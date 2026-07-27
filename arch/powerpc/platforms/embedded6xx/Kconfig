@@ -77,6 +77,19 @@ config USBGECKO_UDBG
 
 	  If in doubt, say N here.
 
+config GAMECUBE_VIDEO_UDBG
+	bool "Video Interface udbg console for the Nintendo Wii"
+	depends on WII
+	select FONT_SUPPORT
+	select FONT_8x16
+	help
+	  Use a reserved YUYV framebuffer and the Wii Video Interface for
+	  kernel udbg output. This provides an on-screen boot console without
+	  requiring a USB Gecko adapter. The framebuffer address and size are
+	  supplied by the Wii device tree and must refer to reserved memory.
+
+	  If in doubt, say N here.
+
 config GAMECUBE
 	bool "Nintendo-GameCube"
 	depends on EMBEDDED6xx

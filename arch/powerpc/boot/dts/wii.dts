@@ -18,6 +18,7 @@
  * that range.
  */
 /*/memreserve/ 0x10000000 0x0004000;*/	/* DSP RAM */
+/memreserve/ 0x01698000 0x00168000;	/* two 640x576 YUYV XFBs */
 
 / {
 	model = "nintendo,wii";
@@ -67,6 +68,8 @@
 					"nintendo,flipper-vi";
 			reg = <0x0c002000 0x100>;
 			interrupts = <8>;
+			xfb-start = <0x01698000>;
+			xfb-size = <0x00168000>;
 		};
 
 		processor-interface@c003000 {
@@ -269,4 +272,3 @@
 		};
 	};
 };
-

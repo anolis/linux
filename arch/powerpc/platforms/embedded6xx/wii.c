@@ -22,6 +22,7 @@
 #include <asm/udbg.h>
 
 #include "flipper-pic.h"
+#include "gcnvi_udbg.h"
 #include "hlwd-pic.h"
 #include "usbgecko_udbg.h"
 
@@ -144,6 +145,7 @@ static int __init wii_probe(void)
 	pm_power_off = wii_power_off;
 
 	ug_udbg_init();
+	gcnvi_udbg_init();
 
 	return 1;
 }
