@@ -27,7 +27,7 @@
 	#size-cells = <1>;
 
 	chosen {
-		bootargs = "root=/dev/mmcblk0p2 rootwait udbg-immortal";
+		bootargs = "root=/dev/mmcblk0p2 rootwait rw init=/init-diag.sh console=tty0 udbg-immortal";
 	};
 
 	memory {
