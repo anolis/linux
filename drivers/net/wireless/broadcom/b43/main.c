@@ -2590,6 +2590,9 @@ start_ieee80211:
 	if (!modparam_qos || dev->fw.opensource ||
 	    dev->dev->chip_id == BCMA_CHIP_ID_BCM4331)
 		wl->hw->queues = 1;
+	/* The Wii's SDIO receive path cannot deliver QoS data frames. */
+	if (b43_bus_host_is_sdio(dev->dev))
+		wl->hw->queues = 1;
 
 	err = ieee80211_register_hw(wl->hw);
 	if (err)
