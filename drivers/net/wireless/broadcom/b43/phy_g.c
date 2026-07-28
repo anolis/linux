@@ -2546,6 +2546,7 @@ static int b43_gphy_op_prepare_hardware(struct b43_wldev *dev)
 static int b43_gphy_op_init(struct b43_wldev *dev)
 {
 	b43_phy_initg(dev);
+
 	return 0;
 }
 
