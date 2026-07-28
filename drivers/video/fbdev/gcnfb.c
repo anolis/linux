@@ -39,6 +39,7 @@
 #include <linux/i2c.h>
 #endif
 #include <linux/videodev2.h>
+#include <asm/cacheflush.h>
 #include "gcnfb-accel.h"
 
 #ifndef FBIOWAITRETRACE
@@ -632,7 +633,6 @@ static unsigned long gx_fb_start;
 static void *fb_mem, *vfb_mem;
 static unsigned long vfb_len;
 static unsigned int gx_fb_size;
-static bool gx_fb_region_claimed;
 static int vfb_format;
 #define	vfb_diff	0
 
@@ -1324,6 +1324,12 @@ static int vifb_adjust_ll(int ll) {
 	return ll;
 }
 
+static void vi_flush_xfb(void *start, size_t size)
+{
+	flush_dcache_range((unsigned long)start,
+			   (unsigned long)start + size);
+}
+
 /*
  * Set the address from where the video encoder will display data on screen.
  */
@@ -1396,6 +1402,7 @@ static void vi_transcode_RGB565_to(struct vi_ctl *ctl, uint32_t *dst)
 	struct fb_info *info = ctl->info;
 	unsigned int width;
 	unsigned int height = info->var.yres;
+	uint32_t *dst_start = dst;
 	/* address of the virtual framebuffer */
 	uint32_t *src = (uint32_t *)info->screen_base;
 	
@@ -1411,6 +1418,8 @@ static void vi_transcode_RGB565_to(struct vi_ctl *ctl, uint32_t *dst)
 		dst += width;
 		src += width;
 	}
+	vi_flush_xfb(dst_start,
+		     info->fix.line_length * info->var.yres);
 }
 
 static void vi_transcode_RGB565(struct vi_ctl *ctl)
@@ -1449,6 +1458,7 @@ static void __maybe_unused vi_transcode_RGB565_diff(struct vi_ctl *ctl)
 		src += width;
 		src_diff += width;
 	}
+	vi_flush_xfb(fb_mem, info->fix.line_length * info->var.yres);
 }
 
 static void vi_transcode_RGB888(struct vi_ctl *ctl)
@@ -1475,6 +1485,8 @@ static void vi_transcode_RGB888(struct vi_ctl *ctl)
 		dst += width;
 		src += width;
 	}
+	vi_flush_xfb(fb_mem,
+		     vifb_adjust_ll(info->fix.line_length) * info->var.yres);
 }
 
 static void vi_transcode_RGB888_diff(struct vi_ctl *ctl)
@@ -1508,6 +1520,8 @@ static void vi_transcode_RGB888_diff(struct vi_ctl *ctl)
 		src += width;
 		src_diff += width;
 	}
+	vi_flush_xfb(fb_mem,
+		     vifb_adjust_ll(info->fix.line_length) * info->var.yres);
 }
 
 static void gcnfb_restore_software(void)
@@ -2201,6 +2215,7 @@ static void vifb_clear_all(void)
 	while (i--) {
 		*(j++) = 0x10801080;
 	}
+	vi_flush_xfb(fb_mem, gx_fb_size);
 }
 
 /*
@@ -2454,30 +2469,19 @@ static int vifb_do_probe(struct device *dev,
 		   "virtual framebuffer at 0x%p, size %ldk\n",
 		   (void *)vfb_mem, PAGE_ALIGN(vfb_len) / 1024);
 
-	/*
-	 * Map the video card's memory (this is the physical framebuffer)
-	 * into kernel's virtual memory space
-	 */
-	gx_fb_region_claimed = request_mem_region(xfb_start, xfb_size,
-					     DRV_MODULE_NAME) != NULL;
-	if (!gx_fb_region_claimed) {
-		drv_printk(KERN_WARNING,
-			   "failed to request video memory at %p\n",
-			   (void *)xfb_start);
-	}
-
 	/* store global variables for the physical framebuffer */
 	gx_fb_start = xfb_start;
 	gx_fb_size = xfb_size;
 	
-	fb_mem = ioremap(xfb_start, xfb_size);
+	/* The memreserved XFB remains System RAM and must use the direct map. */
+	fb_mem = memremap(xfb_start, xfb_size, MEMREMAP_WB);
 	if (!fb_mem) {
 		drv_printk(KERN_ERR,
-			   "failed to ioremap video memory at %p (%ldk)\n",
+			   "failed to memremap video memory at %p (%ldk)\n",
 			   (void *)xfb_start,
 			   xfb_size / 1024);
 		error = -EIO;
-		goto err_ioremap;
+		goto err_memremap;
 	}
 	drv_printk(KERN_INFO,
 		   "framebuffer at 0x%p mapped to 0x%p, size %ldk\n",
@@ -2492,6 +2496,7 @@ static int vifb_do_probe(struct device *dev,
 	while (i--) {
 		*(j++) = 0x10801080;
 	}
+	vi_flush_xfb(fb_mem, xfb_size);
 
 	spin_lock_init(&ctl->lock);
 	init_waitqueue_head(&ctl->vtrace_waitq);
@@ -2567,8 +2572,8 @@ err_check_var:
 err_request_irq:
 	fb_dealloc_cmap(&info->cmap);
 err_alloc_cmap:
-	iounmap(fb_mem);
-err_ioremap:
+	memunmap(fb_mem);
+err_memremap:
 	/* release the physical framebuffer */
 	vifb_release_virtual_fb();
 
@@ -2593,7 +2598,7 @@ static int vifb_do_remove(struct device *dev)
 	free_irq(ctl->irq, dev);
 	unregister_framebuffer(info);
 	fb_dealloc_cmap(&info->cmap);
-	iounmap(fb_mem);
+	memunmap(fb_mem);
 
 	vifb_release_virtual_fb();
 
@@ -2613,12 +2618,6 @@ static int vifb_do_remove(struct device *dev)
 static void vifb_release_virtual_fb() {
 	unsigned long size;
 	unsigned long adr = (unsigned long)vfb_mem;
-	
-	/* release memory mapping region */
-	if (gx_fb_region_claimed) {
-		release_mem_region(gx_fb_start, gx_fb_size);
-		gx_fb_region_claimed = false;
-	}
 	
 	/* release the virtual framebuffer's reserved pages */
 	size = PAGE_ALIGN(vfb_len);
