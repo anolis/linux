@@ -21,6 +21,7 @@
 #include "wa.h"
 
 #include <linux/bitrev.h>
+#include <linux/delay.h>
 #include <linux/slab.h>
 
 
@@ -2589,6 +2590,18 @@ static void b43_gphy_op_write(struct b43_wldev *dev, u16 reg, u16 value)
 		wii_gphy_write_count++;
 	b43_write16f(dev, B43_MMIO_PHY_CONTROL, reg);
 	b43_write16(dev, B43_MMIO_PHY_DATA, value);
+	/*
+	 * Compatibility test: this write completes measurably faster
+	 * over SDIO on the modern sdhci-pltfm stack than it did on the
+	 * old sdhci-of core this platform used before (~96us/op faster
+	 * on average across the whole G-PHY init sequence, confirmed by
+	 * wii-phytiming/wii-phyopcount). If this calibration algorithm
+	 * implicitly relied on the old stack's slower per-transaction
+	 * latency as analog settling time, restoring it here should
+	 * matter; if not, this is a no-op hypothesis test.
+	 */
+	if (b43_bus_host_is_sdio(dev->dev))
+		udelay(100);
 }
 
 static u16 b43_gphy_op_radio_read(struct b43_wldev *dev, u16 reg)
@@ -2613,6 +2626,9 @@ static void b43_gphy_op_radio_write(struct b43_wldev *dev, u16 reg, u16 value)
 		wii_gphy_radio_write_count++;
 	b43_write16f(dev, B43_MMIO_RADIO_CONTROL, reg);
 	b43_write16(dev, B43_MMIO_RADIO_DATA_LOW, value);
+	/* See the matching comment in b43_gphy_op_write(). */
+	if (b43_bus_host_is_sdio(dev->dev))
+		udelay(100);
 }
 
 static bool b43_gphy_op_supports_hwpctl(struct b43_wldev *dev)
