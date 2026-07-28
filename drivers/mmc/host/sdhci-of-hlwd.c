@@ -62,7 +62,9 @@ static const struct sdhci_ops sdhci_hlwd_ops = {
 
 static const struct sdhci_pltfm_data sdhci_hlwd_pdata = {
 	.quirks = SDHCI_QUIRK_32BIT_DMA_ADDR |
-		  SDHCI_QUIRK_32BIT_DMA_SIZE,
+		  SDHCI_QUIRK_32BIT_DMA_SIZE |
+		  SDHCI_QUIRK_BROKEN_DMA |
+		  SDHCI_QUIRK_BROKEN_ADMA,
 	.ops = &sdhci_hlwd_ops,
 };
 
