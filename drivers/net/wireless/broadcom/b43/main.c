@@ -1962,6 +1962,7 @@ out:
 static void b43_do_interrupt_thread(struct b43_wldev *dev)
 {
 	static unsigned int wii_txdiag_phyerr_count;
+	static atomic_t wii_phyerr_total = ATOMIC_INIT(0);
 	u32 reason;
 	u32 dma_reason[ARRAY_SIZE(dev->dma_reason)];
 	u32 merged_dma_reason = 0;
@@ -1996,10 +1997,19 @@ static void b43_do_interrupt_thread(struct b43_wldev *dev)
 					dev->phy.chandef->chan->center_freq : 0,
 				dev->phy.gmode);
 		}
+		if (b43_bus_host_is_sdio(dev->dev)) {
+			unsigned int total =
+				atomic_inc_return(&wii_phyerr_total);
+			if (total <= 16 || total % 100 == 0)
+				pr_info("b43-phy0: wii-phyerr-total count=%u\n",
+					total);
+		}
 		rmb();
 		if (unlikely(atomic_dec_and_test(&dev->phy.txerr_cnt))) {
 			atomic_set(&dev->phy.txerr_cnt,
 				   B43_PHY_TX_BADNESS_LIMIT);
+			if (b43_bus_host_is_sdio(dev->dev))
+				pr_err("b43-phy0: wii-phyerr RESTART TRIGGERED (too many PHY TX errors)\n");
 			b43err(dev->wl, "Too many PHY TX errors, "
 					"restarting the controller\n");
 			b43_controller_restart(dev, "PHY TX errors");
