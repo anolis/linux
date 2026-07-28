@@ -14,6 +14,7 @@
 #include "pio.h"
 #include "dma.h"
 #include "main.h"
+#include "phy_g.h"
 #include "xmit.h"
 
 #include <linux/delay.h>
@@ -531,6 +532,14 @@ static int pio_tx_frame(struct b43_pio_txqueue *q,
 				b43_shm_read16(dev, B43_SHM_SHARED, B43_SHM_SH_SIZE67),
 				b43_read32(dev, B43_MMIO_GEN_IRQ_MASK),
 				b43_read32(dev, B43_MMIO_GEN_IRQ_REASON));
+			if (dev->phy.type == B43_PHYTYPE_G && dev->phy.g)
+				b43info(wl,
+					"wii-txpwrdiag tssi_cck=%08x tssi_ofdm=%08x bbatt=%u rfatt=%u padmix=%u tx_control=%02x radio_on=%u\n",
+					b43_shm_read32(dev, B43_SHM_SHARED, B43_SHM_SH_TSSI_CCK),
+					b43_shm_read32(dev, B43_SHM_SHARED, B43_SHM_SH_TSSI_OFDM_G),
+					dev->phy.g->bbatt.att, dev->phy.g->rfatt.att,
+					dev->phy.g->rfatt.with_padmix,
+					dev->phy.g->tx_control, dev->phy.g->radio_on);
 		}
 		snprintf(dump_prefix, sizeof(dump_prefix),
 			 "b43-wii-txdiag %u hdr: ", diag_id);
