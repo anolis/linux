@@ -6,13 +6,14 @@ set -euo pipefail
 usage()
 {
 	cat <<'EOF'
-Usage: tools/wii-deploy-kernel.sh [--no-build] [--allow-dirty]
+Usage: tools/wii-deploy-kernel.sh [--no-build] [--allow-dirty] [--keep-mounted]
 
 Build and deploy the Wii zImage through the user-owned BOOTWII mount.
 
 Environment overrides:
   JOBS                 parallel build jobs (default: nproc)
   WII_BOOT_MOUNT       boot mountpoint (default: /media/$USER/BOOTWII)
+  WII_ROOT_MOUNT       root mountpoint (default: /media/$USER/WII-LINUX-NGX)
   WII_KERNEL_DEST      deployed image path (default: $mount/gumboot/zImage.ngx)
   WII_DEPLOY_ARCHIVE   host backup directory (default: /tmp/wii-kernel-deploy-backups)
 EOF
@@ -20,6 +21,7 @@ EOF
 
 build=1
 allow_dirty=0
+keep_mounted=0
 while (($#)); do
 	case "$1" in
 	--no-build)
@@ -27,6 +29,9 @@ while (($#)); do
 		;;
 	--allow-dirty)
 		allow_dirty=1
+		;;
+	--keep-mounted)
+		keep_mounted=1
 		;;
 	-h|--help)
 		usage
@@ -52,6 +57,7 @@ fi
 commit=$(git rev-parse --short=12 HEAD)
 jobs=${JOBS:-$(nproc)}
 boot_mount=${WII_BOOT_MOUNT:-/media/$USER/BOOTWII}
+root_mount=${WII_ROOT_MOUNT:-/media/$USER/WII-LINUX-NGX}
 destination=${WII_KERNEL_DEST:-$boot_mount/gumboot/zImage.ngx}
 archive=${WII_DEPLOY_ARCHIVE:-/tmp/wii-kernel-deploy-backups}
 image=$repo/arch/powerpc/boot/zImage
@@ -109,4 +115,16 @@ printf '  commit: %s\n' "$commit"
 printf '  sha256: %s\n' "$deployed_sha"
 printf '  source: %s\n' "$image"
 printf '  target: %s\n' "$destination"
+
+if (( ! keep_mounted )); then
+	for mount_path in "$boot_mount" "$root_mount"; do
+		if mountpoint -q "$mount_path"; then
+			mount_source=$(findmnt -nro SOURCE --target "$mount_path")
+			if ! umount "$mount_path"; then
+				udisksctl unmount -b "$mount_source"
+			fi
+		fi
+	done
+	printf '  media:  unmounted; card can be removed\n'
+fi
 printf '\a'
