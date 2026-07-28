@@ -128,3 +128,37 @@ Next isolate texture geometry before changing raster state. The source and
 tiled-buffer digests matching rules out corruption in the CPU tiling loop,
 but does not validate the GX texture dimensions, format, cache/TMEM state,
 texture coordinates, or EFB-to-XFB copy stride.
+
+## 2026-07-28: Texture geometry passed, sharpness failed
+
+- Test implementation: `8e376ece808f`
+- Kernel image SHA-256:
+  `87f3732a65c836824ba8bcff450a872d5fc036c990dc244a93262cc6d86e041a`
+- GX module SHA-256:
+  `842c368f90d943cfbaad3dfba8c4190dc384b020ce574014f15e0fd714a8eff3`
+- Runtime kernel: `6.18.40-wii+ #12 PREEMPT Tue Jul 28 17:07:44 CDT 2026`
+- Parameters: `renderer=generated texture_source=pattern hold_frame=1`
+
+The deterministic tiled RGB565 texture rendered with correct large-scale
+geometry on real hardware. A full-frame webcam capture showed the expected
+red upper-left, dark-green upper-right, blue lower-left, and white lower-right
+quadrants. Black 32-pixel grid lines covered the full frame and the yellow
+diagonal markers crossed the expected geometry. The user directly observed
+that the GX output was blurry, however, while the CPU-console control after
+module unload was sharp. This is a spatial-layout positive control, not an
+image-quality positive control.
+
+All four PE finish IRQs arrived, token waits completed in 410-860
+microseconds, and every FIFO drained to `RDoff == WToff`. Both texture buffers
+produced the same deterministic digest (`crc=a05bcbcf`, `sum=30d9faae`,
+`xor=0410`, `nz=288345`). Module unload then restored the clear CPU console,
+also confirmed with a full-frame capture.
+
+Because the pattern uses the same MEM1 buffers, cache flush, RGB565 texture
+descriptor, generated command state, draw geometry, EFB copy, XFB stride, and
+presentation path as the corrupt console test, it rules out gross dimension,
+axis, tiling-block, viewport, and stride mistakes. It does not rule out
+half-texel sampling, texture filtering, EFB copy filtering, or another
+downstream quality issue. The repeated/compressed console layout may still
+involve the live VFB contract or linear-to-tiled copy, but the shared blur
+requires auditing the GX sampling and copy-filter state first.
