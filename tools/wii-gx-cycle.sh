@@ -12,7 +12,7 @@ Build and live-reload gcn-gx.ko on the Wii over SSH.
 
 Options:
   --host HOST             Wii address (default: WII_SSH_HOST or 10.3.10.12)
-  --renderer MODE         generated or reference (default: generated)
+  --renderer MODE         generated, reference, or direct (default: generated)
   --texture-source MODE   console or pattern (default: console)
   --hold-frame N          publish frame N once, then hold (default: 0)
   --unload                unload GX and leave the CPU console active
@@ -73,7 +73,7 @@ while (($#)); do
 	shift
 done
 
-if [[ $renderer != generated && $renderer != reference ]]; then
+if [[ $renderer != generated && $renderer != reference && $renderer != direct ]]; then
 	echo "Invalid renderer: $renderer" >&2
 	exit 2
 fi

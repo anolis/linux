@@ -108,7 +108,7 @@ static bool gx_rgb565_hold;
 
 static char *gx_renderer = "generated";
 module_param_named(renderer, gx_renderer, charp, 0444);
-MODULE_PARM_DESC(renderer, "RGB565 command path: generated or reference");
+MODULE_PARM_DESC(renderer, "RGB565 command path: generated, reference, or direct");
 
 static unsigned int gx_hold_frame;
 module_param_named(hold_frame, gx_hold_frame, uint, 0444);
@@ -119,6 +119,7 @@ module_param_named(texture_source, gx_texture_source, charp, 0444);
 MODULE_PARM_DESC(texture_source, "RGB565 texture source: console or pattern");
 
 static bool gx_use_reference;
+static bool gx_use_direct;
 static bool gx_use_pattern;
 
 static inline u16 pe_read(int reg)
@@ -1156,25 +1157,51 @@ static void __maybe_unused gx_draw_pos_quad(u16 width, u16 height)
 	wg_f32_bits(0x40800000); wg_f32_bits(0xC0800000); wg_f32_bits(F32_ZERO); /* ( 4, -4, 0) */
 }
 
-static void gx_draw_color_quad(u16 width, u16 height, u8 r, u8 g, u8 b)
+static void gx_draw_color_rect(u16 x0, u16 y0, u16 x1, u16 y1,
+			       u8 r, u8 g, u8 b)
 {
-	u32 fw = f32_from_u16(width);
-	u32 fh = f32_from_u16(height);
+	u32 fx0 = f32_from_u16(x0);
+	u32 fy0 = f32_from_u16(y0);
+	u32 fx1 = f32_from_u16(x1);
+	u32 fy1 = f32_from_u16(y1);
 
 	gx_wr8(0x80);			/* GX_QUADS | vtxfmt 0 */
 	gx_wr16be(4);
 
-	wg_f32_bits(F32_ZERO); wg_f32_bits(F32_ZERO);
+	wg_f32_bits(fx0); wg_f32_bits(fy0);
 	gx_wr8(r); gx_wr8(g); gx_wr8(b); gx_wr8(0xff);
 
-	wg_f32_bits(fw);       wg_f32_bits(F32_ZERO);
+	wg_f32_bits(fx1); wg_f32_bits(fy0);
 	gx_wr8(r); gx_wr8(g); gx_wr8(b); gx_wr8(0xff);
 
-	wg_f32_bits(fw);       wg_f32_bits(fh);
+	wg_f32_bits(fx1); wg_f32_bits(fy1);
 	gx_wr8(r); gx_wr8(g); gx_wr8(b); gx_wr8(0xff);
 
-	wg_f32_bits(F32_ZERO); wg_f32_bits(fh);
+	wg_f32_bits(fx0); wg_f32_bits(fy1);
 	gx_wr8(r); gx_wr8(g); gx_wr8(b); gx_wr8(0xff);
+}
+
+static void gx_draw_color_quad(u16 width, u16 height, u8 r, u8 g, u8 b)
+{
+	gx_draw_color_rect(0, 0, width, height, r, g, b);
+}
+
+static void gx_draw_direct_pattern(u16 width, u16 height)
+{
+	u16 x, y;
+
+	gx_draw_color_rect(0, 0, width / 2, height / 2, 0xff, 0x00, 0x00);
+	gx_draw_color_rect(width / 2, 0, width, height / 2, 0x00, 0x80, 0x00);
+	gx_draw_color_rect(0, height / 2, width / 2, height, 0x00, 0x00, 0xff);
+	gx_draw_color_rect(width / 2, height / 2, width, height,
+			   0xff, 0xff, 0xff);
+
+	for (x = 0; x < width; x += 32)
+		gx_draw_color_rect(x, 0, min_t(u16, x + 2, width), height,
+				   0x00, 0x00, 0x00);
+	for (y = 0; y < height; y += 32)
+		gx_draw_color_rect(0, y, width, min_t(u16, y + 2, height),
+				   0x00, 0x00, 0x00);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1757,11 +1784,35 @@ static void gx_submit_generated_rgb565(const void *vfb, u32 xfb_phys,
 	gx_submit_cmds(phase);
 }
 
+static void gx_submit_direct_pattern(u32 xfb_phys, u16 width, u16 height,
+				     const char *phase)
+{
+	u32 live_frame = gx_live_texture_frame++;
+	int i;
+
+	fifo_pos = 0;
+	if (!live_frame)
+		gx_load_libogc_init_preamble();
+	gx_setup_vertex_color_state(width, height);
+	gx_draw_direct_pattern(width, height);
+	gx_load_bp_reg(0x45000002);
+	for (i = 0; i < 32; i++)
+		gx_wr8(0);
+	if (!strcmp(phase, "live0"))
+		gx_set_copy_clear_rgb(0x80, 0x00, 0x80);
+	else
+		gx_set_copy_clear_rgb(0x00, 0x80, 0x80);
+	gx_copy_efb_to_xfb(xfb_phys, width, height, true);
+	gx_submit_cmds(phase);
+}
+
 static void gx_submit_selected_rgb565(const void *vfb, u32 xfb_phys,
 				      u16 width, u16 height,
 				      const char *phase)
 {
-	if (gx_use_reference)
+	if (gx_use_direct)
+		gx_submit_direct_pattern(xfb_phys, width, height, phase);
+	else if (gx_use_reference)
 		gx_submit_reference_rgb565(vfb, xfb_phys, width, height, phase);
 	else
 		gx_submit_generated_rgb565(vfb, xfb_phys, width, height, phase);
@@ -1998,11 +2049,16 @@ static int gcn_gx_init(void)
 	int ret;
 	u32 fifo_phys;
 
-	if (!strcmp(gx_renderer, "generated"))
+	if (!strcmp(gx_renderer, "generated")) {
 		gx_use_reference = false;
-	else if (!strcmp(gx_renderer, "reference"))
+		gx_use_direct = false;
+	} else if (!strcmp(gx_renderer, "reference")) {
 		gx_use_reference = true;
-	else {
+		gx_use_direct = false;
+	} else if (!strcmp(gx_renderer, "direct")) {
+		gx_use_reference = false;
+		gx_use_direct = true;
+	} else {
 		pr_err("gcn-gx: invalid renderer '%s'\n", gx_renderer);
 		return -EINVAL;
 	}
