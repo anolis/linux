@@ -63,6 +63,11 @@ archive=${WII_DEPLOY_ARCHIVE:-/tmp/wii-kernel-deploy-backups}
 image=$repo/arch/powerpc/boot/zImage
 
 if (( build )); then
+	ARCH=powerpc CROSS_COMPILE=powerpc-linux-gnu- make wii_defconfig
+	if ! grep -q '^CONFIG_FB_GAMECUBE=y$' .config; then
+		echo "wii_defconfig did not enable CONFIG_FB_GAMECUBE=y" >&2
+		exit 1
+	fi
 	CCACHE_DISABLE=1 ARCH=powerpc CROSS_COMPILE=powerpc-linux-gnu- \
 		make -j"$jobs" zImage modules
 fi
