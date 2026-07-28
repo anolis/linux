@@ -190,3 +190,33 @@ cause. Keep the narrow values because they accurately implement the stated
 hard-edged direct-color EFB pattern without texture sampling, then copy it
 through the same XFB path. A sharp direct-color result implicates texture
 sampling; a blurry result implicates the EFB-copy/presentation path.
+
+## 2026-07-28: Direct-color EFB pattern was clear
+
+- Test implementation: `acc19b0770dc`
+- Kernel image SHA-256:
+  `87f3732a65c836824ba8bcff450a872d5fc036c990dc244a93262cc6d86e041a`
+- GX module SHA-256:
+  `c6037cd65e8d83f20026f7f1869820a21c3a015710819a159b6abdac507b04b8`
+- Runtime kernel: `6.18.40-wii+ #12 PREEMPT Tue Jul 28 17:07:44 CDT 2026`
+- Parameters: `renderer=direct texture_source=console hold_frame=1`
+
+The direct renderer bypassed VFB reads, linear-to-tiled conversion, MEM1
+texture buffers, texture descriptors, texture coordinates, TMEM, and texture
+sampling. It drew four vertex-color quadrants and a two-pixel 32x32 black grid
+directly into the EFB, then used the same PE fence, EFB-to-XFB copy, XFB
+stride, VI scanout, and presentation path as the blurry textured tests.
+
+The user observed a clear image. A full-frame webcam capture independently
+confirmed materially sharp grid edges and quadrant boundaries. All four PE
+finish IRQs arrived, token waits completed in 410-420 microseconds, and FIFO
+submissions drained to `RDoff == WToff`; the direct frame used 2688 command
+bytes. Module unload restored the CPU console.
+
+This is a valid positive control for the downstream display path. EFB copy,
+the narrow BP 0x53/0x54 filter, XFB stride, VI presentation, and the capture
+path do not cause the texture blur. The remaining blur is in the texture path:
+texture coordinates, LOD/filter state, TMEM/cache behavior, or sampling. The
+correct large-scale textured-pattern geometry makes a gross coordinate or
+dimension error unlikely. Audit BP 0x80 texMode0 encoding first, especially
+min/mag filter and LOD fields, against libogc and Dolphin.
