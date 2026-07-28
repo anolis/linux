@@ -163,7 +163,7 @@ if [[ -n $ssh_host ]]; then
 	if (( remote_reboot )); then
 		printf '  reboot: requested\n'
 		remote_status "rebooting into commit $commit"
-		remote_exec "reboot" || true
+		remote_exec "/sbin/reboot -f" || true
 	fi
 	printf '\a'
 	exit 0
