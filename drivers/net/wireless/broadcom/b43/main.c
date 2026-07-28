@@ -1961,6 +1961,7 @@ out:
 
 static void b43_do_interrupt_thread(struct b43_wldev *dev)
 {
+	static unsigned int wii_txdiag_phyerr_count;
 	u32 reason;
 	u32 dma_reason[ARRAY_SIZE(dev->dma_reason)];
 	u32 merged_dma_reason = 0;
@@ -1980,6 +1981,21 @@ static void b43_do_interrupt_thread(struct b43_wldev *dev)
 
 	if (unlikely(reason & B43_IRQ_PHY_TXERR)) {
 		b43err(dev->wl, "PHY transmission error\n");
+		if (b43_bus_host_is_sdio(dev->dev) &&
+		    wii_txdiag_phyerr_count < 64) {
+			b43info(dev->wl,
+				"wii-txdiag phyerr=%u irq=%08x macctl=%08x shm_chan=%04x phy_chan=%u conf_chan=%u freq=%u gmode=%u\n",
+				wii_txdiag_phyerr_count++, reason,
+				b43_read32(dev, B43_MMIO_MACCTL),
+				b43_shm_read16(dev, B43_SHM_SHARED,
+					       B43_SHM_SH_CHAN),
+				dev->phy.channel,
+				dev->phy.chandef && dev->phy.chandef->chan ?
+					dev->phy.chandef->chan->hw_value : 0,
+				dev->phy.chandef && dev->phy.chandef->chan ?
+					dev->phy.chandef->chan->center_freq : 0,
+				dev->phy.gmode);
+		}
 		rmb();
 		if (unlikely(atomic_dec_and_test(&dev->phy.txerr_cnt))) {
 			atomic_set(&dev->phy.txerr_cnt,

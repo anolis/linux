@@ -19,6 +19,10 @@
 #include "dma.h"
 #include "pio.h"
 
+#define B43_WII_TXDIAG_LIMIT	64
+
+static unsigned int b43_wii_txdiag_status_count;
+
 static const struct b43_tx_legacy_rate_phy_ctl_entry b43_tx_legacy_rate_phy_ctl[] = {
 	{ B43_CCK_RATE_1MB,	0x0,			0x0 },
 	{ B43_CCK_RATE_2MB,	0x0,			0x1 },
@@ -818,6 +822,17 @@ drop:
 void b43_handle_txstatus(struct b43_wldev *dev,
 			 const struct b43_txstatus *status)
 {
+	if (b43_bus_host_is_sdio(dev->dev) &&
+	    b43_wii_txdiag_status_count < B43_WII_TXDIAG_LIMIT) {
+		b43info(dev->wl,
+			"wii-txdiag status=%u cookie=%04x seq=%04x phy=%02x frames=%u rts=%u supp=%u pm=%u intermediate=%u ampdu=%u acked=%u\n",
+			b43_wii_txdiag_status_count++, status->cookie,
+			status->seq, status->phy_stat, status->frame_count,
+			status->rts_count, status->supp_reason,
+			status->pm_indicated, status->intermediate,
+			status->for_ampdu, status->acked);
+	}
+
 	b43_debugfs_log_txstat(dev, status);
 
 	if (status->intermediate)

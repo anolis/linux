@@ -20,6 +20,10 @@
 #include <linux/sched.h>
 #include <linux/slab.h>
 
+#define B43_WII_TXDIAG_LIMIT	64
+
+static unsigned int b43_wii_txdiag_submit_count;
+
 
 static u16 generate_cookie(struct b43_pio_txqueue *q,
 			   struct b43_pio_txpacket *pack)
@@ -443,9 +447,19 @@ static int pio_tx_frame(struct b43_pio_txqueue *q,
 	struct b43_wldev *dev = q->dev;
 	struct b43_wl *wl = dev->wl;
 	struct b43_pio_txpacket *pack;
+	struct ieee80211_hdr *wlhdr = (struct ieee80211_hdr *)skb->data;
+	struct ieee80211_rate *txrate;
+	struct b43_phy *phy = &dev->phy;
+	char dump_prefix[48];
 	u16 cookie;
+	u16 fc;
+	u16 shm_channel = 0;
+	u32 ctl_before = 0;
+	u32 ctl_after = 0;
+	unsigned int diag_id = 0;
 	int err;
 	unsigned int hdrlen;
+	bool txdiag = false;
 	struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
 	struct b43_txhdr *txhdr = (struct b43_txhdr *)wl->pio_scratchspace;
 
@@ -462,6 +476,51 @@ static int pio_tx_frame(struct b43_pio_txqueue *q,
 	if (err)
 		return err;
 
+	fc = le16_to_cpu(wlhdr->frame_control);
+	if (b43_bus_host_is_sdio(dev->dev) &&
+	    ieee80211_is_mgmt(wlhdr->frame_control) &&
+	    b43_wii_txdiag_submit_count < B43_WII_TXDIAG_LIMIT) {
+		diag_id = b43_wii_txdiag_submit_count++;
+		txdiag = true;
+		txrate = ieee80211_get_tx_rate(wl->hw, info);
+		shm_channel = b43_shm_read16(dev, B43_SHM_SHARED,
+					     B43_SHM_SH_CHAN);
+		if (q->rev >= 8)
+			ctl_before = b43_piotx_read32(q, B43_PIO8_TXCTL);
+		else
+			ctl_before = b43_piotx_read16(q, B43_PIO_TXCTL);
+
+		b43info(wl,
+			"wii-txdiag submit=%u fc=%04x len=%u cookie=%04x q=%u/%u used=%u slots=%u ctl=%08x rate_idx=%d rate_hw=%d rate_100k=%d count=%u rflags=%x iflags=%x\n",
+			diag_id, fc, skb->len, cookie, q->index,
+			skb_get_queue_mapping(skb), q->buffer_used,
+			q->free_packet_slots, ctl_before,
+			info->control.rates[0].idx,
+			txrate ? txrate->hw_value : -1,
+			txrate ? txrate->bitrate : -1,
+			info->control.rates[0].count,
+			info->control.rates[0].flags, info->flags);
+		b43info(wl,
+			"wii-txdiag submit=%u chan=%u conf_chan=%u freq=%u shm_chan=%04x gmode=%u hdrfmt=%u hdrlen=%u macctl=%08x phyctl=%04x phyrate=%02x radio=%02x extra=%02x\n",
+			diag_id, phy->channel,
+			phy->chandef && phy->chandef->chan ?
+				phy->chandef->chan->hw_value : 0,
+			phy->chandef && phy->chandef->chan ?
+				phy->chandef->chan->center_freq : 0,
+			shm_channel, phy->gmode, dev->fw.hdr_format, hdrlen,
+			le32_to_cpu(txhdr->mac_ctl),
+			le16_to_cpu(txhdr->phy_ctl), txhdr->phy_rate,
+			txhdr->chan_radio_code, txhdr->extra_ft);
+		snprintf(dump_prefix, sizeof(dump_prefix),
+			 "b43-wii-txdiag %u hdr: ", diag_id);
+		print_hex_dump(KERN_INFO, dump_prefix, DUMP_PREFIX_NONE, 16, 1,
+			       txhdr, hdrlen, false);
+		snprintf(dump_prefix, sizeof(dump_prefix),
+			 "b43-wii-txdiag %u frame: ", diag_id);
+		print_hex_dump(KERN_INFO, dump_prefix, DUMP_PREFIX_NONE, 16, 1,
+			       skb->data, min_t(unsigned int, skb->len, 48), false);
+	}
+
 	if (info->flags & IEEE80211_TX_CTL_SEND_AFTER_DTIM) {
 		/* Tell the firmware about the cookie of the last
 		 * mcast frame, so it can clear the more-data bit in it. */
@@ -474,6 +533,15 @@ static int pio_tx_frame(struct b43_pio_txqueue *q,
 		pio_tx_frame_4byte_queue(pack, (const u8 *)txhdr, hdrlen);
 	else
 		pio_tx_frame_2byte_queue(pack, (const u8 *)txhdr, hdrlen);
+
+	if (txdiag) {
+		if (q->rev >= 8)
+			ctl_after = b43_piotx_read32(q, B43_PIO8_TXCTL);
+		else
+			ctl_after = b43_piotx_read16(q, B43_PIO_TXCTL);
+		b43info(wl, "wii-txdiag submit=%u committed ctl=%08x\n",
+			diag_id, ctl_after);
+	}
 
 	/* Remove it from the list of available packet slots.
 	 * It will be put back when we receive the status report. */
