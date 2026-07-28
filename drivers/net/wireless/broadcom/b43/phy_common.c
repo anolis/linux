@@ -396,7 +396,16 @@ void b43_phy_take_out_of_reset(struct b43_wldev *dev)
 		/* Unset reset bit (with forcing clock) */
 		tmp = ssb_read32(dev->dev->sdev, SSB_TMSLOW);
 		tmp &= ~B43_TMSLOW_PHYRESET;
-		tmp &= ~B43_TMSLOW_PHYCLKEN;
+		/*
+		 * The Wii's BCM4318 is attached through SSB-over-SDIO.  Keep the
+		 * PHY clock enabled while releasing reset, matching the working
+		 * Linux 3.15 sequence.
+		 */
+		if (b43_bus_host_is_sdio(dev->dev))
+			b43info(dev->wl,
+				"SDIO PHY reset: preserving PHYCLKEN\n");
+		else
+			tmp &= ~B43_TMSLOW_PHYCLKEN;
 		tmp |= SSB_TMSLOW_FGC;
 		ssb_write32(dev->dev->sdev, SSB_TMSLOW, tmp);
 		ssb_read32(dev->dev->sdev, SSB_TMSLOW); /* flush */
