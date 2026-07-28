@@ -73,3 +73,28 @@ All positive controls passed:
 The CPU RGB565-to-YUYV path on Linux 6.18 is therefore the new known-good
 fallback baseline. Proceed with the separately reloadable GX accelerator;
 module unload must restore this exact live CPU console.
+
+## 2026-07-28: First reloadable GX module cycle passed
+
+- GX module implementation: `9500ee207`
+- Kernel image SHA-256:
+  `87f3732a65c836824ba8bcff450a872d5fc036c990dc244a93262cc6d86e041a`
+- GX module SHA-256:
+  `fcd616b8c19c98e2ff061020cbfcfbafe62de5d0d1895beca0d42e35e5700c2c`
+- Runtime kernel: `6.18.40-wii+ #12 PREEMPT Tue Jul 28 17:07:44 CDT 2026`
+- Parameters: `renderer=reference hold_frame=1`
+
+The module loaded successfully, registered with gcnfb, mapped PE finish hwirq
+10 to Linux IRQ 23, and completed the seed, copy-clear, libogc init, and two
+reference-renderer submissions. Every FIFO drained to `RDoff == WToff`; all
+four PE finish IRQs arrived; token waits completed in 310-860 microseconds.
+
+The displayed GX frame was visually confirmed blurry, reproducing the known
+3.15 accelerator defect on Linux 6.18. This is a useful reproduction, not a
+port regression: `rmmod gcn_gx` immediately restored the clear live CPU
+console without reboot, also visually confirmed. Wi-Fi and SSH remained live.
+
+The modern reloadable investigation loop is therefore validated. Subsequent
+GX-only changes require only `tools/wii-gx-cycle.sh`; no kernel rebuild, card
+movement, or rootfs write is needed unless reserved-memory requirements
+change.
