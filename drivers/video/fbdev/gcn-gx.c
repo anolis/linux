@@ -114,7 +114,12 @@ static unsigned int gx_hold_frame;
 module_param_named(hold_frame, gx_hold_frame, uint, 0444);
 MODULE_PARM_DESC(hold_frame, "Publish this frame once, then hold output (0=continuous)");
 
+static char *gx_texture_source = "console";
+module_param_named(texture_source, gx_texture_source, charp, 0444);
+MODULE_PARM_DESC(texture_source, "RGB565 texture source: console or pattern");
+
 static bool gx_use_reference;
+static bool gx_use_pattern;
 
 static inline u16 pe_read(int reg)
 {
@@ -515,8 +520,7 @@ static u16 gx_reference_rgb565_pixel(u32 x, u32 y, u32 width, u32 height)
 	return color;
 }
 
-static void __maybe_unused gx_fill_reference_rgb565(u16 *dst, u32 width,
-					     u32 height)
+static void gx_fill_reference_rgb565(u16 *dst, u32 width, u32 height)
 {
 	u32 bw = width >> 2;
 	u32 bh = height >> 2;
@@ -538,6 +542,15 @@ static void __maybe_unused gx_fill_reference_rgb565(u16 *dst, u32 width,
 			}
 		}
 	}
+}
+
+static void gx_prepare_rgb565_texture(const void *vfb, u16 *dst,
+				      u32 width, u32 height)
+{
+	if (gx_use_pattern)
+		gx_fill_reference_rgb565(dst, width, height);
+	else
+		gx_tile_rgb565((const u16 *)vfb, dst, width, height);
 }
 
 static void __maybe_unused gx_invert_rgb565_texture(u16 *buf, u32 width,
@@ -1666,7 +1679,7 @@ static void gx_submit_reference_rgb565(const void *vfb, u32 xfb_phys,
 		gx_tex_buf_alt : gx_tex_buf;
 	u32 pixel_count = (u32)width * height;
 
-	gx_tile_rgb565((const u16 *)vfb, (u16 *)tex_buf, width, height);
+	gx_prepare_rgb565_texture(vfb, (u16 *)tex_buf, width, height);
 	if (!(gx_rgb565_work_runs % 120))
 		pr_info("gcn-gx: texture phase=live run=%u tex=%08x\n",
 			gx_rgb565_work_runs, (u32)virt_to_phys(tex_buf));
@@ -1676,8 +1689,9 @@ static void gx_submit_reference_rgb565(const void *vfb, u32 xfb_phys,
 
 		gx_digest_rgb565((const u16 *)vfb, pixel_count, &vfb_digest);
 		gx_digest_rgb565((const u16 *)tex_buf, pixel_count, &tex_digest);
-		pr_info("gcn-gx: live-data frame=%u tex=%08x vfb crc=%08x sum=%08x xor=%04x nz=%u tex crc=%08x sum=%08x xor=%04x nz=%u\n",
-			live_frame, (u32)virt_to_phys(tex_buf),
+		pr_info("gcn-gx: live-data frame=%u source=%s tex=%08x vfb crc=%08x sum=%08x xor=%04x nz=%u tex crc=%08x sum=%08x xor=%04x nz=%u\n",
+			live_frame, gx_texture_source,
+			(u32)virt_to_phys(tex_buf),
 			vfb_digest.crc, vfb_digest.sum, vfb_digest.xor,
 			vfb_digest.nonzero, tex_digest.crc, tex_digest.sum,
 			tex_digest.xor, tex_digest.nonzero);
@@ -1705,7 +1719,7 @@ static void gx_submit_generated_rgb565(const void *vfb, u32 xfb_phys,
 	u32 pixel_count = (u32)width * height;
 	int i;
 
-	gx_tile_rgb565((const u16 *)vfb, (u16 *)tex_buf, width, height);
+	gx_prepare_rgb565_texture(vfb, (u16 *)tex_buf, width, height);
 	if (!(gx_rgb565_work_runs % 120))
 		pr_info("gcn-gx: texture phase=live run=%u tex=%08x\n",
 			gx_rgb565_work_runs, (u32)virt_to_phys(tex_buf));
@@ -1715,8 +1729,9 @@ static void gx_submit_generated_rgb565(const void *vfb, u32 xfb_phys,
 
 		gx_digest_rgb565((const u16 *)vfb, pixel_count, &vfb_digest);
 		gx_digest_rgb565((const u16 *)tex_buf, pixel_count, &tex_digest);
-		pr_info("gcn-gx: live-data frame=%u tex=%08x vfb crc=%08x sum=%08x xor=%04x nz=%u tex crc=%08x sum=%08x xor=%04x nz=%u\n",
-			live_frame, (u32)virt_to_phys(tex_buf),
+		pr_info("gcn-gx: live-data frame=%u source=%s tex=%08x vfb crc=%08x sum=%08x xor=%04x nz=%u tex crc=%08x sum=%08x xor=%04x nz=%u\n",
+			live_frame, gx_texture_source,
+			(u32)virt_to_phys(tex_buf),
 			vfb_digest.crc, vfb_digest.sum, vfb_digest.xor,
 			vfb_digest.nonzero, tex_digest.crc, tex_digest.sum,
 			tex_digest.xor, tex_digest.nonzero);
@@ -1991,6 +2006,15 @@ static int gcn_gx_init(void)
 		pr_err("gcn-gx: invalid renderer '%s'\n", gx_renderer);
 		return -EINVAL;
 	}
+	if (!strcmp(gx_texture_source, "console"))
+		gx_use_pattern = false;
+	else if (!strcmp(gx_texture_source, "pattern"))
+		gx_use_pattern = true;
+	else {
+		pr_err("gcn-gx: invalid texture source '%s'\n",
+		       gx_texture_source);
+		return -EINVAL;
+	}
 
 	/*
 	 * Mini leaves PI_FIFO_WPTR=0x00000000.  VI hardware generates wgPipe
@@ -2077,8 +2101,8 @@ static int gcn_gx_init(void)
 	pr_info("gcn-gx: init: tex_buf phys=0x%08x/%08x virt=%p/%p\n",
 		GX_TEX_BUF_MEM1_PHYS, GX_TEX_BUF_ALT_MEM1_PHYS,
 		gx_tex_buf, gx_tex_buf_alt);
-	pr_info("gcn-gx: config renderer=%s hold_frame=%u\n",
-		gx_renderer, gx_hold_frame);
+	pr_info("gcn-gx: config renderer=%s texture_source=%s hold_frame=%u\n",
+		gx_renderer, gx_texture_source, gx_hold_frame);
 
 	pr_info("gcn-gx: init: H done (accel ON)\n");
 	gx_accel_ready = true;

@@ -13,6 +13,7 @@ Build and live-reload gcn-gx.ko on the Wii over SSH.
 Options:
   --host HOST             Wii address (default: WII_SSH_HOST or 10.3.10.12)
   --renderer MODE         generated or reference (default: generated)
+  --texture-source MODE   console or pattern (default: console)
   --hold-frame N          publish frame N once, then hold (default: 0)
   --unload                unload GX and leave the CPU console active
   --no-build              reuse the existing gcn-gx.ko
@@ -26,6 +27,7 @@ EOF
 
 ssh_host=${WII_SSH_HOST:-10.3.10.12}
 renderer=generated
+texture_source=console
 hold_frame=0
 unload_only=0
 build=1
@@ -39,6 +41,10 @@ while (($#)); do
 		;;
 	--renderer)
 		renderer=$2
+		shift
+		;;
+	--texture-source)
+		texture_source=$2
 		shift
 		;;
 	--hold-frame)
@@ -69,6 +75,10 @@ done
 
 if [[ $renderer != generated && $renderer != reference ]]; then
 	echo "Invalid renderer: $renderer" >&2
+	exit 2
+fi
+if [[ $texture_source != console && $texture_source != pattern ]]; then
+	echo "Invalid texture source: $texture_source" >&2
 	exit 2
 fi
 if [[ ! $hold_frame =~ ^[0-9]+$ ]]; then
@@ -144,14 +154,15 @@ if [[ $remote_sha != "$module_sha" ]]; then
 fi
 remote_exec "mv -f $remote_module.new $remote_module"
 
-remote_status "loading renderer=$renderer hold_frame=$hold_frame"
-remote_exec "insmod $remote_module renderer=$renderer hold_frame=$hold_frame"
-remote_exec "printf '\\n=== GX LOADED: $renderer hold=$hold_frame ===\\n' > /dev/tty0"
+remote_status "loading renderer=$renderer source=$texture_source hold_frame=$hold_frame"
+remote_exec "insmod $remote_module renderer=$renderer texture_source=$texture_source hold_frame=$hold_frame"
+remote_exec "printf '\\n=== GX LOADED: $renderer source=$texture_source hold=$hold_frame ===\\n' > /dev/tty0"
 
 printf '\nGX live cycle complete\n'
 printf '  commit:    %s\n' "$commit"
 printf '  sha256:    %s\n' "$module_sha"
 printf '  renderer:  %s\n' "$renderer"
+printf '  texture source: %s\n' "$texture_source"
 printf '  hold frame: %s\n' "$hold_frame"
 remote_exec "grep '^gcn_gx ' /proc/modules; dmesg | grep -E 'gcn-gx:|gcnfb:' | tail -n 100"
 printf '\a'
