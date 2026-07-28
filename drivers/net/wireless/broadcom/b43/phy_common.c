@@ -23,6 +23,7 @@
 #include "phy_ac.h"
 #include "b43.h"
 #include "main.h"
+#include <linux/ktime.h>
 
 
 int b43_phy_allocate(struct b43_wldev *dev)
@@ -82,9 +83,18 @@ void b43_phy_free(struct b43_wldev *dev)
 
 int b43_phy_init(struct b43_wldev *dev)
 {
+	static bool wii_phyinit_timed;
 	struct b43_phy *phy = &dev->phy;
 	const struct b43_phy_operations *ops = phy->ops;
+	bool wii_time_this = b43_bus_host_is_sdio(dev->dev) &&
+			      !wii_phyinit_timed;
+	ktime_t t0 = 0, t1 = 0, t2 = 0, t3 = 0, t4 = 0;
 	int err;
+
+	if (wii_time_this) {
+		wii_phyinit_timed = true;
+		t0 = ktime_get();
+	}
 
 	/* During PHY init we need to use some channel. On the first init this
 	 * function is called *before* b43_op_config, so our pointer is NULL.
@@ -95,6 +105,8 @@ int b43_phy_init(struct b43_wldev *dev)
 	}
 
 	phy->ops->switch_analog(dev, true);
+	if (wii_time_this)
+		t1 = ktime_get();
 	if (b43_bus_host_is_sdio(dev->dev)) {
 		/* Match the working Linux 3.15 G-PHY initialization order. */
 		ops->software_rfkill(dev, false);
@@ -103,8 +115,12 @@ int b43_phy_init(struct b43_wldev *dev)
 	} else {
 		b43_software_rfkill(dev, false);
 	}
+	if (wii_time_this)
+		t2 = ktime_get();
 
 	err = ops->init(dev);
+	if (wii_time_this)
+		t3 = ktime_get();
 	if (err) {
 		b43err(dev->wl, "PHY init failed\n");
 		goto err_block_rf;
@@ -112,10 +128,19 @@ int b43_phy_init(struct b43_wldev *dev)
 	phy->do_full_init = false;
 
 	err = b43_switch_channel(dev, phy->channel);
+	if (wii_time_this)
+		t4 = ktime_get();
 	if (err) {
 		b43err(dev->wl, "PHY init: Channel switch to default failed\n");
 		goto err_phy_exit;
 	}
+
+	if (wii_time_this)
+		b43info(dev->wl,
+			"wii-phytiming analog_us=%lld radio_us=%lld ops_init_us=%lld chan_us=%lld total_us=%lld\n",
+			ktime_us_delta(t1, t0), ktime_us_delta(t2, t1),
+			ktime_us_delta(t3, t2), ktime_us_delta(t4, t3),
+			ktime_us_delta(t4, t0));
 
 	return 0;
 
