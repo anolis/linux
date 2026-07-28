@@ -21,7 +21,6 @@
 #include "wa.h"
 
 #include <linux/bitrev.h>
-#include <linux/delay.h>
 #include <linux/slab.h>
 
 
@@ -2544,30 +2543,9 @@ static int b43_gphy_op_prepare_hardware(struct b43_wldev *dev)
 	return 0;
 }
 
-static unsigned int wii_gphy_read_count;
-static unsigned int wii_gphy_write_count;
-static unsigned int wii_gphy_radio_read_count;
-static unsigned int wii_gphy_radio_write_count;
-
 static int b43_gphy_op_init(struct b43_wldev *dev)
 {
-	bool wii_count_this = b43_bus_host_is_sdio(dev->dev);
-
-	if (wii_count_this) {
-		wii_gphy_read_count = 0;
-		wii_gphy_write_count = 0;
-		wii_gphy_radio_read_count = 0;
-		wii_gphy_radio_write_count = 0;
-	}
-
 	b43_phy_initg(dev);
-
-	if (wii_count_this)
-		b43info(dev->wl,
-			"wii-phyopcount phy_read=%u phy_write=%u radio_read=%u radio_write=%u\n",
-			wii_gphy_read_count, wii_gphy_write_count,
-			wii_gphy_radio_read_count, wii_gphy_radio_write_count);
-
 	return 0;
 }
 
@@ -2578,30 +2556,14 @@ static void b43_gphy_op_exit(struct b43_wldev *dev)
 
 static u16 b43_gphy_op_read(struct b43_wldev *dev, u16 reg)
 {
-	if (b43_bus_host_is_sdio(dev->dev))
-		wii_gphy_read_count++;
 	b43_write16f(dev, B43_MMIO_PHY_CONTROL, reg);
 	return b43_read16(dev, B43_MMIO_PHY_DATA);
 }
 
 static void b43_gphy_op_write(struct b43_wldev *dev, u16 reg, u16 value)
 {
-	if (b43_bus_host_is_sdio(dev->dev))
-		wii_gphy_write_count++;
 	b43_write16f(dev, B43_MMIO_PHY_CONTROL, reg);
 	b43_write16(dev, B43_MMIO_PHY_DATA, value);
-	/*
-	 * Compatibility test: this write completes measurably faster
-	 * over SDIO on the modern sdhci-pltfm stack than it did on the
-	 * old sdhci-of core this platform used before (~96us/op faster
-	 * on average across the whole G-PHY init sequence, confirmed by
-	 * wii-phytiming/wii-phyopcount). If this calibration algorithm
-	 * implicitly relied on the old stack's slower per-transaction
-	 * latency as analog settling time, restoring it here should
-	 * matter; if not, this is a no-op hypothesis test.
-	 */
-	if (b43_bus_host_is_sdio(dev->dev))
-		udelay(100);
 }
 
 static u16 b43_gphy_op_radio_read(struct b43_wldev *dev, u16 reg)
@@ -2611,8 +2573,6 @@ static u16 b43_gphy_op_radio_read(struct b43_wldev *dev, u16 reg)
 	/* G-PHY needs 0x80 for read access. */
 	reg |= 0x80;
 
-	if (b43_bus_host_is_sdio(dev->dev))
-		wii_gphy_radio_read_count++;
 	b43_write16f(dev, B43_MMIO_RADIO_CONTROL, reg);
 	return b43_read16(dev, B43_MMIO_RADIO_DATA_LOW);
 }
@@ -2622,13 +2582,8 @@ static void b43_gphy_op_radio_write(struct b43_wldev *dev, u16 reg, u16 value)
 	/* Register 1 is a 32-bit register. */
 	B43_WARN_ON(reg == 1);
 
-	if (b43_bus_host_is_sdio(dev->dev))
-		wii_gphy_radio_write_count++;
 	b43_write16f(dev, B43_MMIO_RADIO_CONTROL, reg);
 	b43_write16(dev, B43_MMIO_RADIO_DATA_LOW, value);
-	/* See the matching comment in b43_gphy_op_write(). */
-	if (b43_bus_host_is_sdio(dev->dev))
-		udelay(100);
 }
 
 static bool b43_gphy_op_supports_hwpctl(struct b43_wldev *dev)

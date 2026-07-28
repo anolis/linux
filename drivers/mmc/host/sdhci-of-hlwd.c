@@ -68,31 +68,7 @@ static const struct sdhci_pltfm_data sdhci_hlwd_pdata = {
 
 static int sdhci_hlwd_probe(struct platform_device *pdev)
 {
-	struct sdhci_host *host;
-	int ret;
-
-	host = sdhci_pltfm_init(pdev, &sdhci_hlwd_pdata, 0);
-	if (IS_ERR(host))
-		return PTR_ERR(host);
-
-	ret = sdhci_add_host(host);
-	if (ret)
-		return ret;
-
-	/*
-	 * The generic sdhci core unconditionally claims
-	 * MMC_CAP2_SDIO_IRQ_NOTHREAD, moving SDIO card-interrupt
-	 * servicing out of a dedicated polling thread and into the
-	 * host's own hardware IRQ path. The old sdhci-of core this
-	 * platform used before the sdhci-pltfm port never set that
-	 * capability. Clear it here to restore the previously-working
-	 * threaded/polled SDIO IRQ delivery for this exact hardware, as
-	 * a compatibility test against the b43 SDIO wifi transmit
-	 * failure that has been present since the port.
-	 */
-	host->mmc->caps2 &= ~MMC_CAP2_SDIO_IRQ_NOTHREAD;
-
-	return 0;
+	return sdhci_pltfm_init_and_add_host(pdev, &sdhci_hlwd_pdata, 0);
 }
 
 static const struct of_device_id sdhci_hlwd_of_match[] = {
