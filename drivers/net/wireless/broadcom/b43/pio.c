@@ -511,6 +511,23 @@ static int pio_tx_frame(struct b43_pio_txqueue *q,
 			le32_to_cpu(txhdr->mac_ctl),
 			le16_to_cpu(txhdr->phy_ctl), txhdr->phy_rate,
 			txhdr->chan_radio_code, txhdr->extra_ft);
+		if (diag_id == 0)
+			b43info(wl,
+				"wii-shmdiag hf=%012llx hf4=%04x hf5=%04x rfatt=%04x antswap=%04x slott=%04x edcfstat=%04x ktp=%04x size01=%04x size23=%04x size45=%04x size67=%04x irqmask=%08x irqreason=%08x\n",
+				b43_hf_read(dev),
+				b43_shm_read16(dev, B43_SHM_SHARED, B43_SHM_SH_HOSTF4),
+				b43_shm_read16(dev, B43_SHM_SHARED, B43_SHM_SH_HOSTF5),
+				b43_shm_read16(dev, B43_SHM_SHARED, B43_SHM_SH_RFATT),
+				b43_shm_read16(dev, B43_SHM_SHARED, B43_SHM_SH_ANTSWAP),
+				b43_shm_read16(dev, B43_SHM_SHARED, B43_SHM_SH_SLOTT),
+				b43_shm_read16(dev, B43_SHM_SHARED, B43_SHM_SH_EDCFSTAT),
+				b43_shm_read16(dev, B43_SHM_SHARED, B43_SHM_SH_KTP),
+				b43_shm_read16(dev, B43_SHM_SHARED, B43_SHM_SH_SIZE01),
+				b43_shm_read16(dev, B43_SHM_SHARED, B43_SHM_SH_SIZE23),
+				b43_shm_read16(dev, B43_SHM_SHARED, B43_SHM_SH_SIZE45),
+				b43_shm_read16(dev, B43_SHM_SHARED, B43_SHM_SH_SIZE67),
+				b43_read32(dev, B43_MMIO_GEN_IRQ_MASK),
+				b43_read32(dev, B43_MMIO_GEN_IRQ_REASON));
 		snprintf(dump_prefix, sizeof(dump_prefix),
 			 "b43-wii-txdiag %u hdr: ", diag_id);
 		print_hex_dump(KERN_INFO, dump_prefix, DUMP_PREFIX_NONE, 16, 1,
