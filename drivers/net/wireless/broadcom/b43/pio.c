@@ -23,6 +23,7 @@
 #define B43_WII_TXDIAG_LIMIT	64
 
 static unsigned int b43_wii_txdiag_submit_count;
+static bool b43_wii_shmdiag_done;
 
 
 static u16 generate_cookie(struct b43_pio_txqueue *q,
@@ -511,7 +512,9 @@ static int pio_tx_frame(struct b43_pio_txqueue *q,
 			le32_to_cpu(txhdr->mac_ctl),
 			le16_to_cpu(txhdr->phy_ctl), txhdr->phy_rate,
 			txhdr->chan_radio_code, txhdr->extra_ft);
-		if (diag_id == 0)
+		if (ieee80211_is_auth(wlhdr->frame_control) &&
+		    !b43_wii_shmdiag_done) {
+			b43_wii_shmdiag_done = true;
 			b43info(wl,
 				"wii-shmdiag hf=%012llx hf4=%04x hf5=%04x rfatt=%04x antswap=%04x slott=%04x edcfstat=%04x ktp=%04x size01=%04x size23=%04x size45=%04x size67=%04x irqmask=%08x irqreason=%08x\n",
 				b43_hf_read(dev),
@@ -528,6 +531,7 @@ static int pio_tx_frame(struct b43_pio_txqueue *q,
 				b43_shm_read16(dev, B43_SHM_SHARED, B43_SHM_SH_SIZE67),
 				b43_read32(dev, B43_MMIO_GEN_IRQ_MASK),
 				b43_read32(dev, B43_MMIO_GEN_IRQ_REASON));
+		}
 		snprintf(dump_prefix, sizeof(dump_prefix),
 			 "b43-wii-txdiag %u hdr: ", diag_id);
 		print_hex_dump(KERN_INFO, dump_prefix, DUMP_PREFIX_NONE, 16, 1,
