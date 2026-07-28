@@ -1831,6 +1831,15 @@ config FB_GAMECUBE
 	  Applications render into an RGB565 virtual framebuffer which is
 	  converted to the YUYV external framebuffer scanned by the VI.
 
+config FB_GAMECUBE_GX
+	tristate "Nintendo GameCube/Wii GX acceleration"
+	depends on FB_GAMECUBE && WII
+	default m
+	help
+	  Build the optional GX accelerator for the Nintendo GameCube/Wii VI
+	  framebuffer. The accelerator can be unloaded independently while
+	  gcnfb continues displaying through its software RGB-to-YUYV converter.
+
 source "drivers/video/fbdev/omap/Kconfig"
 source "drivers/video/fbdev/omap2/Kconfig"
 source "drivers/video/fbdev/mmp/Kconfig"
