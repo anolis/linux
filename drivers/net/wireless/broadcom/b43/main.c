@@ -4840,6 +4840,7 @@ static void b43_wireless_core_exit(struct b43_wldev *dev)
 /* Initialize a wireless core */
 static int b43_wireless_core_init(struct b43_wldev *dev)
 {
+	static bool wii_phyradio_dumped;
 	struct ssb_sprom *sprom = dev->dev->bus_sprom;
 	struct b43_phy *phy = &dev->phy;
 	int err;
@@ -4970,6 +4971,24 @@ static int b43_wireless_core_init(struct b43_wldev *dev)
 	b43_bus_powerup(dev, !(sprom->boardflags_lo & B43_BFL_XTAL_NOSLOW));
 	b43_upload_card_macaddress(dev);
 	b43_security_init(dev);
+
+	if (b43_bus_host_is_sdio(dev->dev) && !wii_phyradio_dumped) {
+		u16 phyregs[64];
+		u16 radioregs[48];
+		unsigned int r;
+
+		wii_phyradio_dumped = true;
+		for (r = 0; r < ARRAY_SIZE(phyregs); r++)
+			phyregs[r] = b43_phy_read(dev, r);
+		print_hex_dump(KERN_INFO, "b43-wii-phydiag: ",
+			       DUMP_PREFIX_OFFSET, 16, 2, phyregs,
+			       sizeof(phyregs), false);
+		for (r = 0; r < ARRAY_SIZE(radioregs); r++)
+			radioregs[r] = b43_radio_read(dev, r);
+		print_hex_dump(KERN_INFO, "b43-wii-radiodiag: ",
+			       DUMP_PREFIX_OFFSET, 16, 2, radioregs,
+			       sizeof(radioregs), false);
+	}
 
 	ieee80211_wake_queues(dev->wl->hw);
 

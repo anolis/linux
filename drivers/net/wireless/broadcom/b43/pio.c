@@ -514,10 +514,6 @@ static int pio_tx_frame(struct b43_pio_txqueue *q,
 			txhdr->chan_radio_code, txhdr->extra_ft);
 		if (ieee80211_is_auth(wlhdr->frame_control) &&
 		    !b43_wii_shmdiag_done) {
-			u16 phyregs[64];
-			u16 radioregs[48];
-			unsigned int r;
-
 			b43_wii_shmdiag_done = true;
 			b43info(wl,
 				"wii-shmdiag hf=%012llx hf4=%04x hf5=%04x rfatt=%04x antswap=%04x slott=%04x edcfstat=%04x ktp=%04x size01=%04x size23=%04x size45=%04x size67=%04x irqmask=%08x irqreason=%08x\n",
@@ -535,16 +531,6 @@ static int pio_tx_frame(struct b43_pio_txqueue *q,
 				b43_shm_read16(dev, B43_SHM_SHARED, B43_SHM_SH_SIZE67),
 				b43_read32(dev, B43_MMIO_GEN_IRQ_MASK),
 				b43_read32(dev, B43_MMIO_GEN_IRQ_REASON));
-			for (r = 0; r < ARRAY_SIZE(phyregs); r++)
-				phyregs[r] = b43_phy_read(dev, r);
-			print_hex_dump(KERN_INFO, "b43-wii-phydiag: ",
-				       DUMP_PREFIX_OFFSET, 16, 2, phyregs,
-				       sizeof(phyregs), false);
-			for (r = 0; r < ARRAY_SIZE(radioregs); r++)
-				radioregs[r] = b43_radio_read(dev, r);
-			print_hex_dump(KERN_INFO, "b43-wii-radiodiag: ",
-				       DUMP_PREFIX_OFFSET, 16, 2, radioregs,
-				       sizeof(radioregs), false);
 		}
 		snprintf(dump_prefix, sizeof(dump_prefix),
 			 "b43-wii-txdiag %u hdr: ", diag_id);
