@@ -162,3 +162,31 @@ half-texel sampling, texture filtering, EFB copy filtering, or another
 downstream quality issue. The repeated/compressed console layout may still
 involve the live VFB contract or linear-to-tiled copy, but the shared blur
 requires auditing the GX sampling and copy-filter state first.
+
+## 2026-07-28: Narrow display-copy filter did not fix blur
+
+- Test implementation: `d6c394313cbf`
+- Kernel image SHA-256:
+  `87f3732a65c836824ba8bcff450a872d5fc036c990dc244a93262cc6d86e041a`
+- GX module SHA-256:
+  `c6ad95d20beced0534d1764ed76d7c43badcc6cc924cdf1575ce2b187c49d424`
+- Runtime kernel: `6.18.40-wii+ #12 PREEMPT Tue Jul 28 17:07:44 CDT 2026`
+- Parameters: `renderer=generated texture_source=pattern hold_frame=1`
+
+This test changed only display-copy filter BP registers 0x53 and 0x54. The
+previous values encoded the broad video-mode coefficients
+`[8,8,10,12,10,8,8]`, despite a source comment claiming `vf=false`. The test
+used libogc's exact `GX_SetCopyFilter(GX_FALSE, NULL, GX_FALSE, NULL)` values,
+which encode `[0,0,21,22,21,0,0]`.
+
+The user still observed blurry GX output, and a full-frame webcam capture
+showed no meaningful sharpness improvement over the broad-filter capture.
+FIFO drains, PE finish IRQs, tokens, pattern digest, and spatial geometry all
+remained correct. Module unload restored the CPU console.
+
+The broad seven-tap copy filter is therefore ruled out as the primary blur
+cause. Keep the narrow values because they accurately implement the stated
+`vf=false` policy, but do not credit them as a visual fix. Next render a
+hard-edged direct-color EFB pattern without texture sampling, then copy it
+through the same XFB path. A sharp direct-color result implicates texture
+sampling; a blurry result implicates the EFB-copy/presentation path.
