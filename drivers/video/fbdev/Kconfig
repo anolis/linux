@@ -1820,6 +1820,17 @@ config FB_SM712
 	  called sm712fb. If you want to compile it as a module, say M
 	  here and read <file:Documentation/kbuild/modules.rst>.
 
+config FB_GAMECUBE
+	bool "Nintendo GameCube/Wii VI framebuffer"
+	depends on FB && WII
+	select FB_CFB_FILLRECT
+	select FB_CFB_COPYAREA
+	select FB_CFB_IMAGEBLIT
+	help
+	  Provide a framebuffer console using the Nintendo Wii Video Interface.
+	  Applications render into an RGB565 virtual framebuffer which is
+	  converted to the YUYV external framebuffer scanned by the VI.
+
 source "drivers/video/fbdev/omap/Kconfig"
 source "drivers/video/fbdev/omap2/Kconfig"
 source "drivers/video/fbdev/mmp/Kconfig"
