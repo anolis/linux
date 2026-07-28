@@ -52,3 +52,24 @@ regular file and `CONFIG_DEVTMPFS` was disabled. Enable devtmpfs in
 `wii_defconfig`; the external `init-diag.sh` has already been updated to mount
 it, stop repeating physical-card pull banners, and launch a local shell when
 `/dev/fb0` exists.
+
+## 2026-07-28: CPU framebuffer positive control passed
+
+- XFB mapping implementation: `204740990`
+- Deployed image SHA-256:
+  `ec7660bd41bea735994f45463ed5077e5ecfad8a119271b7e0b4eed58572da52`
+- Runtime kernel: `6.18.40-wii+ #11 PREEMPT Tue Jul 28 16:55:32 CDT 2026`
+
+All positive controls passed:
+
+- `gcn-vifb` bound to `c002000.video` without warnings or faults.
+- `/proc/fb` reported `0 gcn-vifb`.
+- fbcon switched to an 80x30 color framebuffer console.
+- sysfs reported 640x480, 16 bits per pixel.
+- devtmpfs provided real `/dev/console`, `/dev/tty0`, and `/dev/fb0` nodes.
+- Wi-Fi retained `10.3.10.12` and key-based SSH remained stable.
+- A marker written remotely to `/dev/tty0` was visually confirmed on the Wii.
+
+The CPU RGB565-to-YUYV path on Linux 6.18 is therefore the new known-good
+fallback baseline. Proceed with the separately reloadable GX accelerator;
+module unload must restore this exact live CPU console.
