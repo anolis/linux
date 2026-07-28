@@ -98,3 +98,33 @@ The modern reloadable investigation loop is therefore validated. Subsequent
 GX-only changes require only `tools/wii-gx-cycle.sh`; no kernel rebuild, card
 movement, or rootfs write is needed unless reserved-memory requirements
 change.
+
+## 2026-07-28: Generated renderer bounded-frame control
+
+- Source state: `f9cc3d1927a3`
+- Kernel image SHA-256:
+  `87f3732a65c836824ba8bcff450a872d5fc036c990dc244a93262cc6d86e041a`
+- GX module SHA-256:
+  `fcd616b8c19c98e2ff061020cbfcfbafe62de5d0d1895beca0d42e35e5700c2c`
+- Runtime kernel: `6.18.40-wii+ #12 PREEMPT Tue Jul 28 17:07:44 CDT 2026`
+- Parameters: `renderer=generated hold_frame=1`
+
+The generated renderer completed the same seed, copy-clear, isolated libogc
+init, and two live-frame submissions as the reference test. All four PE
+finish IRQs arrived, token waits completed in 410-860 microseconds, and every
+FIFO submission drained to `RDoff == WToff`. The VFB and tiled-texture digest
+sums matched for both captured live frames.
+
+A full-frame capture from the live webcam feed showed real spatial
+corruption: console content was compressed and repeated in several vertical
+regions, with additional vertical duplication. This is materially different
+from a solid copy-clear result and proves that the generated path publishes
+changing framebuffer content, but with incorrect texture sampling or display
+layout. After `rmmod gcn_gx`, a second full-frame capture showed the clear,
+full-width CPU console. The camera and VI mode are therefore valid controls;
+the repeated layout is produced by the GX path.
+
+Next isolate texture geometry before changing raster state. The source and
+tiled-buffer digests matching rules out corruption in the CPU tiling loop,
+but does not validate the GX texture dimensions, format, cache/TMEM state,
+texture coordinates, or EFB-to-XFB copy stride.
