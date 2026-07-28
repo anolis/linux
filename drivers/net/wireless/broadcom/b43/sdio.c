@@ -10,6 +10,7 @@
 
 #include <linux/kernel.h>
 #include <linux/mmc/card.h>
+#include <linux/mmc/host.h>
 #include <linux/mmc/sdio_func.h>
 #include <linux/mmc/sdio_ids.h>
 #include <linux/slab.h>
@@ -124,6 +125,14 @@ static int b43_sdio_probe(struct sdio_func *func,
 		error = -ENODEV;
 		goto out;
 	}
+
+	dev_info(&func->dev,
+		 "wii-sdiodiag clock=%u bus_width=%u timing=%u signal_mv=%u drv_type=%u caps=%08x caps2=%08x\n",
+		 func->card->host->ios.clock, func->card->host->ios.bus_width,
+		 func->card->host->ios.timing,
+		 func->card->host->ios.signal_voltage,
+		 func->card->host->ios.drv_type, func->card->host->caps,
+		 func->card->host->caps2);
 
 	sdio_claim_host(func);
 	error = sdio_set_block_size(func, B43_SDIO_BLOCK_SIZE);
