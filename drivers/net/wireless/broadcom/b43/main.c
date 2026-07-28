@@ -4973,8 +4973,8 @@ static int b43_wireless_core_init(struct b43_wldev *dev)
 	b43_security_init(dev);
 
 	if (b43_bus_host_is_sdio(dev->dev) && !wii_phyradio_dumped) {
-		u16 phyregs[64];
-		u16 radioregs[48];
+		u16 phyregs[128];
+		u16 radioregs[128];
 		unsigned int r;
 
 		wii_phyradio_dumped = true;
@@ -4984,7 +4984,10 @@ static int b43_wireless_core_init(struct b43_wldev *dev)
 			       DUMP_PREFIX_OFFSET, 16, 2, phyregs,
 			       sizeof(phyregs), false);
 		for (r = 0; r < ARRAY_SIZE(radioregs); r++)
-			radioregs[r] = b43_radio_read(dev, r);
+			/* Register 1 is a 32-bit register; skip it to
+			 * avoid the driver's own B43_WARN_ON(reg == 1)
+			 * in b43_gphy_op_radio_read(). */
+			radioregs[r] = (r == 1) ? 0 : b43_radio_read(dev, r);
 		print_hex_dump(KERN_INFO, "b43-wii-radiodiag: ",
 			       DUMP_PREFIX_OFFSET, 16, 2, radioregs,
 			       sizeof(radioregs), false);
