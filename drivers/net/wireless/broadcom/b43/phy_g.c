@@ -2543,9 +2543,29 @@ static int b43_gphy_op_prepare_hardware(struct b43_wldev *dev)
 	return 0;
 }
 
+static unsigned int wii_gphy_read_count;
+static unsigned int wii_gphy_write_count;
+static unsigned int wii_gphy_radio_read_count;
+static unsigned int wii_gphy_radio_write_count;
+
 static int b43_gphy_op_init(struct b43_wldev *dev)
 {
+	bool wii_count_this = b43_bus_host_is_sdio(dev->dev);
+
+	if (wii_count_this) {
+		wii_gphy_read_count = 0;
+		wii_gphy_write_count = 0;
+		wii_gphy_radio_read_count = 0;
+		wii_gphy_radio_write_count = 0;
+	}
+
 	b43_phy_initg(dev);
+
+	if (wii_count_this)
+		b43info(dev->wl,
+			"wii-phyopcount phy_read=%u phy_write=%u radio_read=%u radio_write=%u\n",
+			wii_gphy_read_count, wii_gphy_write_count,
+			wii_gphy_radio_read_count, wii_gphy_radio_write_count);
 
 	return 0;
 }
@@ -2557,12 +2577,16 @@ static void b43_gphy_op_exit(struct b43_wldev *dev)
 
 static u16 b43_gphy_op_read(struct b43_wldev *dev, u16 reg)
 {
+	if (b43_bus_host_is_sdio(dev->dev))
+		wii_gphy_read_count++;
 	b43_write16f(dev, B43_MMIO_PHY_CONTROL, reg);
 	return b43_read16(dev, B43_MMIO_PHY_DATA);
 }
 
 static void b43_gphy_op_write(struct b43_wldev *dev, u16 reg, u16 value)
 {
+	if (b43_bus_host_is_sdio(dev->dev))
+		wii_gphy_write_count++;
 	b43_write16f(dev, B43_MMIO_PHY_CONTROL, reg);
 	b43_write16(dev, B43_MMIO_PHY_DATA, value);
 }
@@ -2574,6 +2598,8 @@ static u16 b43_gphy_op_radio_read(struct b43_wldev *dev, u16 reg)
 	/* G-PHY needs 0x80 for read access. */
 	reg |= 0x80;
 
+	if (b43_bus_host_is_sdio(dev->dev))
+		wii_gphy_radio_read_count++;
 	b43_write16f(dev, B43_MMIO_RADIO_CONTROL, reg);
 	return b43_read16(dev, B43_MMIO_RADIO_DATA_LOW);
 }
@@ -2583,6 +2609,8 @@ static void b43_gphy_op_radio_write(struct b43_wldev *dev, u16 reg, u16 value)
 	/* Register 1 is a 32-bit register. */
 	B43_WARN_ON(reg == 1);
 
+	if (b43_bus_host_is_sdio(dev->dev))
+		wii_gphy_radio_write_count++;
 	b43_write16f(dev, B43_MMIO_RADIO_CONTROL, reg);
 	b43_write16(dev, B43_MMIO_RADIO_DATA_LOW, value);
 }
