@@ -704,3 +704,41 @@ frame, retrieve it alongside XFB, and convert it as `rgb565be`. Validate that
 source snapshot before modifying tiling or coordinates again: sharp source
 plus broken XFB implicates conversion/sampling, while a broken source means GX
 is accurately displaying fbcon's input.
+
+## 2026-07-29: Same-frame capture clears fbcon and isolates the GX texture path
+
+- Test implementation: `77bc760f9608`
+- Kernel image SHA-256:
+  `87f3732a65c836824ba8bcff450a872d5fc036c990dc244a93262cc6d86e041a`
+- GX module SHA-256:
+  `bd9c9da0a91324e8d87b1c33ca6aa318365ff38fec9059eac34cf52788d7b523`
+- XFB YUYV SHA-256:
+  `7bdb703ed04958cbe0949aceed414349159238b44bf64cb5082d7f1ec5d138b6`
+- XFB PNG SHA-256:
+  `4db6411951424f13704296590f52d39e6bbcc4fc73936173b1af3906fffb17ef`
+- VFB RGB565BE SHA-256:
+  `1433dbadb98cdf3e6fea5f85baab8280b694b56723063fd5a342deb2919fbcdd`
+- VFB PNG SHA-256:
+  `86e717dda2cd5dcc8a5fabd1b41f663108f7c1e5a417cb323425cd9a7cdf6775`
+- Parameters: `renderer=generated texture_source=console hold_frame=1`
+
+The module copied the exact linear VFB immediately before tiling and captured
+the corresponding XFB only after the held frame's PE token completed. The Wii
+Wi-Fi link again truncated large direct reads, but compressing each immutable
+debugfs file on the Wii reduced them to 33763 and 46328 bytes and allowed both
+complete 614400-byte frames to be retrieved. Both converted images were opened
+together in GIMP.
+
+The VFB source is sharp. Its glyph edges and one-pixel strokes are intact. The
+same-frame GX-produced XFB breaks those strokes into a regular checkerboard-like
+pattern. The user's display observation agrees: the negative half-texel bias
+makes the blur more uniform and is an overall improvement, but it is not a
+complete fix.
+
+This decisively clears fbcon and the CPU-side source framebuffer. Dolphin's
+reference RGB565 decoder also confirms the driver's intended 4x4 block order:
+blocks left-to-right and top-to-bottom, with four consecutive big-endian
+RGB565 pixels in each of four rows. Continue with controlled tests of fine
+texture addressing, coordinate scale/rounding, and texture-cache state. Do not
+change the XFB copy path or blame the captured VFB without new contradictory
+evidence.
