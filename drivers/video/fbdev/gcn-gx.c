@@ -142,10 +142,16 @@ module_param_named(texel_bias_eighths, gx_texel_bias_eighths, int, 0444);
 MODULE_PARM_DESC(texel_bias_eighths,
 		 "Position-derived texture translation in eighths of a texel");
 
+static char *gx_texcoord_space = "normalized";
+module_param_named(texcoord_space, gx_texcoord_space, charp, 0444);
+MODULE_PARM_DESC(texcoord_space,
+		 "Position-derived texture coordinates: normalized or texel");
+
 static bool gx_use_reference;
 static bool gx_use_direct;
 static bool gx_use_pattern;
 static bool gx_use_probe;
+static bool gx_use_texel_space;
 
 static inline u16 pe_read(int reg)
 {
@@ -353,8 +359,19 @@ static void gx_load_identity_pos_mtx0(void)
 static void gx_load_pos_to_tex_mtx0(u16 width, u16 height)
 {
 	u16 magnitude = abs(gx_texel_bias_eighths);
-	u32 s_bias = f32_div_u16(magnitude, width * 8);
-	u32 t_bias = f32_div_u16(magnitude, height * 8);
+	u32 s_scale, t_scale, s_bias, t_bias;
+
+	if (gx_use_texel_space) {
+		s_scale = F32_ONE;
+		t_scale = F32_ONE;
+		s_bias = f32_div_u16(magnitude, 8);
+		t_bias = s_bias;
+	} else {
+		s_scale = f32_div_u16(1, width);
+		t_scale = f32_div_u16(1, height);
+		s_bias = f32_div_u16(magnitude, width * 8);
+		t_bias = f32_div_u16(magnitude, height * 8);
+	}
 
 	if (gx_texel_bias_eighths < 0) {
 		s_bias = F32_NEG(s_bias);
@@ -362,19 +379,18 @@ static void gx_load_pos_to_tex_mtx0(u16 width, u16 height)
 	}
 
 	/*
-	 * TEXMTX0 for GX_TG_POS: map object-space quad positions
-	 * (x=0..width, y=0..height) to normalized texture coordinates
-	 * (s=0..1, t=0..1), with a half-texel translation so raster samples
-	 * land at texture centers instead of precision-sensitive boundaries.
+	 * TEXMTX0 for GX_TG_POS maps object-space quad positions to either
+	 * normalized or texel-space coordinates. The configurable translation
+	 * preserves the same fraction-of-a-texel phase in both forms.
 	 * This avoids the direct TEX0 vertex attribute path,
 	 * which hardware testing shows wedges the downstream pipeline when
 	 * texgen output is enabled.
 	 */
 	gx_load_xf_regs_n(0x0078, 8);
-	wg_f32_bits(f32_div_u16(1, width)); wg_f32_bits(F32_ZERO);
-	wg_f32_bits(F32_ZERO);              wg_f32_bits(s_bias);
-	wg_f32_bits(F32_ZERO);              wg_f32_bits(f32_div_u16(1, height));
-	wg_f32_bits(F32_ZERO);              wg_f32_bits(t_bias);
+	wg_f32_bits(s_scale);  wg_f32_bits(F32_ZERO);
+	wg_f32_bits(F32_ZERO); wg_f32_bits(s_bias);
+	wg_f32_bits(F32_ZERO); wg_f32_bits(t_scale);
+	wg_f32_bits(F32_ZERO); wg_f32_bits(t_bias);
 
 	/*
 	 * GX_SetTexCoordGen(..., GX_TEXMTX0) records GX_TEXMTX0 (30) in the
@@ -1161,11 +1177,14 @@ static void gx_setup_texture_rgb565(void *tile_buf, u16 width, u16 height)
 	gx_load_bp_reg(0x0F000000);
 
 	/* BP 0x30/0x31 suSsize/suTsize for texcoord 0:
-	 * [15:0] = texture dimension - 1 (normalises vertex UV to [0,1])
+	 * [15:0] = coordinate scale - 1: dimension - 1 for normalized
+	 * coordinates, or 0 for coordinates already expressed in texels.
 	 * [16] = wrap = 0 (GX_CLAMP)
 	 */
-	gx_load_bp_reg(0x30000000 | (u32)(width  - 1));
-	gx_load_bp_reg(0x31000000 | (u32)(height - 1));
+	gx_load_bp_reg(0x30000000 |
+		       (gx_use_texel_space ? 0 : (u32)(width - 1)));
+	gx_load_bp_reg(0x31000000 |
+		       (gx_use_texel_space ? 0 : (u32)(height - 1)));
 }
 
 /*
@@ -2247,6 +2266,15 @@ static int gcn_gx_init(void)
 		       gx_texel_bias_eighths);
 		return -EINVAL;
 	}
+	if (!strcmp(gx_texcoord_space, "normalized"))
+		gx_use_texel_space = false;
+	else if (!strcmp(gx_texcoord_space, "texel"))
+		gx_use_texel_space = true;
+	else {
+		pr_err("gcn-gx: invalid texcoord_space '%s'\n",
+		       gx_texcoord_space);
+		return -EINVAL;
+	}
 
 	/*
 	 * Mini leaves PI_FIFO_WPTR=0x00000000.  VI hardware generates wgPipe
@@ -2338,9 +2366,9 @@ static int gcn_gx_init(void)
 	pr_info("gcn-gx: init: tex_buf phys=0x%08x/%08x virt=%p/%p\n",
 		GX_TEX_BUF_MEM1_PHYS, GX_TEX_BUF_ALT_MEM1_PHYS,
 		gx_tex_buf, gx_tex_buf_alt);
-	pr_info("gcn-gx: config renderer=%s texture_source=%s probe_seed=%u texel_bias_eighths=%d hold_frame=%u\n",
+	pr_info("gcn-gx: config renderer=%s texture_source=%s probe_seed=%u texcoord_space=%s texel_bias_eighths=%d hold_frame=%u\n",
 		gx_renderer, gx_texture_source, gx_probe_seed,
-		gx_texel_bias_eighths, gx_hold_frame);
+		gx_texcoord_space, gx_texel_bias_eighths, gx_hold_frame);
 
 	gx_xfb_snapshot = vzalloc(GX_XFB_SNAPSHOT_MAX);
 	if (!gx_xfb_snapshot) {
