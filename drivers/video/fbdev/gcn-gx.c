@@ -1224,13 +1224,13 @@ static void gx_setup_display_copy_state(void)
 	gx_load_bp_reg(0x44000003); /* update both fields */
 	gx_load_bp_reg(0x68000000); /* field mode disabled */
 
-	/* Center samples and use the closest unity-sum filter to identity. */
+	/* GX_SetCopyFilter(aa=false, vf=false): center samples, narrow filter. */
 	gx_load_bp_reg(0x01666666);
 	gx_load_bp_reg(0x02666666);
 	gx_load_bp_reg(0x03666666);
 	gx_load_bp_reg(0x04666666);
-	gx_load_bp_reg(0x53FC0000); /* coefficients 0, 0, 0, 63 */
-	gx_load_bp_reg(0x54000001); /* coefficients 1, 0, 0 */
+	gx_load_bp_reg(0x53595000);
+	gx_load_bp_reg(0x54000015);
 
 	/* GX_SetDispCopyYScale(1.0). */
 	gx_load_bp_reg(0x4E000100);
