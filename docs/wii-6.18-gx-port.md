@@ -300,3 +300,38 @@ the earlier clear two-pixel direct test and is not a valid diagnostic baseline
 on this hardware, regardless of its nominal unity coefficient sum. Revert to
 libogc's `vf=false` `[0,0,21,22,21,0,0]` state and revalidate the direct
 positive control before investigating texture sharpness further.
+
+## 2026-07-29: Fresh-boot sequence proves missing GX initialization state
+
+- Test implementation: `d48140133a95`
+- Kernel image SHA-256:
+  `87f3732a65c836824ba8bcff450a872d5fc036c990dc244a93262cc6d86e041a`
+- GX module SHA-256:
+  `c6037cd65e8d83f20026f7f1869820a21c3a015710819a159b6abdac507b04b8`
+- Runtime kernel: `6.18.40-wii+ #12 PREEMPT Tue Jul 28 17:07:44 CDT 2026`
+
+After the user's manual restart, the restored libogc-filter, two-pixel direct
+renderer displayed purple rather than the grid. This module checksum is
+byte-for-byte identical to the earlier `acc19b0770dc` module that produced a
+clear grid and full-frame capture. The same current module was then exercised
+without another reboot in this sequence:
+
+1. `renderer=direct texture_source=console hold_frame=1`: purple clear.
+2. `renderer=generated texture_source=pattern hold_frame=1`: purple clear.
+3. `renderer=reference texture_source=pattern hold_frame=1`: lime-green
+   clear, matching the captured reference stream's own EFB clear color.
+
+Every run drained its FIFO, received all PE finish IRQs and tokens, and
+unloaded back to the CPU console. The webcam was unavailable; colors were
+reported directly by the user. Both generated and byte-replayed libogc
+primitives therefore failed to alter the EFB while copy-clear remained
+functional.
+
+This supersedes the attempted filter-based explanation. Identical module
+bytes can produce visible primitives or only clear colors depending on prior
+GX/boot state. The driver's partial `gx_load_libogc_init_preamble()` does not
+establish a self-contained raster pipeline and relies on residual state from
+Mini, an earlier application, or an earlier module sequence. Stop varying
+filters and geometry. Capture or reconstruct complete libogc `GX_Init()`
+state, validate it from a cold/fresh boot, and only then resume texture-quality
+work.
