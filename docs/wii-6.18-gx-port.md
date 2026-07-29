@@ -501,3 +501,26 @@ display-copy or VI-output effect. Dolphin's `TexMode0` definition and libogc's
 nearest magnification, no mipmap filter, nearest minification, diagonal LOD,
 zero bias, and no anisotropy. Do not spend another test on that same encoding;
 move next to texture-coordinate scale/centering and tiled-data interpretation.
+
+## 2026-07-29: First digital-XFB positive control exposed export bug
+
+- Test implementation: `89cc5f69cae2`
+- Kernel image SHA-256:
+  `87f3732a65c836824ba8bcff450a872d5fc036c990dc244a93262cc6d86e041a`
+- GX module SHA-256:
+  `0eedeb3a595508cdfab9d0310d91c7f3865da6ae501cb74067174999a2344fce`
+- Runtime kernel: `6.18.40-wii+ #12 PREEMPT Tue Jul 28 17:07:44 CDT 2026`
+- Parameters: `renderer=direct texture_source=pattern hold_frame=1`
+
+The known-clear one-pixel direct grid rendered clearly again. All FIFO and PE
+controls passed, and the module logged a post-token, cache-invalidated XFB
+snapshot of 614400 bytes at physical address `0x0172e000`. However,
+`/sys/kernel/debug/gcn_gx/xfb_yuyv` returned zero bytes even though its width,
+height, and physical-address metadata were correct.
+
+This is a failed positive control for the digital capture mechanism; do not
+use it as captured-frame evidence. `debugfs_create_blob()` fixed the readable
+length at its creation-time value of zero. Commit `9f873066c` replaces it with
+a custom `simple_read_from_buffer()` file and makes the cycle script wait on
+published width metadata. Revalidate that implementation against the same
+clear direct pattern before capturing textured output.
