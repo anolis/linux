@@ -437,14 +437,13 @@ first-frame FIFO drained to `RDoff == WToff == 0x0a80`, every PE token
 completed, and same-boot unload restored the CPU console. The webcam remained
 unavailable, so sharpness was judged directly by the user.
 
-Together with the preceding blurry reference-texture result, this is a valid
-same-module, cold-boot A/B control. Both paths use the same EFB-to-XFB copy
-state, XFB publication, VI output, and physical display chain. Therefore the
-remaining blur is not caused by the display-copy filter or scanout path. It is
-specific to the texture path: tiled RGB565 preparation, texture cache/state,
-texture-coordinate generation/interpolation, or texture sampling. Keep the
-direct renderer as the sharp positive control and constrain subsequent tests
-to texture-path differences.
+Together with the preceding blurry reference-texture result, this is a useful
+same-module, cold-boot primitive comparison, but not a filter-controlled A/B:
+the embedded reference frame programs libogc's broad BP 0x53/0x54 copy filter,
+while the direct path programs the driver's narrow filter. The older generated
+texture tests used the narrow filter and were still blurry, but revalidate that
+comparison under the corrected initialization sequence before treating it as
+decisive. Keep the direct renderer as the sharp positive control.
 
 ## 2026-07-29: One-pixel direct grid remains sharp on a cold boot
 
@@ -471,3 +470,34 @@ The downstream EFB copy and VI path preserve one-pixel direct geometry, while
 the texture path does not. The next tests must alter only texture-path state;
 start by decoding and validating BP 0x80 texture filtering and LOD fields
 against libogc and Dolphin rather than changing copy or raster state.
+
+## 2026-07-29: Narrow-filter generated texture remains blurry
+
+- Deployed repository commit: `4603022c24b6`
+- Test implementation: `bdee7ff92fb0`
+- Kernel image SHA-256:
+  `87f3732a65c836824ba8bcff450a872d5fc036c990dc244a93262cc6d86e041a`
+- GX module SHA-256:
+  `a56d3294693b7807efbdc8dcb63a45a6a3c16f8b7eefccd299b2bd352f7e3b0f`
+- Runtime kernel: `6.18.40-wii+ #12 PREEMPT Tue Jul 28 17:07:44 CDT 2026`
+- Parameters: `renderer=generated texture_source=pattern hold_frame=1`
+
+The Wii reported 36 minutes of uptime, so this run is explicitly a warm-state
+test rather than the requested cold boot. No GX module was resident before the
+load. The immediately preceding GX run used the identical module bytes and
+showed a clear one-pixel direct grid before unloading.
+
+The generated renderer showed the deterministic grid, but it was blurry. Both
+source buffers had the expected texture digest (`crc=a05bcbcf`,
+`sum=30d9faae`, `xor=0410`, `nz=288345`). The first generated frame drained
+its 960-byte FIFO to `RDoff == WToff == 0x03c0`, every PE token completed, and
+same-boot unload restored the CPU console. The webcam remained unavailable.
+
+Unlike the embedded reference blob, generated and direct renderers both use
+the driver's narrow BP 0x53/0x54 copy filter. This same-module comparison
+therefore confirms that the remaining blur is texture-path-specific, not a
+display-copy or VI-output effect. Dolphin's `TexMode0` definition and libogc's
+`GX_InitTexObjLOD()` also confirm that BP `0x80000100` already means clamp,
+nearest magnification, no mipmap filter, nearest minification, diagonal LOD,
+zero bias, and no anisotropy. Do not spend another test on that same encoding;
+move next to texture-coordinate scale/centering and tiled-data interpretation.
