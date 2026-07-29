@@ -1162,3 +1162,48 @@ tie-break may be legitimate. This implementation also overrides rather than
 applies `texel_bias_eighths`. Correct constant mode to apply the configured
 fractional-texel phase around the texture centre, then test negative one-half
 before drawing a stronger conclusion.
+
+## 2026-07-29: Phased constant TEX0 exposes stale indirect-texture state
+
+- Test implementation: `3233c744c3b4`
+- Kernel image SHA-256:
+  `87f3732a65c836824ba8bcff450a872d5fc036c990dc244a93262cc6d86e041a`
+- GX module SHA-256:
+  `69994a61f33381fddd1eab3f8f505d49bc7aee009717fb2dd7a485e84d01a60a`
+- Seed 0 XFB YUYV / PNG SHA-256:
+  `962849fe6c022e90a486ec47fa7cd20e4403d2aa7631c9541f52d4a20a981c56` /
+  `31675d9417894e2c90eae174b5a210ff4a39c5ce2ba7d05098944515ead71674`
+- Seed 1 XFB YUYV / PNG SHA-256:
+  `0027d5c4355412674a71e6f31375ea2ed152ea421d15fc24371e68c037e78517` /
+  `582ca079854866f758c31b8d240285c5502446f750a27b310977d340358c31b8`
+- Seed 2 XFB YUYV / PNG SHA-256:
+  `a5b63e0111c21bda64fef926289cf7a28bf84ea1f6ad086b5992f01c157b90d5` /
+  `44890201da32d556721d249bc5cad0dbdbe82ab4d9405359bc7066be7b6301f8`
+- Seed 3 XFB YUYV / PNG SHA-256:
+  `9c1f84a2a9ea60032987d3d9d35bd7188cfe0bbc69df76358aab08f0d7cc48b8` /
+  `033cdd5c081f0f42bc836585019c8426adeafb2e62d465ae9b76997e95e03a85`
+- Parameters:
+  `renderer=generated texture_source=probe probe_seed=0/1/2/3 texcoord_source=direct texcoord_mapping=constant direct_primitive=quad texcoord_space=normalized texel_bias_eighths=-4 hold_frame=1`
+
+Constant mode now applies the configured phase, so all vertices carry the
+normalized equivalent of texel coordinate `(319.5,239.5)`. The half-texel
+shift does not make the result uniform. Across four independent source seeds,
+the destination map consistently selects exactly four source signatures:
+`(318,239)` for 153680 pixels, `(317,238)` for 76880, `(318,240)` for 38320,
+and `(316,237)` for 38320. The complete signature map still repeats exactly
+after destination displacement `(16,12)`.
+
+This rules out a single boundary tie and proves that identical S/T values are
+being modified or interpreted differently as a function of screen position.
+Static audit then found that the driver never writes BP 0x10-0x1f, the TEV
+indirect-texture command registers. libogc's `GX_Init()` calls
+`GX_SetTevDirect()` for every TEV stage; for stage 0 this emits BP `0x10=0`.
+Dolphin independently documents that a nonzero TEV-indirect command combined
+with a disabled indirect stage is undefined and produces a glitchy pattern on
+hardware. Our genMode disables indirect stages but inherited BP 0x10 remains
+unknown, which matches both the periodic coordinate perturbation and the
+otherwise correct texture data.
+
+Next emit the exact `GX_SetTevDirect(GX_TEVSTAGE0)` value, BP `0x10=0`, in the
+generated texture state and repeat the constant probe. This is a focused
+single-register test; do not change coordinates or any other TEV state.
