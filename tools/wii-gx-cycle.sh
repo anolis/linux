@@ -20,7 +20,7 @@ Options:
   --direct-primitive MODE quad or triangle (default: quad)
   --direct-pattern MODE   grid or vstripes (default: grid)
   --texcoord-space MODE   normalized or texel (default: normalized)
-  --texel-bias-eighths N  signed texture phase in eighths (default: -4)
+  --texel-bias-eighths N  signed texture phase in eighths (default: -2)
   --hold-frame N          publish frame N once, then hold (default: 0)
   --unload                unload GX and leave the CPU console active
   --no-build              reuse the existing gcn-gx.ko
@@ -41,7 +41,7 @@ texcoord_mapping=affine
 direct_primitive=quad
 direct_pattern=grid
 texcoord_space=normalized
-texel_bias_eighths=-4
+texel_bias_eighths=-2
 hold_frame=0
 unload_only=0
 build=1

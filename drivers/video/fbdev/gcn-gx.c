@@ -137,7 +137,7 @@ static unsigned int gx_probe_seed;
 module_param_named(probe_seed, gx_probe_seed, uint, 0444);
 MODULE_PARM_DESC(probe_seed, "Seed mixed into the deterministic texture probe");
 
-static int gx_texel_bias_eighths = -4;
+static int gx_texel_bias_eighths = -2;
 module_param_named(texel_bias_eighths, gx_texel_bias_eighths, int, 0444);
 MODULE_PARM_DESC(texel_bias_eighths,
 		 "Texture-coordinate translation in eighths of a texel");
