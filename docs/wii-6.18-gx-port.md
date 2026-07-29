@@ -1243,3 +1243,36 @@ Next retain this exact binary and switch only `texcoord_mapping` from constant
 to affine. Compare the complete output against the seeded source to verify
 one-to-one full-screen texture mapping and determine the correct sampling
 phase.
+
+## 2026-07-29: Fixed affine lookup is exact outside the clamp boundary
+
+- Test implementation: `5b8a19800861` (capture run at docs-only HEAD
+  `f779185df81d`)
+- Kernel image SHA-256:
+  `87f3732a65c836824ba8bcff450a872d5fc036c990dc244a93262cc6d86e041a`
+- GX module SHA-256:
+  `59a9dac94a3d462cb676ae4470c5c957400ee5bff896d36c733c4455df8ca13e`
+- XFB YUYV SHA-256:
+  `9bd9070b86267cac3f7f3095f93b1a041ad26892a8b66cfe852384296f2c430e`
+- XFB PNG SHA-256:
+  `985e5dc383d90bd5a285dc9d990279858feb60f734eaf8d5e1757c47d37e8654`
+- VFB RGB565BE SHA-256:
+  `097cf3243cdac9ad91917aa50953ab54e12da1adb9daa1db5c0e628a150218ee`
+- VFB PNG SHA-256:
+  `bb9316286754514190184fe6245bc65ddf2d270bef10cd0970bb1fa23ae2e501`
+- Parameters:
+  `renderer=generated texture_source=probe probe_seed=0 texcoord_source=direct texcoord_mapping=affine direct_primitive=quad texcoord_space=normalized texel_bias_eighths=-4 hold_frame=1`
+
+With BP 0x10 cleared, the full affine output matches the source at offset
+`(0,0)` for 305409 of 307200 pixels (99.4170%). All eight expected probe
+levels are present and there are no unknown output symbols. Every mismatch is
+confined to the union of rows 0-3 and columns 0-3; the remaining 636x476
+interior is exact for all 302736 pixels. Of the border mismatches, 1312 match
+the previous X texel and 701 match the previous Y texel, with random probe
+agreement accounting for overlap.
+
+The old full-frame mixed-offset failure is gone. The residual is specifically
+the negative-half coordinate phase crossing the top and left clamp boundary,
+not stale indirect state. Retain the fixed binary and test
+`texel_bias_eighths=-2` to move samples one-quarter texel inward without
+changing the source mapping by a whole texel.
