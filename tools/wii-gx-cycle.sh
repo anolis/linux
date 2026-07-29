@@ -15,6 +15,7 @@ Options:
   --renderer MODE         generated, reference, or direct (default: generated)
   --texture-source MODE   console, pattern, or probe (default: console)
   --probe-seed N          seed for the deterministic probe (default: 0)
+  --texcoord-source MODE  position or direct (default: position)
   --texcoord-space MODE   normalized or texel (default: normalized)
   --texel-bias-eighths N  signed texture phase in eighths (default: -4)
   --hold-frame N          publish frame N once, then hold (default: 0)
@@ -32,6 +33,7 @@ ssh_host=${WII_SSH_HOST:-10.3.10.12}
 renderer=generated
 texture_source=console
 probe_seed=0
+texcoord_source=position
 texcoord_space=normalized
 texel_bias_eighths=-4
 hold_frame=0
@@ -55,6 +57,10 @@ while (($#)); do
 		;;
 	--probe-seed)
 		probe_seed=$2
+		shift
+		;;
+	--texcoord-source)
+		texcoord_source=$2
 		shift
 		;;
 	--texcoord-space)
@@ -106,6 +112,10 @@ if [[ ! $hold_frame =~ ^[0-9]+$ ]]; then
 fi
 if [[ ! $probe_seed =~ ^[0-9]+$ ]]; then
 	echo "Invalid probe-seed value: $probe_seed" >&2
+	exit 2
+fi
+if [[ $texcoord_source != position && $texcoord_source != direct ]]; then
+	echo "Invalid texcoord-source value: $texcoord_source" >&2
 	exit 2
 fi
 if [[ $texcoord_space != normalized && $texcoord_space != texel ]]; then
@@ -236,10 +246,10 @@ if [[ $remote_sha != "$module_sha" ]]; then
 fi
 remote_exec "mv -f $remote_module.new $remote_module"
 
-remote_status "loading renderer=$renderer source=$texture_source probe_seed=$probe_seed coord=$texcoord_space bias8=$texel_bias_eighths hold_frame=$hold_frame"
+remote_status "loading renderer=$renderer source=$texture_source probe_seed=$probe_seed texsrc=$texcoord_source coord=$texcoord_space bias8=$texel_bias_eighths hold_frame=$hold_frame"
 remote_exec "grep -q ' /sys/kernel/debug ' /proc/mounts || mount -t debugfs debugfs /sys/kernel/debug"
-remote_exec "insmod $remote_module renderer=$renderer texture_source=$texture_source probe_seed=$probe_seed texcoord_space=$texcoord_space texel_bias_eighths=$texel_bias_eighths hold_frame=$hold_frame"
-remote_exec "printf '\\n=== GX LOADED: $renderer source=$texture_source seed=$probe_seed coord=$texcoord_space bias8=$texel_bias_eighths hold=$hold_frame ===\\n' > /dev/tty0"
+remote_exec "insmod $remote_module renderer=$renderer texture_source=$texture_source probe_seed=$probe_seed texcoord_source=$texcoord_source texcoord_space=$texcoord_space texel_bias_eighths=$texel_bias_eighths hold_frame=$hold_frame"
+remote_exec "printf '\\n=== GX LOADED: $renderer source=$texture_source seed=$probe_seed texsrc=$texcoord_source coord=$texcoord_space bias8=$texel_bias_eighths hold=$hold_frame ===\\n' > /dev/tty0"
 
 printf '\nGX live cycle complete\n'
 printf '  commit:    %s\n' "$commit"
@@ -247,12 +257,13 @@ printf '  sha256:    %s\n' "$module_sha"
 printf '  renderer:  %s\n' "$renderer"
 printf '  texture source: %s\n' "$texture_source"
 printf '  probe seed: %s\n' "$probe_seed"
+printf '  texcoord source: %s\n' "$texcoord_source"
 printf '  texcoord space: %s\n' "$texcoord_space"
 printf '  texel bias eighths: %s\n' "$texel_bias_eighths"
 printf '  hold frame: %s\n' "$hold_frame"
 remote_exec "grep '^gcn_gx ' /proc/modules; dmesg | grep -E 'gcn-gx:|gcnfb:' | tail -n 100"
 
-capture=/tmp/wii-gx-${commit}-${renderer}-${texture_source}-s${probe_seed}-c${texcoord_space}-b${texel_bias_eighths}-h${hold_frame}.yuyv
+capture=/tmp/wii-gx-${commit}-${renderer}-${texture_source}-s${probe_seed}-t${texcoord_source}-c${texcoord_space}-b${texel_bias_eighths}-h${hold_frame}.yuyv
 capture_ready=$(remote_exec "i=0; while [ \$i -lt 5 ] && [ \"\$(cat /sys/kernel/debug/gcn_gx/xfb_width 2>/dev/null || echo 0)\" -eq 0 ]; do sleep 1; i=\$((i + 1)); done; cat /sys/kernel/debug/gcn_gx/xfb_width 2>/dev/null || echo 0")
 if [[ $capture_ready == 640 ]]; then
 	printf '  retrieving compressed, checksum-verified XFB\n'

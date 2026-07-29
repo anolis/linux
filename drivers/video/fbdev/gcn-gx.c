@@ -147,11 +147,17 @@ module_param_named(texcoord_space, gx_texcoord_space, charp, 0444);
 MODULE_PARM_DESC(texcoord_space,
 		 "Position-derived texture coordinates: normalized or texel");
 
+static char *gx_texcoord_source = "position";
+module_param_named(texcoord_source, gx_texcoord_source, charp, 0444);
+MODULE_PARM_DESC(texcoord_source,
+		 "Texture-coordinate source: position or direct TEX0");
+
 static bool gx_use_reference;
 static bool gx_use_direct;
 static bool gx_use_pattern;
 static bool gx_use_probe;
 static bool gx_use_texel_space;
+static bool gx_use_direct_texcoord;
 
 static inline u16 pe_read(int reg)
 {
@@ -400,6 +406,16 @@ static void gx_load_pos_to_tex_mtx0(u16 width, u16 height)
 	 */
 	gx_load_cp_reg(0x30, 30 << 6);
 	gx_load_xf_reg(0x1018, 30 << 6);
+}
+
+static u32 gx_direct_texcoord_bits(u16 extent, bool endpoint)
+{
+	int numerator = endpoint ? extent * 8 + gx_texel_bias_eighths :
+		gx_texel_bias_eighths;
+	u16 denominator = gx_use_texel_space ? 8 : extent * 8;
+	u32 bits = f32_div_u16(abs(numerator), denominator);
+
+	return numerator < 0 ? F32_NEG(bits) : bits;
 }
 
 static void gx_load_identity_post_mtx(void)
@@ -1123,12 +1139,24 @@ static void gx_setup_rgb565_texture_state(u16 width, u16 height)
 	gx_load_bp_reg(0xC108FFC0);
 	gx_load_bp_reg(0x28000040);
 
-	/* GX_TG_MTX2x4 from position through GX_TEXMTX0. */
+	/* GX_TG_MTX2x4 through GX_TEXMTX0. */
 	gx_load_xf_reg(0x103f, 0x00000001);
-	gx_load_xf_reg(0x1040, 0x00000004);
+	if (gx_use_direct_texcoord) {
+		/* GX_TG_TEX0 is XF source row 5, not row 4. */
+		gx_load_xf_reg(0x1040, 0x00000280);
+		gx_load_identity_pos_mtx0();
+		gx_load_cp_reg(0x30, 30 << 6);
+		gx_load_xf_reg(0x1018, 30 << 6);
+
+		/* Append direct TEX0 ST/F32 after the existing POS and CLR0. */
+		gx_load_cp_reg(0x60, 0x00000001);
+		gx_load_cp_reg(0x70, 0x41216008);
+	} else {
+		gx_load_xf_reg(0x1040, 0x00000004);
+		gx_load_pos_to_tex_mtx0(width, height);
+	}
 	/* GX_DTTIDENTITY - GX_DTTMTX0 = 125 - 64 = 61 (0x3d). */
 	gx_load_xf_reg(0x1050, 0x0000003D);
-	gx_load_pos_to_tex_mtx0(width, height);
 	gx_load_identity_post_mtx();
 }
 
@@ -1276,6 +1304,36 @@ static void gx_draw_color_rect(u16 x0, u16 y0, u16 x1, u16 y1,
 static void gx_draw_color_quad(u16 width, u16 height, u8 r, u8 g, u8 b)
 {
 	gx_draw_color_rect(0, 0, width, height, r, g, b);
+}
+
+static void gx_draw_textured_color_quad(u16 width, u16 height,
+					u8 r, u8 g, u8 b)
+{
+	u32 fw = f32_from_u16(width);
+	u32 fh = f32_from_u16(height);
+	u32 s0 = gx_direct_texcoord_bits(width, false);
+	u32 s1 = gx_direct_texcoord_bits(width, true);
+	u32 t0 = gx_direct_texcoord_bits(height, false);
+	u32 t1 = gx_direct_texcoord_bits(height, true);
+
+	gx_wr8(0x80); /* GX_QUADS | vtxfmt 0 */
+	gx_wr16be(4);
+
+	wg_f32_bits(F32_ZERO); wg_f32_bits(F32_ZERO);
+	gx_wr8(r); gx_wr8(g); gx_wr8(b); gx_wr8(0xff);
+	wg_f32_bits(s0); wg_f32_bits(t0);
+
+	wg_f32_bits(fw); wg_f32_bits(F32_ZERO);
+	gx_wr8(r); gx_wr8(g); gx_wr8(b); gx_wr8(0xff);
+	wg_f32_bits(s1); wg_f32_bits(t0);
+
+	wg_f32_bits(fw); wg_f32_bits(fh);
+	gx_wr8(r); gx_wr8(g); gx_wr8(b); gx_wr8(0xff);
+	wg_f32_bits(s1); wg_f32_bits(t1);
+
+	wg_f32_bits(F32_ZERO); wg_f32_bits(fh);
+	gx_wr8(r); gx_wr8(g); gx_wr8(b); gx_wr8(0xff);
+	wg_f32_bits(s0); wg_f32_bits(t1);
 }
 
 static void gx_draw_direct_pattern(u16 width, u16 height)
@@ -1957,7 +2015,10 @@ static void gx_submit_generated_rgb565(const void *vfb, u32 xfb_phys,
 		gx_load_libogc_init_preamble();
 	gx_setup_rgb565_texture_state(width, height);
 	gx_setup_texture_rgb565(tex_buf, width, height);
-	gx_draw_color_quad(width, height, 0xff, 0x00, 0x00);
+	if (gx_use_direct_texcoord)
+		gx_draw_textured_color_quad(width, height, 0xff, 0x00, 0x00);
+	else
+		gx_draw_color_quad(width, height, 0xff, 0x00, 0x00);
 	gx_load_bp_reg(0x45000002);
 	for (i = 0; i < 32; i++)
 		gx_wr8(0);
@@ -2275,6 +2336,15 @@ static int gcn_gx_init(void)
 		       gx_texcoord_space);
 		return -EINVAL;
 	}
+	if (!strcmp(gx_texcoord_source, "position"))
+		gx_use_direct_texcoord = false;
+	else if (!strcmp(gx_texcoord_source, "direct"))
+		gx_use_direct_texcoord = true;
+	else {
+		pr_err("gcn-gx: invalid texcoord_source '%s'\n",
+		       gx_texcoord_source);
+		return -EINVAL;
+	}
 
 	/*
 	 * Mini leaves PI_FIFO_WPTR=0x00000000.  VI hardware generates wgPipe
@@ -2366,9 +2436,10 @@ static int gcn_gx_init(void)
 	pr_info("gcn-gx: init: tex_buf phys=0x%08x/%08x virt=%p/%p\n",
 		GX_TEX_BUF_MEM1_PHYS, GX_TEX_BUF_ALT_MEM1_PHYS,
 		gx_tex_buf, gx_tex_buf_alt);
-	pr_info("gcn-gx: config renderer=%s texture_source=%s probe_seed=%u texcoord_space=%s texel_bias_eighths=%d hold_frame=%u\n",
+	pr_info("gcn-gx: config renderer=%s texture_source=%s probe_seed=%u texcoord_source=%s texcoord_space=%s texel_bias_eighths=%d hold_frame=%u\n",
 		gx_renderer, gx_texture_source, gx_probe_seed,
-		gx_texcoord_space, gx_texel_bias_eighths, gx_hold_frame);
+		gx_texcoord_source, gx_texcoord_space,
+		gx_texel_bias_eighths, gx_hold_frame);
 
 	gx_xfb_snapshot = vzalloc(GX_XFB_SNAPSHOT_MAX);
 	if (!gx_xfb_snapshot) {
