@@ -1307,3 +1307,34 @@ configuration: generated renderer, live console texture, position-derived
 coordinates, affine mapping, and continuous output. The deterministic probe
 has now validated texture upload, tiling, direct coordinates, TMU lookup,
 rasterization, TEV, EFB copy, and XFB publication exactly.
+
+## 2026-07-29: Production live-console milestone passed
+
+- Implementation: `d884291369fa`
+- Kernel image SHA-256:
+  `87f3732a65c836824ba8bcff450a872d5fc036c990dc244a93262cc6d86e041a`
+- GX module SHA-256:
+  `d0f8b8ec5c2d57fb76f58adb77586b3df86e9b4a1b60ca72b31e2dc7fdcd3e4c`
+- Parameters:
+  `renderer=generated texture_source=console texcoord_source=position texcoord_mapping=affine direct_primitive=quad texcoord_space=normalized texel_bias_eighths=-2 hold_frame=0`
+
+The normal position-derived, continuously publishing console path produced a
+clear console and blinking cursor, visually confirmed by the user. The module
+alternated physical XFBs `0x0172e000` and `0x01698000`, advanced past 56880
+worker runs, and continued rendering without PE timeout, FIFO mismatch, GP
+stall, machine check, or self-reboot. The first four live texture digests
+matched their corresponding VFB sums, XOR values, and nonzero counts after
+CPU tiling.
+
+Keyboard responsiveness is not a graphics failure in this run. The kernel
+command line specifies `init=/init-diag.sh`; that diagnostic PID 1 does not
+start SysV init or any configured tty1 getty. `/sys/class/tty/tty0/active`
+reports tty1, but no foreground login process owns it. Test local interaction
+only after replacing the diagnostic init path or explicitly launching a getty.
+
+This is the first production-path milestone: exact deterministic rendering
+and stable live framebuffer presentation both pass. Remaining work is product
+hardening rather than the original texture-corruption investigation: cold
+boots, long-duration and load testing, normal getty/init integration,
+unload/reload fallback, RGB888 disposition, synchronization/tearing checks,
+and removal or gating of diagnostic state and logging.
