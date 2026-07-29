@@ -415,3 +415,33 @@ repeat it across cold boots to establish reliability, then compare a direct
 renderer whose first draw is preceded by the same contiguous preamble. A
 successful direct comparison will isolate the remaining blur to texture input
 or sampling rather than EFB copy output.
+
+## 2026-07-29: Cold-boot direct renderer is sharp with identical copy path
+
+- Deployed repository commit: `743e3e778365`
+- Test implementation: `ebaaf76b15ea`
+- Kernel image SHA-256:
+  `87f3732a65c836824ba8bcff450a872d5fc036c990dc244a93262cc6d86e041a`
+- GX module SHA-256:
+  `39724ebe901a0f3f2839c9ae925a7603425b789d7a28cc3e225ecf0935ad6ee3`
+- Runtime kernel: `6.18.40-wii+ #12 PREEMPT Tue Jul 28 17:07:44 CDT 2026`
+- Parameters: `renderer=direct texture_source=pattern hold_frame=1`
+
+After another full power-off boot, `uptime` reported one minute and no
+`gcn_gx` module was resident. The module bytes were identical to the preceding
+reference-renderer test. The direct-color renderer also placed the historical
+conservative preamble contiguously before its first frame.
+
+The deterministic four-quadrant, two-pixel grid appeared clear. Its 2688-byte
+first-frame FIFO drained to `RDoff == WToff == 0x0a80`, every PE token
+completed, and same-boot unload restored the CPU console. The webcam remained
+unavailable, so sharpness was judged directly by the user.
+
+Together with the preceding blurry reference-texture result, this is a valid
+same-module, cold-boot A/B control. Both paths use the same EFB-to-XFB copy
+state, XFB publication, VI output, and physical display chain. Therefore the
+remaining blur is not caused by the display-copy filter or scanout path. It is
+specific to the texture path: tiled RGB565 preparation, texture cache/state,
+texture-coordinate generation/interpolation, or texture sampling. Keep the
+direct renderer as the sharp positive control and constrain subsequent tests
+to texture-path differences.
