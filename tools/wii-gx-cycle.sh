@@ -134,29 +134,45 @@ retrieve_debugfs_frame()
 	local remote_file=$1
 	local local_file=$2
 	local local_gz=${local_file}.gz
+	local local_chunk=${local_file}.gz.chunk
 	local remote_gz=/tmp/gcn-gx-debugfs-frame.gz
-	local remote_sha local_sha attempt
+	local remote_sha local_sha remote_size chunks chunk_size
+	local index attempt chunk_ok
 
+	: > "$local_file"
 	remote_sha=$(remote_exec "sha256sum $remote_file | cut -d' ' -f1") ||
 		return 1
 	remote_exec "gzip -1 -c $remote_file > $remote_gz" || return 1
+	remote_size=$(remote_exec "stat -c %s $remote_gz") || return 1
+	[[ $remote_size =~ ^[0-9]+$ && $remote_size -gt 0 ]] || return 1
+	chunks=$(((remote_size + 16383) / 16384))
+	: > "$local_gz"
 
-	for attempt in 1 2 3 4 5; do
-		remote_exec "cat $remote_gz" > "$local_gz" || true
-		if gzip -t "$local_gz" 2>/dev/null; then
-			gzip -dc "$local_gz" > "$local_file"
-			local_sha=$(sha256sum "$local_file" | cut -d' ' -f1)
-			if [[ $(stat -c %s "$local_file") == 614400 &&
-			      $local_sha == "$remote_sha" ]]; then
-				remote_exec "rm -f $remote_gz"
-				return 0
+	for ((index = 0; index < chunks; index++)); do
+		chunk_size=$((remote_size - index * 16384))
+		((chunk_size > 16384)) && chunk_size=16384
+		chunk_ok=0
+		for attempt in 1 2 3 4 5; do
+			remote_exec "dd if=$remote_gz bs=16384 skip=$index count=1 2>/dev/null" > "$local_chunk" || true
+			if [[ $(stat -c %s "$local_chunk") == "$chunk_size" ]]; then
+				chunk_ok=1
+				break
 			fi
+			sleep 1
+		done
+		if (( ! chunk_ok )); then
+			remote_exec "rm -f $remote_gz"
+			return 1
 		fi
-		sleep 1
+		command cat "$local_chunk" >> "$local_gz"
 	done
 
 	remote_exec "rm -f $remote_gz"
-	return 1
+	gzip -t "$local_gz" 2>/dev/null || return 1
+	gzip -dc "$local_gz" > "$local_file"
+	local_sha=$(sha256sum "$local_file" | cut -d' ' -f1)
+	[[ $(stat -c %s "$local_file") == 614400 &&
+	   $local_sha == "$remote_sha" ]]
 }
 
 remote_status "unloading prior accelerator"
