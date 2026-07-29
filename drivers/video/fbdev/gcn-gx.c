@@ -133,6 +133,10 @@ static char *gx_texture_source = "console";
 module_param_named(texture_source, gx_texture_source, charp, 0444);
 MODULE_PARM_DESC(texture_source, "RGB565 texture source: console, pattern, or probe");
 
+static unsigned int gx_probe_seed;
+module_param_named(probe_seed, gx_probe_seed, uint, 0444);
+MODULE_PARM_DESC(probe_seed, "Seed mixed into the deterministic texture probe");
+
 static bool gx_use_reference;
 static bool gx_use_direct;
 static bool gx_use_pattern;
@@ -571,6 +575,7 @@ static u16 gx_probe_rgb565_pixel(u32 x, u32 y)
 	u32 hash = x * 0x1f123bb5U ^ y * 0x5f356495U;
 	u32 level, c5, c6;
 
+	hash ^= gx_probe_seed * 0x9e3779b9U;
 	hash ^= hash >> 15;
 	hash *= 0x2c1b3c6dU;
 	hash ^= hash >> 12;
@@ -2317,8 +2322,8 @@ static int gcn_gx_init(void)
 	pr_info("gcn-gx: init: tex_buf phys=0x%08x/%08x virt=%p/%p\n",
 		GX_TEX_BUF_MEM1_PHYS, GX_TEX_BUF_ALT_MEM1_PHYS,
 		gx_tex_buf, gx_tex_buf_alt);
-	pr_info("gcn-gx: config renderer=%s texture_source=%s hold_frame=%u\n",
-		gx_renderer, gx_texture_source, gx_hold_frame);
+	pr_info("gcn-gx: config renderer=%s texture_source=%s probe_seed=%u hold_frame=%u\n",
+		gx_renderer, gx_texture_source, gx_probe_seed, gx_hold_frame);
 
 	gx_xfb_snapshot = vzalloc(GX_XFB_SNAPSHOT_MAX);
 	if (!gx_xfb_snapshot) {

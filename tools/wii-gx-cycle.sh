@@ -14,6 +14,7 @@ Options:
   --host HOST             Wii address (default: WII_SSH_HOST or 10.3.10.12)
   --renderer MODE         generated, reference, or direct (default: generated)
   --texture-source MODE   console, pattern, or probe (default: console)
+  --probe-seed N          seed for the deterministic probe (default: 0)
   --hold-frame N          publish frame N once, then hold (default: 0)
   --unload                unload GX and leave the CPU console active
   --no-build              reuse the existing gcn-gx.ko
@@ -28,6 +29,7 @@ EOF
 ssh_host=${WII_SSH_HOST:-10.3.10.12}
 renderer=generated
 texture_source=console
+probe_seed=0
 hold_frame=0
 unload_only=0
 build=1
@@ -45,6 +47,10 @@ while (($#)); do
 		;;
 	--texture-source)
 		texture_source=$2
+		shift
+		;;
+	--probe-seed)
+		probe_seed=$2
 		shift
 		;;
 	--hold-frame)
@@ -84,6 +90,10 @@ if [[ $texture_source != console && $texture_source != pattern &&
 fi
 if [[ ! $hold_frame =~ ^[0-9]+$ ]]; then
 	echo "Invalid hold-frame value: $hold_frame" >&2
+	exit 2
+fi
+if [[ ! $probe_seed =~ ^[0-9]+$ ]]; then
+	echo "Invalid probe-seed value: $probe_seed" >&2
 	exit 2
 fi
 
@@ -205,20 +215,21 @@ if [[ $remote_sha != "$module_sha" ]]; then
 fi
 remote_exec "mv -f $remote_module.new $remote_module"
 
-remote_status "loading renderer=$renderer source=$texture_source hold_frame=$hold_frame"
+remote_status "loading renderer=$renderer source=$texture_source probe_seed=$probe_seed hold_frame=$hold_frame"
 remote_exec "grep -q ' /sys/kernel/debug ' /proc/mounts || mount -t debugfs debugfs /sys/kernel/debug"
-remote_exec "insmod $remote_module renderer=$renderer texture_source=$texture_source hold_frame=$hold_frame"
-remote_exec "printf '\\n=== GX LOADED: $renderer source=$texture_source hold=$hold_frame ===\\n' > /dev/tty0"
+remote_exec "insmod $remote_module renderer=$renderer texture_source=$texture_source probe_seed=$probe_seed hold_frame=$hold_frame"
+remote_exec "printf '\\n=== GX LOADED: $renderer source=$texture_source seed=$probe_seed hold=$hold_frame ===\\n' > /dev/tty0"
 
 printf '\nGX live cycle complete\n'
 printf '  commit:    %s\n' "$commit"
 printf '  sha256:    %s\n' "$module_sha"
 printf '  renderer:  %s\n' "$renderer"
 printf '  texture source: %s\n' "$texture_source"
+printf '  probe seed: %s\n' "$probe_seed"
 printf '  hold frame: %s\n' "$hold_frame"
 remote_exec "grep '^gcn_gx ' /proc/modules; dmesg | grep -E 'gcn-gx:|gcnfb:' | tail -n 100"
 
-capture=/tmp/wii-gx-${commit}-${renderer}-${texture_source}-h${hold_frame}.yuyv
+capture=/tmp/wii-gx-${commit}-${renderer}-${texture_source}-s${probe_seed}-h${hold_frame}.yuyv
 capture_ready=$(remote_exec "i=0; while [ \$i -lt 5 ] && [ \"\$(cat /sys/kernel/debug/gcn_gx/xfb_width 2>/dev/null || echo 0)\" -eq 0 ]; do sleep 1; i=\$((i + 1)); done; cat /sys/kernel/debug/gcn_gx/xfb_width 2>/dev/null || echo 0")
 if [[ $capture_ready == 640 ]]; then
 	printf '  retrieving compressed, checksum-verified XFB\n'
