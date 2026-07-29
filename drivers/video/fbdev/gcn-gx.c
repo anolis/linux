@@ -1730,6 +1730,8 @@ static void gx_submit_reference_rgb565(const void *vfb, u32 xfb_phys,
 			   pixel_count * sizeof(u16));
 
 	fifo_pos = 0;
+	if (!live_frame)
+		gx_load_libogc_init_preamble();
 	/* Prerequisites held in libogc's initial state, not its frame FIFO. */
 	gx_load_xf_reg(0x1012, 0x00000001);
 	gx_load_identity_post_mtx();
