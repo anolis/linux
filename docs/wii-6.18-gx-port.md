@@ -1338,3 +1338,30 @@ hardening rather than the original texture-corruption investigation: cold
 boots, long-duration and load testing, normal getty/init integration,
 unload/reload fallback, RGB888 disposition, synchronization/tearing checks,
 and removal or gating of diagnostic state and logging.
+
+## 2026-07-29: Hollywood OHCI keyboard-support test
+
+- Test implementation: `c013cfb5c25f`
+- Kernel image SHA-256:
+  `ab6fc4f96878c9f6d85dc8bb02913ee1d85a95b6646dbc64ba7d00e67a295709`
+
+The stable GX console had a running tty1 getty but no keyboard input. Runtime
+inspection showed only the Hollywood GPIO buttons in `/proc/bus/input/devices`;
+the kernel had `CONFIG_USB` disabled and no driver bound to either Wii OHCI
+device-tree node.
+
+This test ports the minimum legacy Hollywood OHCI support needed for a USB
+keyboard onto the Linux 6.18 generic platform OHCI driver. It adds the Wii DT
+match, big-endian register access with little-endian descriptors, Hollywood's
+EHCI-vendor-register interrupt routing, and the legacy control-list and
+interrupt/bulk scheduling workarounds. Streaming USB payloads retain a 32-bit
+DMA mask, while coherent OHCI schedule structures are constrained below 16 MiB
+in MEM1 to avoid the known uncached-MEM2 subword-store limitation without
+restricting ordinary transfer buffers.
+
+The Wii defconfig now builds USB core, OHCI, generic HID, and USB HID into the
+kernel. The complete `zImage modules` build passes and the final objects contain
+all three Hollywood quirk functions. Hardware positive control is a USB
+keyboard appearing in `/proc/bus/input/devices` and producing tty1 input; boot
+logs should also show both `ohci-platform` root hubs. This remains unvalidated
+until that exact checksum is deployed and cold-booted.
