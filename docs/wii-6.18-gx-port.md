@@ -445,3 +445,29 @@ specific to the texture path: tiled RGB565 preparation, texture cache/state,
 texture-coordinate generation/interpolation, or texture sampling. Keep the
 direct renderer as the sharp positive control and constrain subsequent tests
 to texture-path differences.
+
+## 2026-07-29: One-pixel direct grid remains sharp on a cold boot
+
+- Test implementation: `bdee7ff92fb0`
+- Kernel image SHA-256:
+  `87f3732a65c836824ba8bcff450a872d5fc036c990dc244a93262cc6d86e041a`
+- GX module SHA-256:
+  `a56d3294693b7807efbdc8dcb63a45a6a3c16f8b7eefccd299b2bd352f7e3b0f`
+- Runtime kernel: `6.18.40-wii+ #12 PREEMPT Tue Jul 28 17:07:44 CDT 2026`
+- Parameters: `renderer=direct texture_source=pattern hold_frame=1`
+
+This changed only the direct-color diagnostic's horizontal and vertical grid
+lines from two pixels wide to one, matching the deterministic textured
+pattern's grid width. The Wii was fully powered off before the test; `uptime`
+reported one minute and no GX module was resident before loading it.
+
+The one-pixel direct grid appeared clear. The first-frame FIFO again drained
+to `RDoff == WToff == 0x0a80`, all PE tokens completed, and same-boot unload
+restored the CPU console. The webcam remained unavailable, so the visual
+result is based on direct user observation.
+
+This removes feature width as an explanation for the blurry textured grid.
+The downstream EFB copy and VI path preserve one-pixel direct geometry, while
+the texture path does not. The next tests must alter only texture-path state;
+start by decoding and validating BP 0x80 texture filtering and LOD fields
+against libogc and Dolphin rather than changing copy or raster state.
