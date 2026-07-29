@@ -1054,3 +1054,39 @@ oversized triangle whose affine ST endpoints produce the same mapping across
 the 640x480 viewport. This removes quad decomposition and its diagonal edge
 or slope setup while retaining the texture object, nearest filter, TEV,
 viewport, copy path, coordinate phase, and probe data unchanged.
+
+## 2026-07-29: Oversized triangle retains the mixed-texel failure
+
+- Test implementation: `8d1b73a68492`
+- Kernel image SHA-256:
+  `87f3732a65c836824ba8bcff450a872d5fc036c990dc244a93262cc6d86e041a`
+- GX module SHA-256:
+  `11d1cbe6f955a793e6d2f5815d995b62ebecfc74e531f78b625cf0ba58da9116`
+- XFB YUYV SHA-256:
+  `56e0d3f3456d5491486d0fbbed528b1ac67370bfed8cfeaf0e69ca8b45c2325d`
+- XFB PNG SHA-256:
+  `1f7b4ed8bc354ac7ab68652e0138c9976e18802886a7db1a267eac49dc4aba7c`
+- VFB RGB565BE SHA-256:
+  `097cf3243cdac9ad91917aa50953ab54e12da1adb9daa1db5c0e628a150218ee`
+- VFB PNG SHA-256:
+  `bb9316286754514190184fe6245bc65ddf2d270bef10cd0970bb1fa23ae2e501`
+- Parameters:
+  `renderer=generated texture_source=probe probe_seed=0 texcoord_source=direct direct_primitive=triangle texcoord_space=normalized texel_bias_eighths=-4 hold_frame=1`
+
+The oversized direct-TEX0 triangle completed normally. The FIFO drained to
+`RDoff == WToff == 0x0420`, the draw's PE marker completed in approximately
+410 us, and the output contains exactly the same eight probe luma levels as
+the quad. The triangle intentionally covers the complete viewport, so the
+absence of a visible triangular boundary is expected.
+
+Changing only the primitive changes the exact output: 52.6068% of luma
+samples match the quad and 145592 differ. The triangle's strongest source
+correlations remain nearby mixed offsets: 56.2749% at `(-2,-1)`, 32.8976%
+at `(-2,0)`, 24.9414% at `(-1,0)`, 18.7181% at `(-4,-2)`, and 17.1806% at
+`(-3,-2)`, versus approximately 12.6% for unrelated offsets.
+
+The primitive topology therefore affects the deterministic pattern but does
+not remove its failure class. Clear the quad's split and internal diagonal as
+the root cause. The remaining shared path begins at raster interpolation or
+TMU sampling and includes EFB-to-XFB sample/copy state. A high-frequency
+direct-colour stripe test should distinguish the TMU from the latter path.
