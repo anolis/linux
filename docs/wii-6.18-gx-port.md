@@ -635,3 +635,37 @@ direction under the GX raster/texture convention used here. Because the bias
 materially changes the artifact, coordinate centering remains implicated.
 Test negative `0.5 / width` and `0.5 / height` next, changing only the signs
 of the two translation terms.
+
+## 2026-07-29: Negative half-texel bias restores continuous texture grid
+
+- Test implementation: `0feb866b463d`
+- Kernel image SHA-256:
+  `87f3732a65c836824ba8bcff450a872d5fc036c990dc244a93262cc6d86e041a`
+- GX module SHA-256:
+  `aa608c9839142b96cbc1ede4ddfa1b9239ac5eceef4671f4939b99075bfd1e51`
+- XFB YUYV SHA-256:
+  `50de68819f0070c39d685007132efcf25f8158602eca29a8d7f60a6acbec261b`
+- Converted PNG SHA-256:
+  `b07734a176265746cb149446ba4d6e37547ef27b61ec9014fb274756673d3fcd`
+- Parameters: `renderer=generated texture_source=pattern hold_frame=1`
+
+This changed only the signs of TEXMTX0's half-texel translation terms, from
+positive to negative `0.5 / width` and `0.5 / height`. The unstable Wii Wi-Fi
+link truncated multiple whole-file SSH reads, while the remote debugfs file
+remained exactly 614400 bytes. The complete immutable frame was retrieved in
+verified chunks and converted to the checksums above. All FIFO, PE, and tiled
+texture-digest controls passed.
+
+The digital XFB shows continuous, one-pixel black horizontal and vertical grid
+lines across all four quadrants. The periodic dots and short segments from the
+zero-bias and positive-bias captures are gone. Large-scale geometry remains
+correct and the yellow diagonals remain visible. The complete PNG was opened
+in GIMP beside both earlier captures.
+
+This is the first checksum-backed fix for the textured output-quality defect.
+GX's raster convention requires position-derived normalized coordinates to be
+translated by negative half a texel for one-to-one framebuffer sampling. Keep
+this bias. Next run `renderer=generated texture_source=console hold_frame=1`
+to verify real console legibility and capture its exact XFB. Do not conflate
+any remaining YUYV chroma behavior at colored edges with the now-fixed broken
+texture sampling.
