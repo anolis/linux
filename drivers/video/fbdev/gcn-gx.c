@@ -140,7 +140,7 @@ MODULE_PARM_DESC(probe_seed, "Seed mixed into the deterministic texture probe");
 static int gx_texel_bias_eighths = -4;
 module_param_named(texel_bias_eighths, gx_texel_bias_eighths, int, 0444);
 MODULE_PARM_DESC(texel_bias_eighths,
-		 "Position-derived texture translation in eighths of a texel");
+		 "Texture-coordinate translation in eighths of a texel");
 
 static char *gx_texcoord_space = "normalized";
 module_param_named(texcoord_space, gx_texcoord_space, charp, 0444);
@@ -300,7 +300,6 @@ static inline void wg_f32_bits(u32 bits)
 
 /* IEEE 754 constants */
 #define F32_ZERO	0x00000000U
-#define F32_HALF	0x3F000000U
 #define F32_ONE		0x3F800000U
 #define F32_NEG_ONE	0xBF800000U
 #define F32_16M		0x4B7FFFFFU	/* 16777215.0 */
@@ -427,6 +426,15 @@ static void gx_load_pos_to_tex_mtx0(u16 width, u16 height)
 static u32 gx_direct_texcoord_bits(u16 extent, u16 multiple)
 {
 	int numerator = multiple * extent * 8 + gx_texel_bias_eighths;
+	u16 denominator = gx_use_texel_space ? 8 : extent * 8;
+	u32 bits = f32_div_u16(abs(numerator), denominator);
+
+	return numerator < 0 ? F32_NEG(bits) : bits;
+}
+
+static u32 gx_direct_center_texcoord_bits(u16 extent)
+{
+	int numerator = extent * 4 + gx_texel_bias_eighths;
 	u16 denominator = gx_use_texel_space ? 8 : extent * 8;
 	u32 bits = f32_div_u16(abs(numerator), denominator);
 
@@ -1333,8 +1341,8 @@ static void gx_draw_textured_color_quad(u16 width, u16 height,
 	u32 t1 = gx_direct_texcoord_bits(height, 1);
 
 	if (gx_use_constant_texcoord) {
-		s0 = s1 = F32_HALF;
-		t0 = t1 = F32_HALF;
+		s0 = s1 = gx_direct_center_texcoord_bits(width);
+		t0 = t1 = gx_direct_center_texcoord_bits(height);
 	}
 
 	gx_wr8(0x80); /* GX_QUADS | vtxfmt 0 */
@@ -1368,8 +1376,8 @@ static void gx_draw_textured_color_triangle(u16 width, u16 height,
 	u32 t2 = gx_direct_texcoord_bits(height, 2);
 
 	if (gx_use_constant_texcoord) {
-		s0 = s2 = F32_HALF;
-		t0 = t2 = F32_HALF;
+		s0 = s2 = gx_direct_center_texcoord_bits(width);
+		t0 = t2 = gx_direct_center_texcoord_bits(height);
 	}
 
 	gx_wr8(0x90); /* GX_TRIANGLES | vtxfmt 0 */
