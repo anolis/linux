@@ -605,3 +605,33 @@ next isolated test should add a positive half-texel translation to TEXMTX0:
 `0.5 / 640` in S and `0.5 / 480` in T, while leaving scale, texture data,
 filtering, raster state, and copy state unchanged. Success is a digital XFB
 whose black grid lines are continuous and one pixel wide.
+
+## 2026-07-29: Positive half-texel bias changes phase but does not fix grid
+
+- Test implementation: `5892e540b54c`
+- Kernel image SHA-256:
+  `87f3732a65c836824ba8bcff450a872d5fc036c990dc244a93262cc6d86e041a`
+- GX module SHA-256:
+  `30e888965f0d451b70a3264a32c1249715e35485164f97663a2b7ce19b30025e`
+- XFB YUYV SHA-256:
+  `17140135aa614f659aae7e1aa30bf11087da34d6b6fe9e00b3ed1eb4e9fa312e`
+- Converted PNG SHA-256:
+  `e4244fe5e7a0ac50b08206f55e0d32ee195a08503491d02a5d7301b6d108ffd7`
+- Parameters: `renderer=generated texture_source=pattern hold_frame=1`
+
+This changed only TEXMTX0's translation terms from zero to positive
+`0.5 / width` and `0.5 / height`. The first automatic SSH transfer was
+truncated; retrying the still-live immutable snapshot returned all 614400
+bytes and produced the checksums above. All FIFO, PE, and texture-digest
+controls passed.
+
+The positive bias did not make the one-pixel grid continuous. It changed the
+periodic dot/segment phase and made the rising yellow diagonal visibly stair
+and wander, while quadrant boundaries remained correctly positioned. The PNG
+was opened beside the zero-bias baseline in GIMP for direct comparison.
+
+This is a valid negative result: positive half-texel centering is the wrong
+direction under the GX raster/texture convention used here. Because the bias
+materially changes the artifact, coordinate centering remains implicated.
+Test negative `0.5 / width` and `0.5 / height` next, changing only the signs
+of the two translation terms.
