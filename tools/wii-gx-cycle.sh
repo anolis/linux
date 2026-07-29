@@ -168,17 +168,22 @@ printf '  hold frame: %s\n' "$hold_frame"
 remote_exec "grep '^gcn_gx ' /proc/modules; dmesg | grep -E 'gcn-gx:|gcnfb:' | tail -n 100"
 
 capture=/tmp/wii-gx-${commit}-${renderer}-${texture_source}-h${hold_frame}.yuyv
-capture_size=$(remote_exec "i=0; while [ \$i -lt 5 ] && [ ! -s /sys/kernel/debug/gcn_gx/xfb_yuyv ]; do sleep 1; i=\$((i + 1)); done; stat -c %s /sys/kernel/debug/gcn_gx/xfb_yuyv 2>/dev/null || echo 0")
-if [[ $capture_size == 614400 ]]; then
+capture_ready=$(remote_exec "i=0; while [ \$i -lt 5 ] && [ \"\$(cat /sys/kernel/debug/gcn_gx/xfb_width 2>/dev/null || echo 0)\" -eq 0 ]; do sleep 1; i=\$((i + 1)); done; cat /sys/kernel/debug/gcn_gx/xfb_width 2>/dev/null || echo 0")
+if [[ $capture_ready == 640 ]]; then
 	remote_exec "cat /sys/kernel/debug/gcn_gx/xfb_yuyv" > "$capture"
-	printf '  XFB capture: %s (%s)\n' "$capture" "$(sha256sum "$capture" | awk '{print $1}')"
-	if command -v ffmpeg >/dev/null 2>&1; then
+	capture_size=$(stat -c %s "$capture")
+	if [[ $capture_size == 614400 ]]; then
+		printf '  XFB capture: %s (%s)\n' "$capture" "$(sha256sum "$capture" | awk '{print $1}')"
+	else
+		printf '  XFB capture truncated: %s bytes (expected 614400)\n' "$capture_size"
+	fi
+	if [[ $capture_size == 614400 ]] && command -v ffmpeg >/dev/null 2>&1; then
 		capture_png=${capture%.yuyv}.png
 		ffmpeg -loglevel error -y -f rawvideo -pixel_format yuyv422 \
 			-video_size 640x480 -i "$capture" -frames:v 1 "$capture_png"
 		printf '  XFB PNG:     %s\n' "$capture_png"
 	fi
 else
-	printf '  XFB capture unavailable (remote size %s, expected 614400)\n' "$capture_size"
+	printf '  XFB capture unavailable (remote width %s, expected 640)\n' "$capture_ready"
 fi
 printf '\a'

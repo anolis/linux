@@ -41,6 +41,7 @@
 #include <linux/workqueue.h>
 #include <linux/crc32.h>
 #include <linux/debugfs.h>
+#include <linux/fs.h>
 #include <linux/vmalloc.h>
 #include <asm/cacheflush.h>
 #include <asm/div64.h>
@@ -111,7 +112,7 @@ static bool gx_rgb565_hold;
 #define GX_XFB_SNAPSHOT_MAX	(640 * 480 * 2)
 static void *gx_xfb_snapshot;
 static struct dentry *gx_debugfs_dir;
-static struct debugfs_blob_wrapper gx_xfb_blob;
+static size_t gx_xfb_snapshot_size;
 static u32 gx_xfb_snapshot_width;
 static u32 gx_xfb_snapshot_height;
 static u32 gx_xfb_snapshot_phys;
@@ -1327,10 +1328,26 @@ static void gx_capture_xfb(u32 xfb_phys, u16 width, u16 height)
 	gx_xfb_snapshot_height = height;
 	gx_xfb_snapshot_phys = xfb_phys;
 	smp_wmb();
-	WRITE_ONCE(gx_xfb_blob.size, bytes);
+	WRITE_ONCE(gx_xfb_snapshot_size, bytes);
 	pr_info("gcn-gx: captured XFB phys=%08x size=%zu %ux%u\n",
 		xfb_phys, bytes, width, height);
 }
+
+static ssize_t gx_xfb_snapshot_read(struct file *file, char __user *buf,
+				    size_t count, loff_t *ppos)
+{
+	size_t size = READ_ONCE(gx_xfb_snapshot_size);
+
+	smp_rmb();
+	return simple_read_from_buffer(buf, count, ppos, gx_xfb_snapshot, size);
+}
+
+static const struct file_operations gx_xfb_snapshot_fops = {
+	.owner = THIS_MODULE,
+	.open = simple_open,
+	.read = gx_xfb_snapshot_read,
+	.llseek = default_llseek,
+};
 
 /* ------------------------------------------------------------------ */
 /* Public blit API — called from vi_irq_handler in gcnfb.c            */
@@ -2195,7 +2212,10 @@ static int gcn_gx_init(void)
 	gx_rgb565_boot_deferred = false;
 	gx_rgb565_publish_xfb = false;
 	gx_rgb565_hold = false;
-	gx_xfb_blob.size = 0;
+	gx_xfb_snapshot_size = 0;
+	gx_xfb_snapshot_width = 0;
+	gx_xfb_snapshot_height = 0;
+	gx_xfb_snapshot_phys = 0;
 	gx_diag_phase = GX_DIAG_SEED;
 	gx_diag_finish_baseline = 0;
 	pr_info("gcn-gx: init: tex_buf phys=0x%08x/%08x virt=%p/%p\n",
@@ -2209,14 +2229,14 @@ static int gcn_gx_init(void)
 		ret = -ENOMEM;
 		goto err_snapshot;
 	}
-	gx_xfb_blob.data = gx_xfb_snapshot;
 	gx_debugfs_dir = debugfs_create_dir("gcn_gx", NULL);
 	if (IS_ERR(gx_debugfs_dir)) {
 		ret = PTR_ERR(gx_debugfs_dir);
 		gx_debugfs_dir = NULL;
 		goto err_debugfs;
 	}
-	debugfs_create_blob("xfb_yuyv", 0400, gx_debugfs_dir, &gx_xfb_blob);
+	debugfs_create_file("xfb_yuyv", 0400, gx_debugfs_dir, NULL,
+			    &gx_xfb_snapshot_fops);
 	debugfs_create_u32("xfb_width", 0400, gx_debugfs_dir,
 			   &gx_xfb_snapshot_width);
 	debugfs_create_u32("xfb_height", 0400, gx_debugfs_dir,
@@ -2257,7 +2277,7 @@ static void gcn_gx_exit(void)
 	cancel_work_sync(&gx_rgb565_work.work);
 	debugfs_remove_recursive(gx_debugfs_dir);
 	gx_debugfs_dir = NULL;
-	WRITE_ONCE(gx_xfb_blob.size, 0);
+	WRITE_ONCE(gx_xfb_snapshot_size, 0);
 	vfree(gx_xfb_snapshot);
 	gx_xfb_snapshot = NULL;
 	gx_wait_idle();
