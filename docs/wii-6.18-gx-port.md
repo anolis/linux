@@ -544,3 +544,29 @@ This is another failed capture positive control, not frame evidence. Commit
 `be2905216` stores the debugfs dentry and publishes its inode size together
 with the snapshot size after the cache-invalidated copy. Validate that exact
 state once more against the clear direct pattern before proceeding.
+
+## 2026-07-29: Full digital XFB capture passes direct positive control
+
+- Deployed repository commit: `4cede2ab37a3`
+- Test implementation: `be2905216`
+- Kernel image SHA-256:
+  `87f3732a65c836824ba8bcff450a872d5fc036c990dc244a93262cc6d86e041a`
+- GX module SHA-256:
+  `0899bf0dc71bf4530e6bbfcaf5b49d292dd6c22807eaf44b43e47d9b3766a7a1`
+- XFB YUYV SHA-256:
+  `2cdd48857ad4bbfc6ed403129df28ce0180cf7d0cf919281944acfbb3d1a1968`
+- Parameters: `renderer=direct texture_source=pattern hold_frame=1`
+
+The user again observed a clear one-pixel direct grid. After the validated PE
+token, the module captured exactly 614400 bytes from physical XFB
+`0x0172e000`; debugfs reported and returned the full length. The cycle script
+retrieved the YUYV frame and converted it to a 640x480 PNG. Direct inspection
+of that PNG showed the expected four solid quadrants and crisp one-pixel black
+grid lines with no texture-like blur. All FIFO and PE controls passed, and
+same-boot unload restored the CPU console.
+
+This is the required positive control for digital XFB capture. Full-frame
+snapshots obtained through this post-token, cache-invalidated path can now be
+used as evidence. The next run should capture `renderer=generated` with the
+same deterministic pattern and module bytes, then compare exact edge profiles
+and pixels against this direct baseline instead of relying on camera output.
