@@ -335,3 +335,26 @@ Mini, an earlier application, or an earlier module sequence. Stop varying
 filters and geometry. Capture or reconstruct complete libogc `GX_Init()`
 state, validate it from a cold/fresh boot, and only then resume texture-quality
 work.
+
+## 2026-07-29: Vertex-cache invalidation did not restore primitives
+
+- Test implementation: `4351d2557af6`
+- Kernel image SHA-256:
+  `87f3732a65c836824ba8bcff450a872d5fc036c990dc244a93262cc6d86e041a`
+- GX module SHA-256:
+  `160c0e5d773df8ed5197e4dbf4c089a03a3b93777303e86800577711887b1037`
+- Runtime kernel: `6.18.40-wii+ #12 PREEMPT Tue Jul 28 17:07:44 CDT 2026`
+- Parameters: `renderer=direct texture_source=console hold_frame=1`
+
+The initialization preamble emitted libogc's standalone `GX_InvVtxCache()`
+FIFO opcode `0x48`, which was a real command missing from the driver. The
+direct renderer still displayed purple. FIFO, PE, token, and same-boot unload
+controls passed. The webcam remained unavailable.
+
+Keep the invalidation because it is part of canonical `GX_Init()`, but rule it
+out as an isolated fix. The old 3.15 ledger records a more relevant ordering
+control: prepending the conservative preamble and the first exact reference
+texture frame in one contiguous submission eliminated green draw failures on
+seven of seven cold boots. The modern reference path currently sends its
+preamble in an earlier, separate init submission. Restore the validated
+contiguous ordering before expanding the preamble further.
