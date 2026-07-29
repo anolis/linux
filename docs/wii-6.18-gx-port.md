@@ -939,3 +939,40 @@ TEXMTX0 scale `1/dimension` with BP SU scale `dimension`. These forms are
 mathematically equivalent, but the texel-space form removes the normalized
 coordinate multiply and its fixed-point precision from the path. Do not
 revisit direct TEX0 attributes unless this test also fails.
+
+## 2026-07-29: Texel-space coordinates reproduce normalized lookup
+
+- Test implementation: `df2386999950`
+- Kernel image SHA-256:
+  `87f3732a65c836824ba8bcff450a872d5fc036c990dc244a93262cc6d86e041a`
+- GX module SHA-256:
+  `15e9a1343247ba62a46963aed71d2af48716904465773af64d1d4815a64e7d99`
+- XFB YUYV SHA-256:
+  `eb503749c469bba98784a67f6aef09e351263c703589a60a9f8a020234d374c8`
+- XFB PNG SHA-256:
+  `59c7e586d1152fee8795014d48d329793bcdb5d47e38845f11abb63f88bb758d`
+- VFB RGB565BE SHA-256:
+  `097cf3243cdac9ad91917aa50953ab54e12da1adb9daa1db5c0e628a150218ee`
+- VFB PNG SHA-256:
+  `bb9316286754514190184fe6245bc65ddf2d270bef10cd0970bb1fa23ae2e501`
+- Parameters:
+  `renderer=generated texture_source=probe probe_seed=0 texcoord_space=texel texel_bias_eighths=-4 hold_frame=1`
+
+The position-derived texel-space path completed normally. It did not reproduce
+the old large-coordinate stall when BP SU scale was changed to 1 at the same
+time. Every PE marker completed, the FIFO drained to the same `0x03c0`
+endpoint, and both exact snapshots were retrieved.
+
+The source is byte-identical to the normalized negative-half probe. Its XFB
+has the same five correlation peaks, including 56.2313% at `(-2,-1)`, as the
+normalized baseline. Direct comparison finds 99.8639% of luma samples
+identical; the 418 differences are confined to columns 241-364 and do not
+alter the failure class. The normalized-coordinate multiply is not the cause.
+
+Static review then found that the historical direct-TEX0 path used and
+documented XF source row 4. libogc's `GX_SetTexCoordGen2()` maps `GX_TG_TEX0`
+to `vtxrow=5`, and Dolphin's `SourceRow` layout independently agrees. A
+regular 2x4 TEX0 texgen must therefore emit XF 0x1040 value `0x280`, not the
+old `0x200`; row 4 selects absent binormal data and explains that path's
+downstream stalls. Retest direct TEX0 only with source row 5, correct direct
+VCD/VAT payload, and the existing negative-half phase.
