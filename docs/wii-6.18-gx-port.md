@@ -1207,3 +1207,39 @@ otherwise correct texture data.
 Next emit the exact `GX_SetTevDirect(GX_TEVSTAGE0)` value, BP `0x10=0`, in the
 generated texture state and repeat the constant probe. This is a focused
 single-register test; do not change coordinates or any other TEV state.
+
+## 2026-07-29: BP 0x10 fixes constant-coordinate texture corruption
+
+- Test implementation: `5b8a19800861`
+- Kernel image SHA-256:
+  `87f3732a65c836824ba8bcff450a872d5fc036c990dc244a93262cc6d86e041a`
+- GX module SHA-256:
+  `59a9dac94a3d462cb676ae4470c5c957400ee5bff896d36c733c4455df8ca13e`
+- XFB YUYV SHA-256:
+  `35c0262cccbb4b1014dab2550f0f25456d172a1c9ff7dbcda554b3daf9d271d5`
+- XFB PNG SHA-256:
+  `e0479513409949acda72406cc07cd5b1490b5c70d37d37e640f473b716842de7`
+- VFB RGB565BE SHA-256:
+  `097cf3243cdac9ad91917aa50953ab54e12da1adb9daa1db5c0e628a150218ee`
+- VFB PNG SHA-256:
+  `bb9316286754514190184fe6245bc65ddf2d270bef10cd0970bb1fa23ae2e501`
+- Parameters:
+  `renderer=generated texture_source=probe probe_seed=0 texcoord_source=direct texcoord_mapping=constant direct_primitive=quad texcoord_space=normalized texel_bias_eighths=-4 hold_frame=1`
+
+Adding only BP `0x10=0` completely removes the screen-periodic selection.
+All 307200 XFB pixels have luma 109, every one of the 480 rows and 640 columns
+is identical, and the complete frame has no second luma value. The FIFO still
+drains to `RDoff == WToff == 0x0440`; the draw PE marker changes from the
+broken path's 330 us to 720 us, confirming materially different downstream
+work rather than a coincidental copy result.
+
+This is a validated root-cause fix for the mixed-nearby-texel corruption.
+Unknown Mini-inherited BP 0x10 enabled an indirect TEV operation while
+genMode exposed zero indirect stages, producing undefined hardware coordinate
+offsets. `GX_SetTevDirect(GX_TEVSTAGE0)` restores deterministic regular
+texture lookup.
+
+Next retain this exact binary and switch only `texcoord_mapping` from constant
+to affine. Compare the complete output against the seeded source to verify
+one-to-one full-screen texture mapping and determine the correct sampling
+phase.
