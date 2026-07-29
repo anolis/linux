@@ -1012,3 +1012,45 @@ Add XF 0x1008=`0x11` only in direct mode, retaining source row 5, the
 validated VCD/VAT values, normalized negative-half endpoints, and every
 downstream state value. Purple remains the negative control; eight probe luma
 levels indicate the direct path has become active.
+
+## 2026-07-29: Direct TEX0 works and exactly reproduces position texgen
+
+- Test implementation: `366ed88f95b4`
+- Kernel image SHA-256:
+  `87f3732a65c836824ba8bcff450a872d5fc036c990dc244a93262cc6d86e041a`
+- GX module SHA-256:
+  `9be75bbbfdf890104a0c5563bc1de83f39677125f26b4411f4a4ffb5e915f573`
+- XFB YUYV SHA-256:
+  `57b2f2093480407b42ebfd0299b38e5db7d2286e95406bd8b2d368aea62c6779`
+- XFB PNG SHA-256:
+  `5e2cabb44e6da48f931dd006ec642bc8cf7b760c0611fffbd77a742853f5fef9`
+- VFB RGB565BE SHA-256:
+  `097cf3243cdac9ad91917aa50953ab54e12da1adb9daa1db5c0e628a150218ee`
+- VFB PNG SHA-256:
+  `bb9316286754514190184fe6245bc65ddf2d270bef10cd0970bb1fa23ae2e501`
+- Parameters:
+  `renderer=generated texture_source=probe probe_seed=0 texcoord_source=direct texcoord_space=normalized texel_bias_eighths=-4 hold_frame=1`
+
+With XF INVTXSPEC corrected to `0x11`, direct TEX0 becomes a fully active
+rendering path. The draw's PE token returns to the normal approximately 410 us
+completion time instead of the previous 10 us no-work signature. The FIFO
+drains to `RDoff == WToff == 0x0440`, the held output contains all eight probe
+luma levels, and the complete source and XFB snapshots pass remote checksums.
+
+The direct-TEX0 XFB SHA-256 is exactly the same as the original
+position-derived negative-half probe XFB from `dce94a8a34d8`. This is stronger
+than similar correlations: all 614400 output bytes are identical. Direct
+vertex ST values, position-derived TEXMTX0 values, and their respective XF
+source rows therefore converge to the same downstream behavior.
+
+Keep both genuine direct-path fixes: TEX0 source row 5 (`0x280`) and XF
+INVTXSPEC one-color/one-texture value `0x11`. However, clear texgen source,
+matrix multiplication, and direct attribute parsing as causes of the mixed
+lookup. The remaining common path starts at raster interpolation and TMU
+sampling.
+
+Next use corrected direct TEX0 but replace the four-vertex quad with one
+oversized triangle whose affine ST endpoints produce the same mapping across
+the 640x480 viewport. This removes quad decomposition and its diagonal edge
+or slope setup while retaining the texture object, nearest filter, TEV,
+viewport, copy path, coordinate phase, and probe data unchanged.
