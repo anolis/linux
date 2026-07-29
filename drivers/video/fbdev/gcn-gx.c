@@ -114,6 +114,9 @@ static void *gx_xfb_snapshot;
 static struct dentry *gx_debugfs_dir;
 static struct dentry *gx_xfb_debugfs_file;
 static size_t gx_xfb_snapshot_size;
+static void *gx_vfb_snapshot;
+static struct dentry *gx_vfb_debugfs_file;
+static size_t gx_vfb_snapshot_size;
 static u32 gx_xfb_snapshot_width;
 static u32 gx_xfb_snapshot_height;
 static u32 gx_xfb_snapshot_phys;
@@ -1357,6 +1360,36 @@ static const struct file_operations gx_xfb_snapshot_fops = {
 	.llseek = default_llseek,
 };
 
+static ssize_t gx_vfb_snapshot_read(struct file *file, char __user *buf,
+				    size_t count, loff_t *ppos)
+{
+	size_t size = READ_ONCE(gx_vfb_snapshot_size);
+
+	smp_rmb();
+	return simple_read_from_buffer(buf, count, ppos, gx_vfb_snapshot, size);
+}
+
+static const struct file_operations gx_vfb_snapshot_fops = {
+	.owner = THIS_MODULE,
+	.open = simple_open,
+	.read = gx_vfb_snapshot_read,
+	.llseek = default_llseek,
+};
+
+static void gx_capture_vfb(const void *vfb, u16 width, u16 height)
+{
+	size_t bytes = (size_t)width * height * 2;
+
+	if (!gx_vfb_snapshot || bytes > GX_XFB_SNAPSHOT_MAX)
+		return;
+
+	memcpy(gx_vfb_snapshot, vfb, bytes);
+	smp_wmb();
+	WRITE_ONCE(gx_vfb_snapshot_size, bytes);
+	if (gx_vfb_debugfs_file)
+		i_size_write(d_inode(gx_vfb_debugfs_file), bytes);
+}
+
 /* ------------------------------------------------------------------ */
 /* Public blit API — called from vi_irq_handler in gcnfb.c            */
 /* ------------------------------------------------------------------ */
@@ -1813,6 +1846,7 @@ static void gx_submit_generated_rgb565(const void *vfb, u32 xfb_phys,
 	u32 pixel_count = (u32)width * height;
 	int i;
 
+	gx_capture_vfb(vfb, width, height);
 	gx_prepare_rgb565_texture(vfb, (u16 *)tex_buf, width, height);
 	if (!(gx_rgb565_work_runs % 120))
 		pr_info("gcn-gx: texture phase=live run=%u tex=%08x\n",
@@ -2221,6 +2255,7 @@ static int gcn_gx_init(void)
 	gx_rgb565_publish_xfb = false;
 	gx_rgb565_hold = false;
 	gx_xfb_snapshot_size = 0;
+	gx_vfb_snapshot_size = 0;
 	gx_xfb_snapshot_width = 0;
 	gx_xfb_snapshot_height = 0;
 	gx_xfb_snapshot_phys = 0;
@@ -2237,6 +2272,11 @@ static int gcn_gx_init(void)
 		ret = -ENOMEM;
 		goto err_snapshot;
 	}
+	gx_vfb_snapshot = vzalloc(GX_XFB_SNAPSHOT_MAX);
+	if (!gx_vfb_snapshot) {
+		ret = -ENOMEM;
+		goto err_vfb_snapshot;
+	}
 	gx_debugfs_dir = debugfs_create_dir("gcn_gx", NULL);
 	if (IS_ERR(gx_debugfs_dir)) {
 		ret = PTR_ERR(gx_debugfs_dir);
@@ -2246,6 +2286,9 @@ static int gcn_gx_init(void)
 	gx_xfb_debugfs_file = debugfs_create_file("xfb_yuyv", 0400,
 						 gx_debugfs_dir, NULL,
 						 &gx_xfb_snapshot_fops);
+	gx_vfb_debugfs_file = debugfs_create_file("vfb_rgb565be", 0400,
+						 gx_debugfs_dir, NULL,
+						 &gx_vfb_snapshot_fops);
 	debugfs_create_u32("xfb_width", 0400, gx_debugfs_dir,
 			   &gx_xfb_snapshot_width);
 	debugfs_create_u32("xfb_height", 0400, gx_debugfs_dir,
@@ -2258,6 +2301,9 @@ static int gcn_gx_init(void)
 	return 0;
 
 err_debugfs:
+	vfree(gx_vfb_snapshot);
+	gx_vfb_snapshot = NULL;
+err_vfb_snapshot:
 	vfree(gx_xfb_snapshot);
 	gx_xfb_snapshot = NULL;
 err_snapshot:
@@ -2287,7 +2333,11 @@ static void gcn_gx_exit(void)
 	debugfs_remove_recursive(gx_debugfs_dir);
 	gx_debugfs_dir = NULL;
 	gx_xfb_debugfs_file = NULL;
+	gx_vfb_debugfs_file = NULL;
 	WRITE_ONCE(gx_xfb_snapshot_size, 0);
+	WRITE_ONCE(gx_vfb_snapshot_size, 0);
+	vfree(gx_vfb_snapshot);
+	gx_vfb_snapshot = NULL;
 	vfree(gx_xfb_snapshot);
 	gx_xfb_snapshot = NULL;
 	gx_wait_idle();

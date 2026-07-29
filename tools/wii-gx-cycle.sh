@@ -128,6 +128,30 @@ remote_status()
 	remote_exec "printf '<6>gx-cycle: %s\\n' '$1' > /dev/kmsg"
 }
 
+retrieve_debugfs_frame()
+{
+	local remote_file=$1
+	local local_file=$2
+	local chunk=${local_file}.chunk
+	local skip attempt chunk_ok
+
+	: > "$local_file"
+	for skip in $(seq 0 10 140); do
+		chunk_ok=0
+		for attempt in 1 2 3 4 5; do
+			remote_exec "dd if=$remote_file bs=4096 skip=$skip count=10 2>/dev/null" > "$chunk" || true
+			if [[ $(stat -c %s "$chunk") == 40960 ]]; then
+				chunk_ok=1
+				break
+			fi
+			sleep 1
+		done
+		(( chunk_ok )) || return 1
+		command cat "$chunk" >> "$local_file"
+	done
+	[[ $(stat -c %s "$local_file") == 614400 ]]
+}
+
 remote_status "unloading prior accelerator"
 remote_exec "if grep -q '^gcn_gx ' /proc/modules; then rmmod gcn_gx; fi"
 remote_exec "printf '\\n=== GX UNLOADED: CPU CONSOLE LIVE ===\\n' > /dev/tty0"
@@ -171,25 +195,10 @@ capture=/tmp/wii-gx-${commit}-${renderer}-${texture_source}-h${hold_frame}.yuyv
 capture_ready=$(remote_exec "i=0; while [ \$i -lt 5 ] && [ \"\$(cat /sys/kernel/debug/gcn_gx/xfb_width 2>/dev/null || echo 0)\" -eq 0 ]; do sleep 1; i=\$((i + 1)); done; cat /sys/kernel/debug/gcn_gx/xfb_width 2>/dev/null || echo 0")
 if [[ $capture_ready == 640 ]]; then
 	printf '  retrieving XFB in verified chunks\n'
-	: > "$capture"
-	capture_chunk=${capture}.chunk
-	capture_ok=1
-	for skip in 0 30 60 90 120; do
-		chunk_ok=0
-		for attempt in 1 2 3 4 5; do
-			remote_exec "dd if=/sys/kernel/debug/gcn_gx/xfb_yuyv bs=4096 skip=$skip count=30 2>/dev/null" > "$capture_chunk" || true
-			if [[ $(stat -c %s "$capture_chunk") == 122880 ]]; then
-				chunk_ok=1
-				break
-			fi
-			sleep 1
-		done
-		if (( ! chunk_ok )); then
-			capture_ok=0
-			break
-		fi
-		command cat "$capture_chunk" >> "$capture"
-	done
+	capture_ok=0
+	if retrieve_debugfs_frame /sys/kernel/debug/gcn_gx/xfb_yuyv "$capture"; then
+		capture_ok=1
+	fi
 	capture_size=$(stat -c %s "$capture")
 	if (( capture_ok )) && [[ $capture_size == 614400 ]]; then
 		printf '  XFB capture: %s (%s)\n' "$capture" "$(sha256sum "$capture" | awk '{print $1}')"
@@ -201,6 +210,22 @@ if [[ $capture_ready == 640 ]]; then
 		ffmpeg -loglevel error -y -f rawvideo -pixel_format yuyv422 \
 			-video_size 640x480 -i "$capture" -frames:v 1 "$capture_png"
 		printf '  XFB PNG:     %s\n' "$capture_png"
+	fi
+
+	vfb_capture=${capture%.yuyv}.vfb.rgb565be
+	if [[ $(remote_exec "stat -c %s /sys/kernel/debug/gcn_gx/vfb_rgb565be 2>/dev/null || echo 0") == 614400 ]]; then
+		printf '  retrieving VFB in verified chunks\n'
+		if retrieve_debugfs_frame /sys/kernel/debug/gcn_gx/vfb_rgb565be "$vfb_capture"; then
+			printf '  VFB capture: %s (%s)\n' "$vfb_capture" "$(sha256sum "$vfb_capture" | awk '{print $1}')"
+			if command -v ffmpeg >/dev/null 2>&1; then
+				vfb_png=${vfb_capture%.rgb565be}.png
+				ffmpeg -loglevel error -y -f rawvideo -pixel_format rgb565be \
+					-video_size 640x480 -i "$vfb_capture" -frames:v 1 "$vfb_png"
+				printf '  VFB PNG:     %s\n' "$vfb_png"
+			fi
+		else
+			printf '  VFB capture truncated\n'
+		fi
 	fi
 else
 	printf '  XFB capture unavailable (remote width %s, expected 640)\n' "$capture_ready"
