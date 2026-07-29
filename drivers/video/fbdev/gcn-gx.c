@@ -40,6 +40,8 @@
 #include <linux/string.h>
 #include <linux/workqueue.h>
 #include <linux/crc32.h>
+#include <linux/debugfs.h>
+#include <linux/vmalloc.h>
 #include <asm/cacheflush.h>
 #include <asm/div64.h>
 #include <asm/page.h>
@@ -105,6 +107,14 @@ static bool gx_rgb565_work_busy;
 static bool gx_rgb565_boot_deferred;
 static bool gx_rgb565_publish_xfb;
 static bool gx_rgb565_hold;
+
+#define GX_XFB_SNAPSHOT_MAX	(640 * 480 * 2)
+static void *gx_xfb_snapshot;
+static struct dentry *gx_debugfs_dir;
+static struct debugfs_blob_wrapper gx_xfb_blob;
+static u32 gx_xfb_snapshot_width;
+static u32 gx_xfb_snapshot_height;
+static u32 gx_xfb_snapshot_phys;
 
 static char *gx_renderer = "generated";
 module_param_named(renderer, gx_renderer, charp, 0444);
@@ -1292,6 +1302,36 @@ static void gcn_gx_copy_efb_to_xfb(u32 xfb_phys, u16 width, u16 height)
 	gx_copy_efb_to_xfb(xfb_phys, width, height, false);
 }
 
+static void gx_capture_xfb(u32 xfb_phys, u16 width, u16 height)
+{
+	void *xfb;
+	size_t bytes = (size_t)width * height * 2;
+
+	if (!gx_xfb_snapshot || bytes > GX_XFB_SNAPSHOT_MAX)
+		return;
+
+	xfb = memremap(xfb_phys, bytes, MEMREMAP_WB);
+	if (!xfb) {
+		pr_warn_once("gcn-gx: failed to map XFB snapshot at 0x%08x\n",
+			     xfb_phys);
+		return;
+	}
+
+	/* The PE wrote this WB-mapped RAM after any CPU cache allocation. */
+	invalidate_dcache_range((unsigned long)xfb,
+				(unsigned long)xfb + bytes);
+	memcpy(gx_xfb_snapshot, xfb, bytes);
+	memunmap(xfb);
+
+	gx_xfb_snapshot_width = width;
+	gx_xfb_snapshot_height = height;
+	gx_xfb_snapshot_phys = xfb_phys;
+	smp_wmb();
+	WRITE_ONCE(gx_xfb_blob.size, bytes);
+	pr_info("gcn-gx: captured XFB phys=%08x size=%zu %ux%u\n",
+		xfb_phys, bytes, width, height);
+}
+
 /* ------------------------------------------------------------------ */
 /* Public blit API — called from vi_irq_handler in gcnfb.c            */
 /* ------------------------------------------------------------------ */
@@ -1899,6 +1939,7 @@ static bool gx_process_rgb565(const void *vfb, u32 xfb_phys,
 		gx_submit_selected_rgb565(vfb, xfb_phys, width, height, "live");
 		gx_rgb565_publish_xfb = true;
 		if (gx_hold_frame && gx_live_texture_frame >= gx_hold_frame) {
+			gx_capture_xfb(xfb_phys, width, height);
 			gx_rgb565_hold = true;
 			pr_info("gcn-gx: publishing %s frame %u once and holding output\n",
 				gx_renderer, gx_live_texture_frame);
@@ -2154,6 +2195,7 @@ static int gcn_gx_init(void)
 	gx_rgb565_boot_deferred = false;
 	gx_rgb565_publish_xfb = false;
 	gx_rgb565_hold = false;
+	gx_xfb_blob.size = 0;
 	gx_diag_phase = GX_DIAG_SEED;
 	gx_diag_finish_baseline = 0;
 	pr_info("gcn-gx: init: tex_buf phys=0x%08x/%08x virt=%p/%p\n",
@@ -2162,9 +2204,38 @@ static int gcn_gx_init(void)
 	pr_info("gcn-gx: config renderer=%s texture_source=%s hold_frame=%u\n",
 		gx_renderer, gx_texture_source, gx_hold_frame);
 
+	gx_xfb_snapshot = vzalloc(GX_XFB_SNAPSHOT_MAX);
+	if (!gx_xfb_snapshot) {
+		ret = -ENOMEM;
+		goto err_snapshot;
+	}
+	gx_xfb_blob.data = gx_xfb_snapshot;
+	gx_debugfs_dir = debugfs_create_dir("gcn_gx", NULL);
+	if (IS_ERR(gx_debugfs_dir)) {
+		ret = PTR_ERR(gx_debugfs_dir);
+		gx_debugfs_dir = NULL;
+		goto err_debugfs;
+	}
+	debugfs_create_blob("xfb_yuyv", 0400, gx_debugfs_dir, &gx_xfb_blob);
+	debugfs_create_u32("xfb_width", 0400, gx_debugfs_dir,
+			   &gx_xfb_snapshot_width);
+	debugfs_create_u32("xfb_height", 0400, gx_debugfs_dir,
+			   &gx_xfb_snapshot_height);
+	debugfs_create_x32("xfb_phys", 0400, gx_debugfs_dir,
+			   &gx_xfb_snapshot_phys);
+
 	pr_info("gcn-gx: init: H done (accel ON)\n");
 	gx_accel_ready = true;
 	return 0;
+
+err_debugfs:
+	vfree(gx_xfb_snapshot);
+	gx_xfb_snapshot = NULL;
+err_snapshot:
+	free_irq(gx_pe_finish_irq, &gx_pe_finish_irq);
+	irq_dispose_mapping(gx_pe_finish_irq);
+	gx_pe_finish_irq = 0;
+	goto err_hw;
 
 err_irq_mapping:
 	irq_dispose_mapping(gx_pe_finish_irq);
@@ -2184,6 +2255,11 @@ static void gcn_gx_exit(void)
 {
 	WRITE_ONCE(gx_accel_ready, false);
 	cancel_work_sync(&gx_rgb565_work.work);
+	debugfs_remove_recursive(gx_debugfs_dir);
+	gx_debugfs_dir = NULL;
+	WRITE_ONCE(gx_xfb_blob.size, 0);
+	vfree(gx_xfb_snapshot);
+	gx_xfb_snapshot = NULL;
 	gx_wait_idle();
 	cp_write(CP_REG_CTRL, 0);
 	if (gx_pe_finish_irq) {

@@ -155,6 +155,7 @@ fi
 remote_exec "mv -f $remote_module.new $remote_module"
 
 remote_status "loading renderer=$renderer source=$texture_source hold_frame=$hold_frame"
+remote_exec "grep -q ' /sys/kernel/debug ' /proc/mounts || mount -t debugfs debugfs /sys/kernel/debug"
 remote_exec "insmod $remote_module renderer=$renderer texture_source=$texture_source hold_frame=$hold_frame"
 remote_exec "printf '\\n=== GX LOADED: $renderer source=$texture_source hold=$hold_frame ===\\n' > /dev/tty0"
 
@@ -165,4 +166,19 @@ printf '  renderer:  %s\n' "$renderer"
 printf '  texture source: %s\n' "$texture_source"
 printf '  hold frame: %s\n' "$hold_frame"
 remote_exec "grep '^gcn_gx ' /proc/modules; dmesg | grep -E 'gcn-gx:|gcnfb:' | tail -n 100"
+
+capture=/tmp/wii-gx-${commit}-${renderer}-${texture_source}-h${hold_frame}.yuyv
+capture_size=$(remote_exec "i=0; while [ \$i -lt 5 ] && [ ! -s /sys/kernel/debug/gcn_gx/xfb_yuyv ]; do sleep 1; i=\$((i + 1)); done; stat -c %s /sys/kernel/debug/gcn_gx/xfb_yuyv 2>/dev/null || echo 0")
+if [[ $capture_size == 614400 ]]; then
+	remote_exec "cat /sys/kernel/debug/gcn_gx/xfb_yuyv" > "$capture"
+	printf '  XFB capture: %s (%s)\n' "$capture" "$(sha256sum "$capture" | awk '{print $1}')"
+	if command -v ffmpeg >/dev/null 2>&1; then
+		capture_png=${capture%.yuyv}.png
+		ffmpeg -loglevel error -y -f rawvideo -pixel_format yuyv422 \
+			-video_size 640x480 -i "$capture" -frames:v 1 "$capture_png"
+		printf '  XFB PNG:     %s\n' "$capture_png"
+	fi
+else
+	printf '  XFB capture unavailable (remote size %s, expected 614400)\n' "$capture_size"
+fi
 printf '\a'
