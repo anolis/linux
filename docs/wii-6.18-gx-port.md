@@ -570,3 +570,38 @@ snapshots obtained through this post-token, cache-invalidated path can now be
 used as evidence. The next run should capture `renderer=generated` with the
 same deterministic pattern and module bytes, then compare exact edge profiles
 and pixels against this direct baseline instead of relying on camera output.
+
+## 2026-07-29: Digital capture identifies texel-boundary aliasing, not blur
+
+- Deployed repository commit: `2c1941d411ca`
+- Test implementation: `be2905216`
+- Kernel image SHA-256:
+  `87f3732a65c836824ba8bcff450a872d5fc036c990dc244a93262cc6d86e041a`
+- GX module SHA-256:
+  `0899bf0dc71bf4530e6bbfcaf5b49d292dd6c22807eaf44b43e47d9b3766a7a1`
+- XFB YUYV SHA-256:
+  `6c5e2367185ddb148e617dc1c5a01a0adec72d0bdfec9686fa98b775b66feea1`
+- Converted PNG SHA-256:
+  `848624f6050403c7345bec564c13088b3e10fb3177afd8a58a946da4b61cad27`
+- Parameters: `renderer=generated texture_source=pattern hold_frame=1`
+
+The user observed the familiar blurry grid. The first automatic SSH transfer
+was truncated, but the immutable debugfs file continued to report and return
+614400 bytes; a retry produced the complete checksum above. Both tiled source
+buffers had the expected deterministic digest, every PE token completed, and
+the generated FIFO drained to `RDoff == WToff == 0x03c0`.
+
+The exact XFB is more specific than the visual report. Quadrant boundaries and
+yellow diagonals are sharp, proving that gross texture dimensions, addressing,
+and projection are correct. The intended one-pixel black grid is instead
+broken into a regular pattern of dots and short segments across otherwise
+solid regions. Horizontal-line samples vary with X and vertical-line samples
+vary with Y, consistent with coordinates landing on texel boundaries and
+raster interpolation precision selecting adjacent texels. The high-frequency
+aliasing is what appears blurry after analog/HDMI conversion and capture.
+
+BP `0x80000100` is already validated as nearest sampling with no mipmaps. The
+next isolated test should add a positive half-texel translation to TEXMTX0:
+`0.5 / 640` in S and `0.5 / 480` in T, while leaving scale, texture data,
+filtering, raster state, and copy state unchanged. Success is a digital XFB
+whose black grid lines are continuous and one pixel wide.
