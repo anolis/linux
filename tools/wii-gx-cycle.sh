@@ -175,6 +175,24 @@ ssh_options=(
 	-o LogLevel=ERROR
 )
 
+ssh_control_path=${TMPDIR:-/tmp}/wii-gx-ssh-${UID}-$$
+ssh_options+=(
+	-o ControlMaster=auto
+	-o ControlPersist=30
+	-o ControlPath="$ssh_control_path"
+	-o ServerAliveInterval=5
+	-o ServerAliveCountMax=3
+)
+
+close_ssh_master()
+{
+	ssh "${ssh_options[@]}" -O exit "$remote" >/dev/null 2>&1 || true
+}
+trap close_ssh_master EXIT
+
+printf 'Opening persistent SSH connection to %s\n' "$remote"
+ssh "${ssh_options[@]}" -Nf "$remote"
+
 remote_exec()
 {
 	ssh "${ssh_options[@]}" "$remote" "$1"
