@@ -1365,3 +1365,17 @@ all three Hollywood quirk functions. Hardware positive control is a USB
 keyboard appearing in `/proc/bus/input/devices` and producing tty1 input; boot
 logs should also show both `ohci-platform` root hubs. This remains unvalidated
 until that exact checksum is deployed and cold-booted.
+
+Hardware result: the exact image checksum was deployed and cold-booted. USB
+core and `usbhid` initialized, and both DT nodes matched `ohci-platform`, but
+both probes returned `-EIO` before printing the OHCI product description or
+requesting an IRQ. No USB input device appeared. The failure is before
+controller-register setup: `dma_set_coherent_mask(DMA_BIT_MASK(24))` calls
+`dma_direct_supported()`, which rejects any mask below the Wii's highest MEM2
+PFN even though suitable MEM1 exists below 16 MiB.
+
+The DT binding and driver selection are therefore validated, but the 24-bit
+coherent-mask mechanism is ruled out. Replace it with explicit per-controller
+coherent pools reserved in the free MEM1 gap between the GX texture buffers
+and FIFO. Keep the streaming mask at 32 bits. This preserves the intended
+memory safety property while satisfying the direct-DMA layer.
