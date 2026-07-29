@@ -835,3 +835,59 @@ One three-bit symbol still collides with five candidates often enough to leave
 all GX state identical, then classify both captures jointly. Six independent
 bits reduce random five-candidate collisions enough to reconstruct nearly the
 entire texel-selection map before testing any coordinate correction.
+
+## 2026-07-29: Independent seed reconstructs the texel-selection map
+
+- Test implementation: `80a0f740e5c2`
+- Kernel image SHA-256:
+  `87f3732a65c836824ba8bcff450a872d5fc036c990dc244a93262cc6d86e041a`
+- GX module SHA-256:
+  `57292964e076bfa5e347905b5844bc3ad53a67fa42045eb8ae792cfe5ae04955`
+- Seed-1 XFB YUYV SHA-256:
+  `6463956cefec3b70e81eeab62b7a2714e0f8d56d936ddd1a09e5771ea42dcbdc`
+- Seed-1 XFB PNG SHA-256:
+  `477356705fd7162304d71a238642a710de86ee824069280174246016e8cfb9a1`
+- Seed-1 VFB RGB565BE SHA-256:
+  `369b3baed5cc29a082b7a7318dc169f7f4b409fc504fbccd2890d3649c8bcc53`
+- Seed-1 VFB PNG SHA-256:
+  `f342dcb8727b2c105952c933105d9cacfd4bbca9f3919630fe271806626b7ffb`
+- Joint candidate-map PNG SHA-256:
+  `08f3e0c32b061c5d7227db183e1b1ef494d08db851a11a86ff09b19e2568c54f`
+- Parameters: `renderer=generated texture_source=probe probe_seed=1 hold_frame=1`
+
+The hardened 8 KiB chunk transport retrieved both incompressible frames with
+matching remote raw SHA-256 values. The seed-1 source snapshot matched the
+independently regenerated seeded formula at all 307200 pixels, and its XFB
+again contained only the eight expected nearest-neighbor luma values. All PE
+markers completed and the FIFO drained normally. The user described the
+display as blurry but more uniform than before, which is expected from the
+graded probe and is not itself used as the measurement.
+
+Comparing the seed-0 and seed-1 symbol pairs reduces unrelated agreement to
+1/64. Using the convention that output `(x,y)` selected source
+`(x+dx,y+dy)`, 93.8534% of the interior pixels matched exactly one of the
+five established candidates, 6.1466% had an accidental multi-match, and no
+pixel was unmatched. The uniquely classified distribution was:
+
+- `(-2,-1)`: 133852 pixels, 50.0064%
+- `(-2, 0)`: 52701 pixels, 19.6888%
+- `(-1, 0)`: 47740 pixels, 17.8354%
+- `(-3,-2)`: 20827 pixels, 7.7808%
+- `(-4,-2)`: 12550 pixels, 4.6886%
+
+The map is highly structured. Labels agree after a four-row displacement at
+99.572%, after a 16-column displacement at 98.024%, and after `(16,12)` at
+99.335%. Converting each selected coordinate to the driver's confirmed 4x4
+RGB565 tiled-memory index does not produce a constant word displacement; the
+result splits across many offsets. This rejects a simple texture-base error
+or a fixed shift in the tiled byte stream. The raster-grid periodicity instead
+points to texture coordinates repeatedly landing on a fixed-point selection
+boundary.
+
+Do not change the tiler, texture base, cache invalidation, postmatrix, or XFB
+copy based on this result. The next isolated test should move the current
+negative half-texel translation away from the boundary by a quarter texel
+while retaining the same scale and eight-level seeded probe. A clean result
+would collapse the five-candidate pattern to one source displacement; a
+persisting pattern would move the investigation to coordinate scale or direct
+texcoord generation.
