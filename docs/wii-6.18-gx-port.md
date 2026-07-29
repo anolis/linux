@@ -891,3 +891,51 @@ while retaining the same scale and eight-level seeded probe. A clean result
 would collapse the five-candidate pattern to one source displacement; a
 persisting pattern would move the investigation to coordinate scale or direct
 texcoord generation.
+
+## 2026-07-29: Quarter-texel phase preserves the raster-periodic error
+
+- Test implementation: `141ccb161c1d`
+- Kernel image SHA-256:
+  `87f3732a65c836824ba8bcff450a872d5fc036c990dc244a93262cc6d86e041a`
+- GX module SHA-256:
+  `197ce83f32a9638bb399c823da3abe05320fc1a30631a1b1720a231f4453185f`
+- Seed-0 XFB YUYV SHA-256:
+  `6b05b0537d505c52749a6395e9df15480123d92674dc3d37671dad122a0aac41`
+- Seed-0 XFB PNG SHA-256:
+  `275565c2b1492cf2eb7034b96006bb19a88310d9b28c681e41edd9cb64717ee9`
+- Seed-1 XFB YUYV SHA-256:
+  `61471f507ec981ebdaf5e33a4578dd48f6abff28645a013603ccaf2e4a6470a1`
+- Seed-1 XFB PNG SHA-256:
+  `05ed7c36784215474b06f618c644748b37c3fa003006b6d1188012cc55a1b993`
+- Seed-0 VFB RGB565BE SHA-256:
+  `097cf3243cdac9ad91917aa50953ab54e12da1adb9daa1db5c0e628a150218ee`
+- Seed-1 VFB RGB565BE SHA-256:
+  `369b3baed5cc29a082b7a7318dc169f7f4b409fc504fbccd2890d3649c8bcc53`
+- Parameters:
+  `renderer=generated texture_source=probe probe_seed=0/1 texel_bias_eighths=-2 hold_frame=1`
+
+Both source captures are byte-identical to their corresponding negative-half
+baselines, proving that only the texture-matrix translation changed. Both
+XFBs again contain exactly the eight expected luma symbols, every PE marker
+completed, and every FIFO drained.
+
+The two seeded captures jointly produce four real source offsets. Of the
+interior pixels, 95.3303% match exactly one candidate, 4.6697% have an
+accidental multi-match, and none are unmatched. The unique distribution is
+`(-1,0)` at 50.0136%, `(-2,-1)` at 24.9998%, `(-2,0)` at 12.5010%, and
+`(-3,-2)` at 12.4856%. Unrelated offsets remain at the expected 1/64 joint
+agreement.
+
+The new map agrees after a four-row displacement at 99.676%, after a
+16-column displacement at 99.004%, and after `(16,12)` at exactly 100% for
+the uniquely classified pixels. Moving from negative one-half to negative
+one-quarter therefore changes phase and the candidate mixture but does not
+collapse lookup to a single texel. Reject the simple phase-boundary
+hypothesis.
+
+Next preserve position-derived texgen and the negative-half phase, but emit
+coordinates in texel space: TEXMTX0 scale 1 with BP SU scale 1 instead of
+TEXMTX0 scale `1/dimension` with BP SU scale `dimension`. These forms are
+mathematically equivalent, but the texel-space form removes the normalized
+coordinate multiply and its fixed-point precision from the path. Do not
+revisit direct TEX0 attributes unless this test also fails.
