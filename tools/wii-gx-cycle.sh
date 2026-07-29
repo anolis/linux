@@ -138,6 +138,8 @@ retrieve_debugfs_frame()
 	local remote_gz=/tmp/gcn-gx-debugfs-frame.gz
 	local remote_sha local_sha remote_size chunks chunk_size
 	local index attempt chunk_ok
+	local chunk_bytes=8192
+	local max_attempts=10
 
 	: > "$local_file"
 	remote_sha=$(remote_exec "sha256sum $remote_file | cut -d' ' -f1") ||
@@ -145,15 +147,17 @@ retrieve_debugfs_frame()
 	remote_exec "gzip -1 -c $remote_file > $remote_gz" || return 1
 	remote_size=$(remote_exec "stat -c %s $remote_gz") || return 1
 	[[ $remote_size =~ ^[0-9]+$ && $remote_size -gt 0 ]] || return 1
-	chunks=$(((remote_size + 16383) / 16384))
+	chunks=$(((remote_size + chunk_bytes - 1) / chunk_bytes))
 	: > "$local_gz"
 
 	for ((index = 0; index < chunks; index++)); do
-		chunk_size=$((remote_size - index * 16384))
-		((chunk_size > 16384)) && chunk_size=16384
+		chunk_size=$((remote_size - index * chunk_bytes))
+		if ((chunk_size > chunk_bytes)); then
+			chunk_size=$chunk_bytes
+		fi
 		chunk_ok=0
-		for attempt in 1 2 3 4 5; do
-			remote_exec "dd if=$remote_gz bs=16384 skip=$index count=1 2>/dev/null" > "$local_chunk" || true
+		for ((attempt = 1; attempt <= max_attempts; attempt++)); do
+			remote_exec "dd if=$remote_gz bs=$chunk_bytes skip=$index count=1 2>/dev/null" > "$local_chunk" || true
 			if [[ $(stat -c %s "$local_chunk") == "$chunk_size" ]]; then
 				chunk_ok=1
 				break
