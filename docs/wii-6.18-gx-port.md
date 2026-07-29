@@ -1090,3 +1090,38 @@ not remove its failure class. Clear the quad's split and internal diagonal as
 the root cause. The remaining shared path begins at raster interpolation or
 TMU sampling and includes EFB-to-XFB sample/copy state. A high-frequency
 direct-colour stripe test should distinguish the TMU from the latter path.
+
+## 2026-07-29: One-pixel direct stripes clear raster and display copy
+
+- Test implementation: `041b4ddfb3e5`
+- Kernel image SHA-256:
+  `87f3732a65c836824ba8bcff450a872d5fc036c990dc244a93262cc6d86e041a`
+- GX module SHA-256:
+  `1d093da726d0d86718b5d234fd2529cfa6020427842b9c98fc6543c2a5db601a`
+- XFB YUYV SHA-256:
+  `4850d373baa1554810d7d08ca0f5d1bf195e1b0013b865a5b6f7dbf472b5560b`
+- XFB PNG SHA-256:
+  `2ada091ee68ae7f928dc7d2dddf7b8ca3161b19b5d763fea3f908c4f1828094a`
+- Parameters:
+  `renderer=direct direct_pattern=vstripes texture_source=console hold_frame=1`
+
+The texture-free direct renderer drew a white full-screen background followed
+by 320 one-pixel black rectangles at even X coordinates. The 17056-byte FIFO
+drained completely to `RDoff == WToff == 0x42a0`; the draw PE marker completed
+in 980 us; and the exact 614400-byte XFB snapshot passed its remote checksum.
+
+Every captured pixel is exact. All 480 rows are identical, each row's luma is
+`16,235,16,235,...` for all 640 columns, and every one of the 307200 shared
+YUYV chroma bytes is neutral 128. There are exactly 153600 black and 153600
+white luma samples, every column is vertically uniform, and every run is one
+pixel wide.
+
+This is a stronger positive control than the earlier 32-pixel grid. The
+direct-colour rasterizer and the common EFB-to-XFB sampling, conversion, and
+copy path preserve the highest representable horizontal spatial frequency
+without diffusion or neighbour substitution. Localize the mixed-nearby-texel
+failure to the texture path rather than display copying.
+
+Next hold direct TEX0 constant at all primitive vertices. A uniform expected
+texel would implicate coordinate interpolation or gradients; continued mixed
+texels would implicate texture addressing or sampling after interpolation.
