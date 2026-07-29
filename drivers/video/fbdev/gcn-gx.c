@@ -1630,6 +1630,8 @@ static void gx_load_libogc_init_preamble(void)
 
 	gx_load_cp_reg(0x20, 0x00000000);
 	gx_load_xf_reg(0x1006, 0x00000000);
+	/* GX_InvVtxCache(): standalone FIFO opcode emitted by GX_Init(). */
+	gx_wr8(0x48);
 	gx_load_bp_reg(0x23000000);
 	gx_load_bp_reg(0x24000000);
 	gx_load_bp_reg(0x67000000);
