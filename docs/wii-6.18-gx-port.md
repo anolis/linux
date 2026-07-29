@@ -524,3 +524,23 @@ length at its creation-time value of zero. Commit `9f873066c` replaces it with
 a custom `simple_read_from_buffer()` file and makes the cycle script wait on
 published width metadata. Revalidate that implementation against the same
 clear direct pattern before capturing textured output.
+
+## 2026-07-29: Dynamic XFB reader still required inode-size publication
+
+- Deployed repository commit: `1c61a66a7d93`
+- Test implementation: `9f873066c`
+- GX module SHA-256:
+  `09fd4f157c098630e5d55f53c74cd8015b7803383cda70a30cb32e8caee35631`
+- Parameters: `renderer=direct texture_source=pattern hold_frame=1`
+
+The direct one-pixel grid was again visibly clear. The corrected module again
+logged a 614400-byte post-token snapshot, and debugfs metadata reported width
+640, height 480, and physical address `0x0172e000`. The custom debugfs reader
+still returned zero bytes, however, because its regular-file inode retained
+the creation-time length of zero and the VFS returned EOF before delivering
+data through the read callback.
+
+This is another failed capture positive control, not frame evidence. Commit
+`be2905216` stores the debugfs dentry and publishes its inode size together
+with the snapshot size after the cache-invalidated copy. Validate that exact
+state once more against the clear direct pattern before proceeding.
