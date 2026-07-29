@@ -137,6 +137,11 @@ static unsigned int gx_probe_seed;
 module_param_named(probe_seed, gx_probe_seed, uint, 0444);
 MODULE_PARM_DESC(probe_seed, "Seed mixed into the deterministic texture probe");
 
+static int gx_texel_bias_eighths = -4;
+module_param_named(texel_bias_eighths, gx_texel_bias_eighths, int, 0444);
+MODULE_PARM_DESC(texel_bias_eighths,
+		 "Position-derived texture translation in eighths of a texel");
+
 static bool gx_use_reference;
 static bool gx_use_direct;
 static bool gx_use_pattern;
@@ -347,8 +352,14 @@ static void gx_load_identity_pos_mtx0(void)
 
 static void gx_load_pos_to_tex_mtx0(u16 width, u16 height)
 {
-	u32 s_bias = f32_div_u16(1, width * 2);
-	u32 t_bias = f32_div_u16(1, height * 2);
+	u16 magnitude = abs(gx_texel_bias_eighths);
+	u32 s_bias = f32_div_u16(magnitude, width * 8);
+	u32 t_bias = f32_div_u16(magnitude, height * 8);
+
+	if (gx_texel_bias_eighths < 0) {
+		s_bias = F32_NEG(s_bias);
+		t_bias = F32_NEG(t_bias);
+	}
 
 	/*
 	 * TEXMTX0 for GX_TG_POS: map object-space quad positions
@@ -361,9 +372,9 @@ static void gx_load_pos_to_tex_mtx0(u16 width, u16 height)
 	 */
 	gx_load_xf_regs_n(0x0078, 8);
 	wg_f32_bits(f32_div_u16(1, width)); wg_f32_bits(F32_ZERO);
-	wg_f32_bits(F32_ZERO);              wg_f32_bits(F32_NEG(s_bias));
+	wg_f32_bits(F32_ZERO);              wg_f32_bits(s_bias);
 	wg_f32_bits(F32_ZERO);              wg_f32_bits(f32_div_u16(1, height));
-	wg_f32_bits(F32_ZERO);              wg_f32_bits(F32_NEG(t_bias));
+	wg_f32_bits(F32_ZERO);              wg_f32_bits(t_bias);
 
 	/*
 	 * GX_SetTexCoordGen(..., GX_TEXMTX0) records GX_TEXMTX0 (30) in the
@@ -2231,6 +2242,11 @@ static int gcn_gx_init(void)
 		       gx_texture_source);
 		return -EINVAL;
 	}
+	if (gx_texel_bias_eighths < -8 || gx_texel_bias_eighths > 8) {
+		pr_err("gcn-gx: invalid texel_bias_eighths %d (expected -8..8)\n",
+		       gx_texel_bias_eighths);
+		return -EINVAL;
+	}
 
 	/*
 	 * Mini leaves PI_FIFO_WPTR=0x00000000.  VI hardware generates wgPipe
@@ -2322,8 +2338,9 @@ static int gcn_gx_init(void)
 	pr_info("gcn-gx: init: tex_buf phys=0x%08x/%08x virt=%p/%p\n",
 		GX_TEX_BUF_MEM1_PHYS, GX_TEX_BUF_ALT_MEM1_PHYS,
 		gx_tex_buf, gx_tex_buf_alt);
-	pr_info("gcn-gx: config renderer=%s texture_source=%s probe_seed=%u hold_frame=%u\n",
-		gx_renderer, gx_texture_source, gx_probe_seed, gx_hold_frame);
+	pr_info("gcn-gx: config renderer=%s texture_source=%s probe_seed=%u texel_bias_eighths=%d hold_frame=%u\n",
+		gx_renderer, gx_texture_source, gx_probe_seed,
+		gx_texel_bias_eighths, gx_hold_frame);
 
 	gx_xfb_snapshot = vzalloc(GX_XFB_SNAPSHOT_MAX);
 	if (!gx_xfb_snapshot) {
