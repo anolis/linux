@@ -1125,3 +1125,40 @@ failure to the texture path rather than display copying.
 Next hold direct TEX0 constant at all primitive vertices. A uniform expected
 texel would implicate coordinate interpolation or gradients; continued mixed
 texels would implicate texture addressing or sampling after interpolation.
+
+## 2026-07-29: Constant TEX0 removes gradients but retains a binary pattern
+
+- Test implementation: `38d30d69b465`
+- Kernel image SHA-256:
+  `87f3732a65c836824ba8bcff450a872d5fc036c990dc244a93262cc6d86e041a`
+- GX module SHA-256:
+  `0e8e79e0415d12d9606f7687e430f52435794272e1982c14112836423f9709f3`
+- XFB YUYV SHA-256:
+  `b3a9c9f6172fc37a2d5cd1670e2978f40cfc67ee8fe5f36d6329a43261c9a2e7`
+- XFB PNG SHA-256:
+  `7c7fb4e0b3eda1c21f00d7419bdb6f6c0f339a292b96ca26d6484f4012d81cd7`
+- VFB RGB565BE SHA-256:
+  `097cf3243cdac9ad91917aa50953ab54e12da1adb9daa1db5c0e628a150218ee`
+- VFB PNG SHA-256:
+  `bb9316286754514190184fe6245bc65ddf2d270bef10cd0970bb1fa23ae2e501`
+- Parameters:
+  `renderer=generated texture_source=probe probe_seed=0 texcoord_source=direct texcoord_mapping=constant direct_primitive=quad texcoord_space=normalized hold_frame=1`
+
+All four vertices carried bit-exact normalized TEX0 `(0.5,0.5)`, eliminating
+both coordinate gradients. The FIFO drained to `RDoff == WToff == 0x0440`,
+the draw PE marker completed in 330 us, and both snapshots passed their remote
+checksums.
+
+The result is not uniform. It contains 153760 pixels at luma 16 and 153440 at
+luma 142, with no other luma values. Its binary selection agrees after four
+rows at 99.5864%, inverts after two rows at 99.7928%, agrees after 16 columns
+at 98.75%, and repeats exactly after displacement `(16,12)`. Thus ordinary
+affine gradients and quad interpolation are not required to produce the
+screen-position-dependent selection.
+
+This does not yet prove broken texture addressing. Normalized 0.5 can lie on
+the boundary between the central texels, where a position-dependent nearest
+tie-break may be legitimate. This implementation also overrides rather than
+applies `texel_bias_eighths`. Correct constant mode to apply the configured
+fractional-texel phase around the texture centre, then test negative one-half
+before drawing a stronger conclusion.
