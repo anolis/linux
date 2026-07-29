@@ -380,3 +380,38 @@ old seven-of-seven cold-boot control. It therefore proves that contiguous
 ordering is not sufficient to recover the current warm GX state, but it is not
 an exact rejection of the historical startup result. Remove the unhelpful
 opcode and retest the exact historical stream after a real full power-off boot.
+
+## 2026-07-29: Historical contiguous preamble restores cold-boot primitives
+
+- Test implementation: `ebaaf76b15ea`
+- Kernel image SHA-256:
+  `87f3732a65c836824ba8bcff450a872d5fc036c990dc244a93262cc6d86e041a`
+- GX module SHA-256:
+  `39724ebe901a0f3f2839c9ae925a7603425b789d7a28cc3e225ecf0935ad6ee3`
+- Runtime kernel: `6.18.40-wii+ #12 PREEMPT Tue Jul 28 17:07:44 CDT 2026`
+- Parameters: `renderer=reference texture_source=pattern hold_frame=1`
+
+The Wii was fully powered off before this run. After boot, `uptime` reported
+less than one minute and no `gcn_gx` module was loaded, validating the intended
+cold-start condition. This build removed the newly added `GX_InvVtxCache()`
+opcode while retaining the historical conservative initialization preamble
+contiguous with the first exact reference frame.
+
+The deterministic four-quadrant grid pattern became visible. The user judged
+it blurry, but this is categorically different from the lime-green copy-clear
+seen in the preceding warm-state run: GX primitives altered the EFB on this
+cold boot. The first combined frame had the expected padded size of 992 bytes
+(`WT=RD=0x03e0`), every PE token completed, every FIFO drained, and same-boot
+module unload restored the CPU console. The webcam remained unavailable, so
+the visual result is based on direct user observation rather than a saved
+full-frame capture.
+
+This reproduces the important direction of the old 3.15 seven-of-seven result
+on Linux 6.18: the conservative preamble must be contiguous with the first
+reference draw, and startup state matters. Treat primitive visibility and
+image sharpness as separate problems. Preserve this checksum-backed stream as
+the cold-start positive control. Before changing filters or texture state,
+repeat it across cold boots to establish reliability, then compare a direct
+renderer whose first draw is preceded by the same contiguous preamble. A
+successful direct comparison will isolate the remaining blur to texture input
+or sampling rather than EFB copy output.
