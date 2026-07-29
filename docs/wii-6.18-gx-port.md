@@ -1276,3 +1276,34 @@ the negative-half coordinate phase crossing the top and left clamp boundary,
 not stale indirect state. Retain the fixed binary and test
 `texel_bias_eighths=-2` to move samples one-quarter texel inward without
 changing the source mapping by a whole texel.
+
+## 2026-07-29: Negative-quarter phase gives an exact affine blit
+
+- Test implementation: `5b8a19800861` (capture run at docs-only HEAD
+  `dc5f0d63d66c`)
+- Kernel image SHA-256:
+  `87f3732a65c836824ba8bcff450a872d5fc036c990dc244a93262cc6d86e041a`
+- GX module SHA-256:
+  `59a9dac94a3d462cb676ae4470c5c957400ee5bff896d36c733c4455df8ca13e`
+- XFB YUYV SHA-256:
+  `764f1a9f4d97f1e3385e09a16fd80fb1be596215fd63eca442876a1be1230cac`
+- XFB PNG SHA-256:
+  `325373e0d050429d78fd042ed0cea1866bb7df5301feeb0e712dee6706f7c6cc`
+- VFB RGB565BE SHA-256:
+  `097cf3243cdac9ad91917aa50953ab54e12da1adb9daa1db5c0e628a150218ee`
+- VFB PNG SHA-256:
+  `bb9316286754514190184fe6245bc65ddf2d270bef10cd0970bb1fa23ae2e501`
+- Parameters:
+  `renderer=generated texture_source=probe probe_seed=0 texcoord_source=direct texcoord_mapping=affine direct_primitive=quad texcoord_space=normalized texel_bias_eighths=-2 hold_frame=1`
+
+The negative-quarter phase produces an exact one-to-one full-frame texture
+blit. All 307200 XFB luma symbols match source coordinate `(0,0)`; mismatch
+count is zero, including the complete top and left boundaries. All eight
+probe levels remain present and no unexpected output symbol appears. The PE
+marker completes normally and the FIFO drains completely.
+
+Make `texel_bias_eighths=-2` the default. Then validate the normal production
+configuration: generated renderer, live console texture, position-derived
+coordinates, affine mapping, and continuous output. The deterministic probe
+has now validated texture upload, tiling, direct coordinates, TMU lookup,
+rasterization, TEV, EFB copy, and XFB publication exactly.
