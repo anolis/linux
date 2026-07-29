@@ -278,3 +278,25 @@ three-tap values to the near-identity values, so two differences exist versus
 the clear direct test. Restore the two-pixel grid while retaining the
 near-identity filter. A clear result isolates one-pixel geometry; purple
 instead implicates the filter-state change or test chronology.
+
+## 2026-07-29: Two-pixel direct grid also purple under identity filter
+
+- Test implementation: `28d2c3406695`
+- Kernel image SHA-256:
+  `87f3732a65c836824ba8bcff450a872d5fc036c990dc244a93262cc6d86e041a`
+- GX module SHA-256:
+  `1b09ced4f16359211329e72285f234fc45cf36349de322ca1bd4feb57cae1451`
+- Runtime kernel: `6.18.40-wii+ #12 PREEMPT Tue Jul 28 17:07:44 CDT 2026`
+- Parameters: `renderer=direct texture_source=console hold_frame=1`
+
+Restoring the direct grid to two pixels while retaining the custom
+`[0,0,0,63,1,0,0]` copy filter still produced a uniform purple diagnostic
+clear. All FIFO, PE, token, and same-boot unload controls passed. The webcam
+remained unavailable, so this is a direct user-observed color result.
+
+This rules out one-pixel geometry as the cause of the preceding purple runs.
+The custom near-identity filter is the remaining controlled difference from
+the earlier clear two-pixel direct test and is not a valid diagnostic baseline
+on this hardware, regardless of its nominal unity coefficient sum. Revert to
+libogc's `vf=false` `[0,0,21,22,21,0,0]` state and revalidate the direct
+positive control before investigating texture sharpness further.
