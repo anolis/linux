@@ -131,11 +131,12 @@ MODULE_PARM_DESC(hold_frame, "Publish this frame once, then hold output (0=conti
 
 static char *gx_texture_source = "console";
 module_param_named(texture_source, gx_texture_source, charp, 0444);
-MODULE_PARM_DESC(texture_source, "RGB565 texture source: console or pattern");
+MODULE_PARM_DESC(texture_source, "RGB565 texture source: console, pattern, or probe");
 
 static bool gx_use_reference;
 static bool gx_use_direct;
 static bool gx_use_pattern;
+static bool gx_use_probe;
 
 static inline u16 pe_read(int reg)
 {
@@ -565,11 +566,43 @@ static void gx_fill_reference_rgb565(u16 *dst, u32 width, u32 height)
 	}
 }
 
+static u16 gx_probe_rgb565_pixel(u32 x, u32 y)
+{
+	u32 hash = x * 0x1f123bb5U ^ y * 0x5f356495U;
+
+	hash ^= hash >> 15;
+	hash *= 0x2c1b3c6dU;
+	hash ^= hash >> 12;
+	return (hash & 1) ? 0xffff : 0x0000;
+}
+
+static void gx_fill_probe_rgb565(u16 *dst, u32 width, u32 height)
+{
+	u32 bw = width >> 2;
+	u32 bh = height >> 2;
+	u32 tx, ty, x, y;
+
+	for (ty = 0; ty < bh; ty++) {
+		for (tx = 0; tx < bw; tx++) {
+			u16 *tile = dst + (ty * bw + tx) * 16;
+
+			for (y = 0; y < 4; y++) {
+				for (x = 0; x < 4; x++)
+					tile[y * 4 + x] =
+						gx_probe_rgb565_pixel(tx * 4 + x,
+								      ty * 4 + y);
+			}
+		}
+	}
+}
+
 static void gx_prepare_rgb565_texture(const void *vfb, u16 *dst,
 				      u32 width, u32 height)
 {
 	if (gx_use_pattern)
 		gx_fill_reference_rgb565(dst, width, height);
+	else if (gx_use_probe)
+		gx_fill_probe_rgb565(dst, width, height);
 	else
 		gx_tile_rgb565((const u16 *)vfb, dst, width, height);
 }
@@ -1379,11 +1412,23 @@ static const struct file_operations gx_vfb_snapshot_fops = {
 static void gx_capture_vfb(const void *vfb, u16 width, u16 height)
 {
 	size_t bytes = (size_t)width * height * 2;
+	u16 *dst = gx_vfb_snapshot;
+	u32 x, y;
 
 	if (!gx_vfb_snapshot || bytes > GX_XFB_SNAPSHOT_MAX)
 		return;
 
-	memcpy(gx_vfb_snapshot, vfb, bytes);
+	if (!gx_use_pattern && !gx_use_probe) {
+		memcpy(dst, vfb, bytes);
+	} else {
+		for (y = 0; y < height; y++) {
+			for (x = 0; x < width; x++) {
+				dst[y * width + x] = gx_use_pattern ?
+					gx_reference_rgb565_pixel(x, y, width, height) :
+					gx_probe_rgb565_pixel(x, y);
+			}
+		}
+	}
 	smp_wmb();
 	WRITE_ONCE(gx_vfb_snapshot_size, bytes);
 	if (gx_vfb_debugfs_file)
@@ -2165,10 +2210,14 @@ static int gcn_gx_init(void)
 		return -EINVAL;
 	}
 	if (!strcmp(gx_texture_source, "console"))
-		gx_use_pattern = false;
-	else if (!strcmp(gx_texture_source, "pattern"))
+		gx_use_pattern = gx_use_probe = false;
+	else if (!strcmp(gx_texture_source, "pattern")) {
 		gx_use_pattern = true;
-	else {
+		gx_use_probe = false;
+	} else if (!strcmp(gx_texture_source, "probe")) {
+		gx_use_pattern = false;
+		gx_use_probe = true;
+	} else {
 		pr_err("gcn-gx: invalid texture source '%s'\n",
 		       gx_texture_source);
 		return -EINVAL;
