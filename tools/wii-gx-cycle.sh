@@ -132,24 +132,30 @@ retrieve_debugfs_frame()
 {
 	local remote_file=$1
 	local local_file=$2
-	local chunk=${local_file}.chunk
-	local skip attempt chunk_ok
+	local local_gz=${local_file}.gz
+	local remote_gz=/tmp/gcn-gx-debugfs-frame.gz
+	local remote_sha local_sha attempt
 
-	: > "$local_file"
-	for skip in $(seq 0 10 140); do
-		chunk_ok=0
-		for attempt in 1 2 3 4 5; do
-			remote_exec "dd if=$remote_file bs=4096 skip=$skip count=10 2>/dev/null" > "$chunk" || true
-			if [[ $(stat -c %s "$chunk") == 40960 ]]; then
-				chunk_ok=1
-				break
+	remote_sha=$(remote_exec "sha256sum $remote_file | cut -d' ' -f1") ||
+		return 1
+	remote_exec "gzip -1 -c $remote_file > $remote_gz" || return 1
+
+	for attempt in 1 2 3 4 5; do
+		remote_exec "cat $remote_gz" > "$local_gz" || true
+		if gzip -t "$local_gz" 2>/dev/null; then
+			gzip -dc "$local_gz" > "$local_file"
+			local_sha=$(sha256sum "$local_file" | cut -d' ' -f1)
+			if [[ $(stat -c %s "$local_file") == 614400 &&
+			      $local_sha == "$remote_sha" ]]; then
+				remote_exec "rm -f $remote_gz"
+				return 0
 			fi
-			sleep 1
-		done
-		(( chunk_ok )) || return 1
-		command cat "$chunk" >> "$local_file"
+		fi
+		sleep 1
 	done
-	[[ $(stat -c %s "$local_file") == 614400 ]]
+
+	remote_exec "rm -f $remote_gz"
+	return 1
 }
 
 remote_status "unloading prior accelerator"
@@ -194,7 +200,7 @@ remote_exec "grep '^gcn_gx ' /proc/modules; dmesg | grep -E 'gcn-gx:|gcnfb:' | t
 capture=/tmp/wii-gx-${commit}-${renderer}-${texture_source}-h${hold_frame}.yuyv
 capture_ready=$(remote_exec "i=0; while [ \$i -lt 5 ] && [ \"\$(cat /sys/kernel/debug/gcn_gx/xfb_width 2>/dev/null || echo 0)\" -eq 0 ]; do sleep 1; i=\$((i + 1)); done; cat /sys/kernel/debug/gcn_gx/xfb_width 2>/dev/null || echo 0")
 if [[ $capture_ready == 640 ]]; then
-	printf '  retrieving XFB in verified chunks\n'
+	printf '  retrieving compressed, checksum-verified XFB\n'
 	capture_ok=0
 	if retrieve_debugfs_frame /sys/kernel/debug/gcn_gx/xfb_yuyv "$capture"; then
 		capture_ok=1
@@ -214,7 +220,7 @@ if [[ $capture_ready == 640 ]]; then
 
 	vfb_capture=${capture%.yuyv}.vfb.rgb565be
 	if [[ $(remote_exec "stat -c %s /sys/kernel/debug/gcn_gx/vfb_rgb565be 2>/dev/null || echo 0") == 614400 ]]; then
-		printf '  retrieving VFB in verified chunks\n'
+		printf '  retrieving compressed, checksum-verified VFB\n'
 		if retrieve_debugfs_frame /sys/kernel/debug/gcn_gx/vfb_rgb565be "$vfb_capture"; then
 			printf '  VFB capture: %s (%s)\n' "$vfb_capture" "$(sha256sum "$vfb_capture" | awk '{print $1}')"
 			if command -v ffmpeg >/dev/null 2>&1; then
