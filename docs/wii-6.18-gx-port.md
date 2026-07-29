@@ -742,3 +742,48 @@ RGB565 pixels in each of four rows. Continue with controlled tests of fine
 texture addressing, coordinate scale/rounding, and texture-cache state. Do not
 change the XFB copy path or blame the captured VFB without new contradictory
 evidence.
+
+## 2026-07-29: Coordinate probe proves mixed nearest-neighbor texel selection
+
+- Deployed repository commit: `a36280b90505`
+- Kernel image SHA-256:
+  `87f3732a65c836824ba8bcff450a872d5fc036c990dc244a93262cc6d86e041a`
+- GX module SHA-256:
+  `96294cf70da3d859c7a524135f40650106988f49fbd32ce52e43b78479856451`
+- XFB YUYV SHA-256:
+  `54db4f67bca0342080f34af89df00b501fa92b78ca5db93688acb193ca236bd9`
+- XFB PNG SHA-256:
+  `d54eeb40f267dca55ca8e48b545d3bf9f3c13705765fc9da3aeaf0bd10d9c992`
+- VFB RGB565BE SHA-256:
+  `83c8ffc0b89bc80c0cf888cd8d1c4c7983455d3232b7463d0f0d0cfecc5726bf`
+- VFB PNG SHA-256:
+  `7ad0e6f02392c5849ca28962b42c1af16cccd653a412dee1b387656f9c30a895`
+- Parameters: `renderer=generated texture_source=probe hold_frame=1`
+
+The probe assigns every source coordinate a reproducible black or white value
+from a 32-bit integer hash. Its published linear source snapshot matched the
+same independently generated coordinate field exactly: 153941 white and
+153259 black pixels. This validates the diagnostic before interpreting GX
+output. The FIFO drained, every PE token completed, and the held XFB contained
+only exact Y=16 black and Y=235 white samples. GX is therefore performing
+nearest selection rather than blending or corrupting pixel values.
+
+Integer-shift correlation found one strong mapping: output displaced two
+pixels right and one pixel down agrees with the intended source at 74.8107%.
+The next candidates were 59.8655% at (2,0), 58.9329% at (1,0), and 53.8882%
+at (3,2); unrelated mappings remain at the expected 50% chance rate. A single
+constant displacement cannot explain the output. Approximately half the
+pixels follow the dominant mapping while the remainder select other nearby
+texels. This directly explains the checkerboard breakup of one-pixel console
+strokes.
+
+The first compressed transfer attempt also exposed a tooling limit. Probe data
+compresses to roughly 90 KiB rather than the console's 34-46 KiB, and a single
+SSH read still truncated. Both immutable files were recovered and checksum
+validated using independently retried 16 KiB compressed chunks. Harden the
+cycle script with that fallback before the next hardware test.
+
+Next refine the probe from one random bit to multiple grayscale levels per
+coordinate. That reduces accidental matches from 50% to 12.5% and permits a
+more precise phase-by-phase reconstruction of which source texel each raster
+position selects. Do not change sampling state until that mapping is measured.
