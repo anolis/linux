@@ -787,3 +787,51 @@ Next refine the probe from one random bit to multiple grayscale levels per
 coordinate. That reduces accidental matches from 50% to 12.5% and permits a
 more precise phase-by-phase reconstruction of which source texel each raster
 position selects. Do not change sampling state until that mapping is measured.
+
+## 2026-07-29: Eight-level probe isolates deterministic texel lookup variation
+
+- Deployed repository commit: `dce94a8a34d8`
+- Kernel image SHA-256:
+  `87f3732a65c836824ba8bcff450a872d5fc036c990dc244a93262cc6d86e041a`
+- GX module SHA-256:
+  `c6ed0aaebbe399167ea0e1a6dd3af739b167a370cc843965ca742bf5bd325361`
+- XFB YUYV SHA-256:
+  `57b2f2093480407b42ebfd0299b38e5db7d2286e95406bd8b2d368aea62c6779`
+- XFB PNG SHA-256:
+  `5e2cabb44e6da48f931dd006ec642bc8cf7b760c0611fffbd77a742853f5fef9`
+- VFB RGB565BE SHA-256:
+  `097cf3243cdac9ad91917aa50953ab54e12da1adb9daa1db5c0e628a150218ee`
+- VFB PNG SHA-256:
+  `bb9316286754514190184fe6245bc65ddf2d270bef10cd0970bb1fa23ae2e501`
+- Parameters: `renderer=generated texture_source=probe hold_frame=1`
+
+The refined probe encodes the hash's top three bits as eight ordered RGB565
+gray levels. The source snapshot again matched its independently generated
+formula exactly. The XFB contained exactly eight corresponding luma values:
+16, 46, 79, 109, 142, 172, 205, and 235. No intermediate values occurred, so
+nearest-neighbor selection is independently reconfirmed.
+
+With unrelated agreement now 12.5%, global correlations were 56.2313% for
+offset (2,1), 29.6865% for (2,0), 28.2492% for (1,0), 19.3924% for (3,2),
+and 16.6246% for (4,2). Subtracting chance agreement gives an approximate
+mixture of 50%, 20%, 18%, 8%, and 5%, respectively. Among the 179831 pixels
+that matched exactly one of those five candidates, the measured distribution
+was 49.769%, 19.814%, 18.022%, 7.761%, and 4.634%. The candidate map forms a
+dense deterministic diagonal pattern rather than spatially random corruption.
+
+An independent audit of the earlier checksum-backed direct-pattern XFB found
+every one-pixel grid line exactly at coordinates 0, 32, 64, and so on, with
+quadrant boundaries exactly at x=320 and y=240. The viewport, scissor,
+projection, primitive geometry, and EFB-to-XFB copy are therefore aligned.
+The displacement and variation belong specifically to position-derived
+texture lookup.
+
+The post-transform selector is also correct: libogc encodes
+`GX_DTTIDENTITY - GX_DTTMTX0 = 61`, matching XF 0x1050 value `0x3d`, and
+the driver loads identity rows 61-63. Do not change that state.
+
+One three-bit symbol still collides with five candidates often enough to leave
+41.5% of pixels ambiguous. Add a second independent probe seed while keeping
+all GX state identical, then classify both captures jointly. Six independent
+bits reduce random five-candidate collisions enough to reconstruct nearly the
+entire texel-selection map before testing any coordinate correction.
