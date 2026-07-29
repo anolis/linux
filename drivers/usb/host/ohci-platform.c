@@ -33,6 +33,11 @@
 #include "ohci.h"
 
 #define DRIVER_DESC "OHCI generic platform driver"
+
+#define HLWD_EHCI_CTL		0x0d0400cc
+#define HLWD_EHCI_CTL_OH0INTE	BIT(11)
+#define HLWD_EHCI_CTL_OH1INTE	BIT(12)
+#define HLWD_EHCI_CTL_UNKNOWN	GENMASK(19, 17)
 #define OHCI_MAX_CLKS 4
 #define hcd_to_ohci_priv(h) ((struct ohci_platform_priv *)hcd_to_ohci(h)->priv)
 
@@ -94,6 +99,7 @@ static int ohci_platform_probe(struct platform_device *dev)
 	struct ohci_platform_priv *priv;
 	struct ohci_hcd *ohci;
 	int err, irq, clk = 0;
+	bool is_hlwd = false;
 
 	if (usb_disabled())
 		return -ENODEV;
@@ -105,7 +111,22 @@ static int ohci_platform_probe(struct platform_device *dev)
 	if (!pdata)
 		pdata = &ohci_platform_defaults;
 
-	err = dma_coerce_mask_and_coherent(&dev->dev, DMA_BIT_MASK(32));
+	is_hlwd = IS_ENABLED(CONFIG_USB_OHCI_HCD_HLWD) &&
+		of_device_is_compatible(dev->dev.of_node,
+					"nintendo,hollywood-usb-ohci");
+
+	if (is_hlwd) {
+		/*
+		 * Streaming buffers may live in MEM2, but coherent OHCI schedule
+		 * structures must stay in MEM1: uncached MEM2 rejects the subword
+		 * CPU stores used by the generic OHCI data structures.
+		 */
+		err = dma_set_mask(&dev->dev, DMA_BIT_MASK(32));
+		if (!err)
+			err = dma_set_coherent_mask(&dev->dev, DMA_BIT_MASK(24));
+	} else {
+		err = dma_coerce_mask_and_coherent(&dev->dev, DMA_BIT_MASK(32));
+	}
 	if (err)
 		return err;
 
@@ -122,6 +143,21 @@ static int ohci_platform_probe(struct platform_device *dev)
 	dev->dev.platform_data = pdata;
 	priv = hcd_to_ohci_priv(hcd);
 	ohci = hcd_to_ohci(hcd);
+	if (is_hlwd) {
+		void __iomem *ehci_ctl;
+		u32 value;
+
+		ohci->flags |= OHCI_QUIRK_BE_MMIO | OHCI_QUIRK_WII;
+		ehci_ctl = devm_ioremap(&dev->dev, HLWD_EHCI_CTL, sizeof(u32));
+		if (!ehci_ctl) {
+			err = -ENOMEM;
+			goto err_put_clks;
+		}
+		value = ioread32be(ehci_ctl);
+		value |= HLWD_EHCI_CTL_UNKNOWN | HLWD_EHCI_CTL_OH0INTE |
+			 HLWD_EHCI_CTL_OH1INTE;
+		iowrite32be(value, ehci_ctl);
+	}
 
 	if (pdata == &ohci_platform_defaults && dev->dev.of_node) {
 		if (of_property_read_bool(dev->dev.of_node, "big-endian-regs"))
@@ -318,6 +354,7 @@ static int ohci_platform_restore(struct device *dev)
 
 static const struct of_device_id ohci_platform_ids[] = {
 	{ .compatible = "generic-ohci", },
+	{ .compatible = "nintendo,hollywood-usb-ohci", },
 	{ .compatible = "cavium,octeon-6335-ohci", },
 	{ .compatible = "ti,ohci-omap3", },
 	{ }

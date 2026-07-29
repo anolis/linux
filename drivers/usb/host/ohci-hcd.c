@@ -89,6 +89,10 @@ static void io_watchdog_func(struct timer_list *t);
 #include "ohci-mem.c"
 #include "ohci-q.c"
 
+#ifdef CONFIG_USB_OHCI_HCD_HLWD
+#include "ohci-hlwd.c"
+#endif
+
 
 /*
  * On architectures with edge-triggered interrupts we must never return
@@ -1009,6 +1013,7 @@ static void ohci_stop (struct usb_hcd *hcd)
 
 	ohci_writel (ohci, OHCI_INTR_MIE, &ohci->regs->intrdisable);
 	ohci_usb_reset(ohci);
+	ohci_hlwd_cleanup(ohci);
 	free_irq(hcd->irq, hcd);
 	hcd->irq = 0;
 
@@ -1355,4 +1360,3 @@ static void __exit ohci_hcd_mod_exit(void)
 	clear_bit(USB_OHCI_LOADED, &usb_hcds_loaded);
 }
 module_exit(ohci_hcd_mod_exit);
-

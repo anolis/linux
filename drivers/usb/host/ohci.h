@@ -422,6 +422,7 @@ struct ohci_hcd {
 #define	OHCI_QUIRK_AMD_PREFETCH	0x400			/* pre-fetch for ISO transfer */
 #define	OHCI_QUIRK_GLOBAL_SUSPEND	0x800		/* must suspend ports */
 #define	OHCI_QUIRK_QEMU		0x1000			/* relax timing expectations */
+#define	OHCI_QUIRK_WII		0x2000			/* Hollywood scheduling errata */
 
 	// there are also chip quirks/bugs in init logic
 
@@ -434,10 +435,25 @@ struct ohci_hcd {
 
 	struct dentry		*debug_dir;
 
+#ifdef CONFIG_USB_OHCI_HCD_HLWD
+	struct ed		*hlwd_control_ed;
+	struct td		*hlwd_control_td;
+#endif
+
 	/* platform-specific data -- must come last */
 	unsigned long           priv[] __aligned(sizeof(s64));
 
 };
+
+#ifdef CONFIG_USB_OHCI_HCD_HLWD
+void ohci_hlwd_control_quirk(struct ohci_hcd *ohci);
+void ohci_hlwd_bulk_quirk(struct ohci_hcd *ohci);
+void ohci_hlwd_cleanup(struct ohci_hcd *ohci);
+#else
+static inline void ohci_hlwd_control_quirk(struct ohci_hcd *ohci) { }
+static inline void ohci_hlwd_bulk_quirk(struct ohci_hcd *ohci) { }
+static inline void ohci_hlwd_cleanup(struct ohci_hcd *ohci) { }
+#endif
 
 #ifdef CONFIG_USB_PCI
 static inline int quirk_nec(struct ohci_hcd *ohci)
