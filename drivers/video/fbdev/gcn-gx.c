@@ -569,11 +569,15 @@ static void gx_fill_reference_rgb565(u16 *dst, u32 width, u32 height)
 static u16 gx_probe_rgb565_pixel(u32 x, u32 y)
 {
 	u32 hash = x * 0x1f123bb5U ^ y * 0x5f356495U;
+	u32 level, c5, c6;
 
 	hash ^= hash >> 15;
 	hash *= 0x2c1b3c6dU;
 	hash ^= hash >> 12;
-	return (hash & 1) ? 0xffff : 0x0000;
+	level = hash >> 29;
+	c5 = (level * 31 + 3) / 7;
+	c6 = level * 9;
+	return (c5 << 11) | (c6 << 5) | c5;
 }
 
 static void gx_fill_probe_rgb565(u16 *dst, u32 width, u32 height)
