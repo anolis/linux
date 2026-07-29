@@ -339,18 +339,23 @@ static void gx_load_identity_pos_mtx0(void)
 
 static void gx_load_pos_to_tex_mtx0(u16 width, u16 height)
 {
+	u32 s_bias = f32_div_u16(1, width * 2);
+	u32 t_bias = f32_div_u16(1, height * 2);
+
 	/*
 	 * TEXMTX0 for GX_TG_POS: map object-space quad positions
 	 * (x=0..width, y=0..height) to normalized texture coordinates
-	 * (s=0..1, t=0..1).  This avoids the direct TEX0 vertex attribute path,
+	 * (s=0..1, t=0..1), with a half-texel translation so raster samples
+	 * land at texture centers instead of precision-sensitive boundaries.
+	 * This avoids the direct TEX0 vertex attribute path,
 	 * which hardware testing shows wedges the downstream pipeline when
 	 * texgen output is enabled.
 	 */
 	gx_load_xf_regs_n(0x0078, 8);
 	wg_f32_bits(f32_div_u16(1, width)); wg_f32_bits(F32_ZERO);
-	wg_f32_bits(F32_ZERO);              wg_f32_bits(F32_ZERO);
+	wg_f32_bits(F32_ZERO);              wg_f32_bits(s_bias);
 	wg_f32_bits(F32_ZERO);              wg_f32_bits(f32_div_u16(1, height));
-	wg_f32_bits(F32_ZERO);              wg_f32_bits(F32_ZERO);
+	wg_f32_bits(F32_ZERO);              wg_f32_bits(t_bias);
 
 	/*
 	 * GX_SetTexCoordGen(..., GX_TEXMTX0) records GX_TEXMTX0 (30) in the
