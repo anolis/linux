@@ -1197,10 +1197,10 @@ static void gx_draw_direct_pattern(u16 width, u16 height)
 			   0xff, 0xff, 0xff);
 
 	for (x = 0; x < width; x += 32)
-		gx_draw_color_rect(x, 0, min_t(u16, x + 2, width), height,
+		gx_draw_color_rect(x, 0, min_t(u16, x + 1, width), height,
 				   0x00, 0x00, 0x00);
 	for (y = 0; y < height; y += 32)
-		gx_draw_color_rect(0, y, width, min_t(u16, y + 2, height),
+		gx_draw_color_rect(0, y, width, min_t(u16, y + 1, height),
 				   0x00, 0x00, 0x00);
 }
 
