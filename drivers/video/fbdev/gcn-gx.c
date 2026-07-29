@@ -353,9 +353,9 @@ static void gx_load_pos_to_tex_mtx0(u16 width, u16 height)
 	 */
 	gx_load_xf_regs_n(0x0078, 8);
 	wg_f32_bits(f32_div_u16(1, width)); wg_f32_bits(F32_ZERO);
-	wg_f32_bits(F32_ZERO);              wg_f32_bits(s_bias);
+	wg_f32_bits(F32_ZERO);              wg_f32_bits(F32_NEG(s_bias));
 	wg_f32_bits(F32_ZERO);              wg_f32_bits(f32_div_u16(1, height));
-	wg_f32_bits(F32_ZERO);              wg_f32_bits(t_bias);
+	wg_f32_bits(F32_ZERO);              wg_f32_bits(F32_NEG(t_bias));
 
 	/*
 	 * GX_SetTexCoordGen(..., GX_TEXMTX0) records GX_TEXMTX0 (30) in the
