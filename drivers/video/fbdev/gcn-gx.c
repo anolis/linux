@@ -156,6 +156,10 @@ static char *gx_direct_primitive = "quad";
 module_param_named(direct_primitive, gx_direct_primitive, charp, 0444);
 MODULE_PARM_DESC(direct_primitive, "Direct-TEX0 primitive: quad or triangle");
 
+static char *gx_direct_pattern_name = "grid";
+module_param_named(direct_pattern, gx_direct_pattern_name, charp, 0444);
+MODULE_PARM_DESC(direct_pattern, "Texture-free direct-colour pattern: grid or vstripes");
+
 static bool gx_use_reference;
 static bool gx_use_direct;
 static bool gx_use_pattern;
@@ -163,6 +167,7 @@ static bool gx_use_probe;
 static bool gx_use_texel_space;
 static bool gx_use_direct_texcoord;
 static bool gx_use_direct_triangle;
+static bool gx_use_direct_vstripes;
 
 static inline u16 pe_read(int reg)
 {
@@ -1367,7 +1372,7 @@ static void gx_draw_textured_color_triangle(u16 width, u16 height,
 	wg_f32_bits(s0); wg_f32_bits(t2);
 }
 
-static void gx_draw_direct_pattern(u16 width, u16 height)
+static void gx_draw_direct_grid(u16 width, u16 height)
 {
 	u16 x, y;
 
@@ -1383,6 +1388,24 @@ static void gx_draw_direct_pattern(u16 width, u16 height)
 	for (y = 0; y < height; y += 32)
 		gx_draw_color_rect(0, y, width, min_t(u16, y + 1, height),
 				   0x00, 0x00, 0x00);
+}
+
+static void gx_draw_direct_vertical_stripes(u16 width, u16 height)
+{
+	u16 x;
+
+	/* Monochrome keeps shared YUYV chroma neutral; luma must alternate. */
+	gx_draw_color_quad(width, height, 0xff, 0xff, 0xff);
+	for (x = 0; x < width; x += 2)
+		gx_draw_color_rect(x, 0, x + 1, height, 0x00, 0x00, 0x00);
+}
+
+static void gx_draw_direct_pattern(u16 width, u16 height)
+{
+	if (gx_use_direct_vstripes)
+		gx_draw_direct_vertical_stripes(width, height);
+	else
+		gx_draw_direct_grid(width, height);
 }
 
 /* ------------------------------------------------------------------ */
@@ -2395,6 +2418,15 @@ static int gcn_gx_init(void)
 		pr_err("gcn-gx: direct_primitive=triangle requires texcoord_source=direct\n");
 		return -EINVAL;
 	}
+	if (!strcmp(gx_direct_pattern_name, "grid"))
+		gx_use_direct_vstripes = false;
+	else if (!strcmp(gx_direct_pattern_name, "vstripes"))
+		gx_use_direct_vstripes = true;
+	else {
+		pr_err("gcn-gx: invalid direct_pattern '%s'\n",
+		       gx_direct_pattern_name);
+		return -EINVAL;
+	}
 
 	/*
 	 * Mini leaves PI_FIFO_WPTR=0x00000000.  VI hardware generates wgPipe
@@ -2486,9 +2518,10 @@ static int gcn_gx_init(void)
 	pr_info("gcn-gx: init: tex_buf phys=0x%08x/%08x virt=%p/%p\n",
 		GX_TEX_BUF_MEM1_PHYS, GX_TEX_BUF_ALT_MEM1_PHYS,
 		gx_tex_buf, gx_tex_buf_alt);
-	pr_info("gcn-gx: config renderer=%s texture_source=%s probe_seed=%u texcoord_source=%s direct_primitive=%s texcoord_space=%s texel_bias_eighths=%d hold_frame=%u\n",
+	pr_info("gcn-gx: config renderer=%s texture_source=%s probe_seed=%u texcoord_source=%s direct_primitive=%s direct_pattern=%s texcoord_space=%s texel_bias_eighths=%d hold_frame=%u\n",
 		gx_renderer, gx_texture_source, gx_probe_seed,
-		gx_texcoord_source, gx_direct_primitive, gx_texcoord_space,
+		gx_texcoord_source, gx_direct_primitive, gx_direct_pattern_name,
+		gx_texcoord_space,
 		gx_texel_bias_eighths, gx_hold_frame);
 
 	gx_xfb_snapshot = vzalloc(GX_XFB_SNAPSHOT_MAX);
