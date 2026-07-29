@@ -1162,6 +1162,9 @@ static void gx_setup_rgb565_texture_state(u16 width, u16 height)
 	gx_load_bp_reg(0xC108FFC0);
 	gx_load_bp_reg(0x28000040);
 
+	/* GX_SetTevDirect(GX_TEVSTAGE0): disable inherited indirect offsets. */
+	gx_load_bp_reg(0x10000000);
+
 	/* GX_TG_MTX2x4 through GX_TEXMTX0. */
 	gx_load_xf_reg(0x103f, 0x00000001);
 	if (gx_use_direct_texcoord) {
