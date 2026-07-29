@@ -669,3 +669,38 @@ this bias. Next run `renderer=generated texture_source=console hold_frame=1`
 to verify real console legibility and capture its exact XFB. Do not conflate
 any remaining YUYV chroma behavior at colored edges with the now-fixed broken
 texture sampling.
+
+## 2026-07-29: Real console improves but retains digital glyph breakup
+
+- Deployed repository commit: `d9d6d228c527`
+- Test implementation: `0feb866b463d`
+- Kernel image SHA-256:
+  `87f3732a65c836824ba8bcff450a872d5fc036c990dc244a93262cc6d86e041a`
+- GX module SHA-256:
+  `aa608c9839142b96cbc1ede4ddfa1b9239ac5eceef4671f4939b99075bfd1e51`
+- XFB YUYV SHA-256:
+  `763ed70cd2c4dd5d1243469ec460a7a73fcd1866e54272389a981c5de2876829`
+- Converted PNG SHA-256:
+  `8778f66e88a0f6b59ae41d1fb101c7aaf335224ed03e235f18c02509762ea545`
+- Parameters: `renderer=generated texture_source=console hold_frame=1`
+
+The user observed that the console remained blurry, but that its blur was more
+uniform and represented an overall improvement. The complete digital XFB was
+retrieved in verified chunks and opened in GIMP. It shows recognizable text,
+but white glyph strokes break into a checkerboard-like pattern. The residual
+defect is therefore present in the GPU-produced digital frame, not introduced
+only by HDMI conversion or the camera.
+
+Both generated console submissions completed every FIFO and PE control. For
+each submitted frame, the linear VFB and tiled buffer had identical sums, XOR,
+and nonzero counts; differing CRCs are expected because tiling changes byte
+order. The deterministic texture pattern is now clean under the same negative
+half-texel state, so this residual is specific to real console input or its
+linear-to-tiled path rather than the general copy/output path.
+
+`/dev/fb0` is mmap-only on this rootfs and returned zero bytes to a read test.
+Add a module debugfs snapshot of the exact linear RGB565 VFB used for the held
+frame, retrieve it alongside XFB, and convert it as `rgb565be`. Validate that
+source snapshot before modifying tiling or coordinates again: sharp source
+plus broken XFB implicates conversion/sampling, while a broken source means GX
+is accurately displaying fbcon's input.
