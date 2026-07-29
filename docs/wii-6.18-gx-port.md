@@ -249,3 +249,32 @@ including the broad seven-tap, libogc three-tap, and near-identity variants.
 Retest the direct-color pattern with a one-pixel grid to match feature width;
 without that control, the clear two-pixel direct pattern does not yet prove
 that texture sampling alone causes the degradation.
+
+## 2026-07-29: One-pixel direct grid reproducibly copied purple clear
+
+- Test implementation: `e2833fa2608e`
+- Kernel image SHA-256:
+  `87f3732a65c836824ba8bcff450a872d5fc036c990dc244a93262cc6d86e041a`
+- GX module SHA-256:
+  `cf3616357c7a68ef75f47ba618c927132998e536f5b8b2f113f38ec0f28cdf60`
+- Runtime kernel: `6.18.40-wii+ #12 PREEMPT Tue Jul 28 17:07:44 CDT 2026`
+- Parameters: `renderer=direct texture_source=console hold_frame=1`
+
+This changed only the direct diagnostic's vertical and horizontal grid
+rectangles from two pixels wide to one. The test was run twice with identical
+module bytes. Both runs displayed a uniform purple diagnostic clear rather
+than any quadrants or grid. Each run still received all PE finish IRQs and
+tokens and drained the 2688-byte direct FIFO to `RDoff == WToff`. Same-boot
+module unload restored the CPU console after the second run.
+
+The webcam was unavailable, so this result is based on two matching direct
+user observations and kernel logs, not a saved full-frame capture. Purple is
+a categorical primitive-missing result rather than a sharpness judgment; it
+does not satisfy the intended one-pixel quality comparison. Do not retract
+the earlier clear two-pixel direct result.
+
+The one-pixel change was made after switching the copy filter from libogc's
+three-tap values to the near-identity values, so two differences exist versus
+the clear direct test. Restore the two-pixel grid while retaining the
+near-identity filter. A clear result isolates one-pixel geometry; purple
+instead implicates the filter-state change or test chronology.
