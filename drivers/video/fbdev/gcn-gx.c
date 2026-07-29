@@ -112,6 +112,7 @@ static bool gx_rgb565_hold;
 #define GX_XFB_SNAPSHOT_MAX	(640 * 480 * 2)
 static void *gx_xfb_snapshot;
 static struct dentry *gx_debugfs_dir;
+static struct dentry *gx_xfb_debugfs_file;
 static size_t gx_xfb_snapshot_size;
 static u32 gx_xfb_snapshot_width;
 static u32 gx_xfb_snapshot_height;
@@ -1329,6 +1330,8 @@ static void gx_capture_xfb(u32 xfb_phys, u16 width, u16 height)
 	gx_xfb_snapshot_phys = xfb_phys;
 	smp_wmb();
 	WRITE_ONCE(gx_xfb_snapshot_size, bytes);
+	if (gx_xfb_debugfs_file)
+		i_size_write(d_inode(gx_xfb_debugfs_file), bytes);
 	pr_info("gcn-gx: captured XFB phys=%08x size=%zu %ux%u\n",
 		xfb_phys, bytes, width, height);
 }
@@ -2235,8 +2238,9 @@ static int gcn_gx_init(void)
 		gx_debugfs_dir = NULL;
 		goto err_debugfs;
 	}
-	debugfs_create_file("xfb_yuyv", 0400, gx_debugfs_dir, NULL,
-			    &gx_xfb_snapshot_fops);
+	gx_xfb_debugfs_file = debugfs_create_file("xfb_yuyv", 0400,
+						 gx_debugfs_dir, NULL,
+						 &gx_xfb_snapshot_fops);
 	debugfs_create_u32("xfb_width", 0400, gx_debugfs_dir,
 			   &gx_xfb_snapshot_width);
 	debugfs_create_u32("xfb_height", 0400, gx_debugfs_dir,
@@ -2277,6 +2281,7 @@ static void gcn_gx_exit(void)
 	cancel_work_sync(&gx_rgb565_work.work);
 	debugfs_remove_recursive(gx_debugfs_dir);
 	gx_debugfs_dir = NULL;
+	gx_xfb_debugfs_file = NULL;
 	WRITE_ONCE(gx_xfb_snapshot_size, 0);
 	vfree(gx_xfb_snapshot);
 	gx_xfb_snapshot = NULL;
