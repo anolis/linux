@@ -160,6 +160,10 @@ static char *gx_direct_pattern_name = "grid";
 module_param_named(direct_pattern, gx_direct_pattern_name, charp, 0444);
 MODULE_PARM_DESC(direct_pattern, "Texture-free direct-colour pattern: grid or vstripes");
 
+static char *gx_texcoord_mapping = "affine";
+module_param_named(texcoord_mapping, gx_texcoord_mapping, charp, 0444);
+MODULE_PARM_DESC(texcoord_mapping, "Direct TEX0 mapping: affine or constant");
+
 static bool gx_use_reference;
 static bool gx_use_direct;
 static bool gx_use_pattern;
@@ -168,6 +172,7 @@ static bool gx_use_texel_space;
 static bool gx_use_direct_texcoord;
 static bool gx_use_direct_triangle;
 static bool gx_use_direct_vstripes;
+static bool gx_use_constant_texcoord;
 
 static inline u16 pe_read(int reg)
 {
@@ -295,6 +300,7 @@ static inline void wg_f32_bits(u32 bits)
 
 /* IEEE 754 constants */
 #define F32_ZERO	0x00000000U
+#define F32_HALF	0x3F000000U
 #define F32_ONE		0x3F800000U
 #define F32_NEG_ONE	0xBF800000U
 #define F32_16M		0x4B7FFFFFU	/* 16777215.0 */
@@ -1326,6 +1332,11 @@ static void gx_draw_textured_color_quad(u16 width, u16 height,
 	u32 t0 = gx_direct_texcoord_bits(height, 0);
 	u32 t1 = gx_direct_texcoord_bits(height, 1);
 
+	if (gx_use_constant_texcoord) {
+		s0 = s1 = F32_HALF;
+		t0 = t1 = F32_HALF;
+	}
+
 	gx_wr8(0x80); /* GX_QUADS | vtxfmt 0 */
 	gx_wr16be(4);
 
@@ -1355,6 +1366,11 @@ static void gx_draw_textured_color_triangle(u16 width, u16 height,
 	u32 s2 = gx_direct_texcoord_bits(width, 2);
 	u32 t0 = gx_direct_texcoord_bits(height, 0);
 	u32 t2 = gx_direct_texcoord_bits(height, 2);
+
+	if (gx_use_constant_texcoord) {
+		s0 = s2 = F32_HALF;
+		t0 = t2 = F32_HALF;
+	}
 
 	gx_wr8(0x90); /* GX_TRIANGLES | vtxfmt 0 */
 	gx_wr16be(3);
@@ -2427,6 +2443,19 @@ static int gcn_gx_init(void)
 		       gx_direct_pattern_name);
 		return -EINVAL;
 	}
+	if (!strcmp(gx_texcoord_mapping, "affine"))
+		gx_use_constant_texcoord = false;
+	else if (!strcmp(gx_texcoord_mapping, "constant"))
+		gx_use_constant_texcoord = true;
+	else {
+		pr_err("gcn-gx: invalid texcoord_mapping '%s'\n",
+		       gx_texcoord_mapping);
+		return -EINVAL;
+	}
+	if (gx_use_constant_texcoord && !gx_use_direct_texcoord) {
+		pr_err("gcn-gx: texcoord_mapping=constant requires texcoord_source=direct\n");
+		return -EINVAL;
+	}
 
 	/*
 	 * Mini leaves PI_FIFO_WPTR=0x00000000.  VI hardware generates wgPipe
@@ -2518,10 +2547,10 @@ static int gcn_gx_init(void)
 	pr_info("gcn-gx: init: tex_buf phys=0x%08x/%08x virt=%p/%p\n",
 		GX_TEX_BUF_MEM1_PHYS, GX_TEX_BUF_ALT_MEM1_PHYS,
 		gx_tex_buf, gx_tex_buf_alt);
-	pr_info("gcn-gx: config renderer=%s texture_source=%s probe_seed=%u texcoord_source=%s direct_primitive=%s direct_pattern=%s texcoord_space=%s texel_bias_eighths=%d hold_frame=%u\n",
+	pr_info("gcn-gx: config renderer=%s texture_source=%s probe_seed=%u texcoord_source=%s texcoord_mapping=%s direct_primitive=%s direct_pattern=%s texcoord_space=%s texel_bias_eighths=%d hold_frame=%u\n",
 		gx_renderer, gx_texture_source, gx_probe_seed,
-		gx_texcoord_source, gx_direct_primitive, gx_direct_pattern_name,
-		gx_texcoord_space,
+		gx_texcoord_source, gx_texcoord_mapping, gx_direct_primitive,
+		gx_direct_pattern_name, gx_texcoord_space,
 		gx_texel_bias_eighths, gx_hold_frame);
 
 	gx_xfb_snapshot = vzalloc(GX_XFB_SNAPSHOT_MAX);
