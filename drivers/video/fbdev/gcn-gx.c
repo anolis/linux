@@ -152,12 +152,17 @@ module_param_named(texcoord_source, gx_texcoord_source, charp, 0444);
 MODULE_PARM_DESC(texcoord_source,
 		 "Texture-coordinate source: position or direct TEX0");
 
+static char *gx_direct_primitive = "quad";
+module_param_named(direct_primitive, gx_direct_primitive, charp, 0444);
+MODULE_PARM_DESC(direct_primitive, "Direct-TEX0 primitive: quad or triangle");
+
 static bool gx_use_reference;
 static bool gx_use_direct;
 static bool gx_use_pattern;
 static bool gx_use_probe;
 static bool gx_use_texel_space;
 static bool gx_use_direct_texcoord;
+static bool gx_use_direct_triangle;
 
 static inline u16 pe_read(int reg)
 {
@@ -408,10 +413,9 @@ static void gx_load_pos_to_tex_mtx0(u16 width, u16 height)
 	gx_load_xf_reg(0x1018, 30 << 6);
 }
 
-static u32 gx_direct_texcoord_bits(u16 extent, bool endpoint)
+static u32 gx_direct_texcoord_bits(u16 extent, u16 multiple)
 {
-	int numerator = endpoint ? extent * 8 + gx_texel_bias_eighths :
-		gx_texel_bias_eighths;
+	int numerator = multiple * extent * 8 + gx_texel_bias_eighths;
 	u16 denominator = gx_use_texel_space ? 8 : extent * 8;
 	u32 bits = f32_div_u16(abs(numerator), denominator);
 
@@ -1312,10 +1316,10 @@ static void gx_draw_textured_color_quad(u16 width, u16 height,
 {
 	u32 fw = f32_from_u16(width);
 	u32 fh = f32_from_u16(height);
-	u32 s0 = gx_direct_texcoord_bits(width, false);
-	u32 s1 = gx_direct_texcoord_bits(width, true);
-	u32 t0 = gx_direct_texcoord_bits(height, false);
-	u32 t1 = gx_direct_texcoord_bits(height, true);
+	u32 s0 = gx_direct_texcoord_bits(width, 0);
+	u32 s1 = gx_direct_texcoord_bits(width, 1);
+	u32 t0 = gx_direct_texcoord_bits(height, 0);
+	u32 t1 = gx_direct_texcoord_bits(height, 1);
 
 	gx_wr8(0x80); /* GX_QUADS | vtxfmt 0 */
 	gx_wr16be(4);
@@ -1335,6 +1339,32 @@ static void gx_draw_textured_color_quad(u16 width, u16 height,
 	wg_f32_bits(F32_ZERO); wg_f32_bits(fh);
 	gx_wr8(r); gx_wr8(g); gx_wr8(b); gx_wr8(0xff);
 	wg_f32_bits(s0); wg_f32_bits(t1);
+}
+
+static void gx_draw_textured_color_triangle(u16 width, u16 height,
+					    u8 r, u8 g, u8 b)
+{
+	u32 fw2 = f32_from_u16(width * 2);
+	u32 fh2 = f32_from_u16(height * 2);
+	u32 s0 = gx_direct_texcoord_bits(width, 0);
+	u32 s2 = gx_direct_texcoord_bits(width, 2);
+	u32 t0 = gx_direct_texcoord_bits(height, 0);
+	u32 t2 = gx_direct_texcoord_bits(height, 2);
+
+	gx_wr8(0x90); /* GX_TRIANGLES | vtxfmt 0 */
+	gx_wr16be(3);
+
+	wg_f32_bits(F32_ZERO); wg_f32_bits(F32_ZERO);
+	gx_wr8(r); gx_wr8(g); gx_wr8(b); gx_wr8(0xff);
+	wg_f32_bits(s0); wg_f32_bits(t0);
+
+	wg_f32_bits(fw2); wg_f32_bits(F32_ZERO);
+	gx_wr8(r); gx_wr8(g); gx_wr8(b); gx_wr8(0xff);
+	wg_f32_bits(s2); wg_f32_bits(t0);
+
+	wg_f32_bits(F32_ZERO); wg_f32_bits(fh2);
+	gx_wr8(r); gx_wr8(g); gx_wr8(b); gx_wr8(0xff);
+	wg_f32_bits(s0); wg_f32_bits(t2);
 }
 
 static void gx_draw_direct_pattern(u16 width, u16 height)
@@ -2016,10 +2046,16 @@ static void gx_submit_generated_rgb565(const void *vfb, u32 xfb_phys,
 		gx_load_libogc_init_preamble();
 	gx_setup_rgb565_texture_state(width, height);
 	gx_setup_texture_rgb565(tex_buf, width, height);
-	if (gx_use_direct_texcoord)
-		gx_draw_textured_color_quad(width, height, 0xff, 0x00, 0x00);
-	else
+	if (gx_use_direct_texcoord) {
+		if (gx_use_direct_triangle)
+			gx_draw_textured_color_triangle(width, height,
+						       0xff, 0x00, 0x00);
+		else
+			gx_draw_textured_color_quad(width, height,
+						   0xff, 0x00, 0x00);
+	} else {
 		gx_draw_color_quad(width, height, 0xff, 0x00, 0x00);
+	}
 	gx_load_bp_reg(0x45000002);
 	for (i = 0; i < 32; i++)
 		gx_wr8(0);
@@ -2346,6 +2382,19 @@ static int gcn_gx_init(void)
 		       gx_texcoord_source);
 		return -EINVAL;
 	}
+	if (!strcmp(gx_direct_primitive, "quad"))
+		gx_use_direct_triangle = false;
+	else if (!strcmp(gx_direct_primitive, "triangle"))
+		gx_use_direct_triangle = true;
+	else {
+		pr_err("gcn-gx: invalid direct_primitive '%s'\n",
+		       gx_direct_primitive);
+		return -EINVAL;
+	}
+	if (gx_use_direct_triangle && !gx_use_direct_texcoord) {
+		pr_err("gcn-gx: direct_primitive=triangle requires texcoord_source=direct\n");
+		return -EINVAL;
+	}
 
 	/*
 	 * Mini leaves PI_FIFO_WPTR=0x00000000.  VI hardware generates wgPipe
@@ -2437,9 +2486,9 @@ static int gcn_gx_init(void)
 	pr_info("gcn-gx: init: tex_buf phys=0x%08x/%08x virt=%p/%p\n",
 		GX_TEX_BUF_MEM1_PHYS, GX_TEX_BUF_ALT_MEM1_PHYS,
 		gx_tex_buf, gx_tex_buf_alt);
-	pr_info("gcn-gx: config renderer=%s texture_source=%s probe_seed=%u texcoord_source=%s texcoord_space=%s texel_bias_eighths=%d hold_frame=%u\n",
+	pr_info("gcn-gx: config renderer=%s texture_source=%s probe_seed=%u texcoord_source=%s direct_primitive=%s texcoord_space=%s texel_bias_eighths=%d hold_frame=%u\n",
 		gx_renderer, gx_texture_source, gx_probe_seed,
-		gx_texcoord_source, gx_texcoord_space,
+		gx_texcoord_source, gx_direct_primitive, gx_texcoord_space,
 		gx_texel_bias_eighths, gx_hold_frame);
 
 	gx_xfb_snapshot = vzalloc(GX_XFB_SNAPSHOT_MAX);
