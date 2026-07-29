@@ -976,3 +976,39 @@ regular 2x4 TEX0 texgen must therefore emit XF 0x1040 value `0x280`, not the
 old `0x200`; row 4 selects absent binormal data and explains that path's
 downstream stalls. Retest direct TEX0 only with source row 5, correct direct
 VCD/VAT payload, and the existing negative-half phase.
+
+## 2026-07-29: Correct TEX0 source row drains but exposes INVTXSPEC gap
+
+- Test implementation: `92eb9d4cc18c`
+- Kernel image SHA-256:
+  `87f3732a65c836824ba8bcff450a872d5fc036c990dc244a93262cc6d86e041a`
+- GX module SHA-256:
+  `4a33afd3b1236d6d273335b1eb646e48f8716da9130c2e67afc03e2205908450`
+- XFB YUYV SHA-256:
+  `37c5513c4756831e4dd21f4d03250673066a834942d82239603755133a8c2c02`
+- XFB PNG SHA-256:
+  `e96e42ba974081d3649d2d53c3a1939c206143d3c710e03cf4db5a062e6011f0`
+- VFB RGB565BE SHA-256:
+  `097cf3243cdac9ad91917aa50953ab54e12da1adb9daa1db5c0e628a150218ee`
+- VFB PNG SHA-256:
+  `bb9316286754514190184fe6245bc65ddf2d270bef10cd0970bb1fa23ae2e501`
+- Parameters:
+  `renderer=generated texture_source=probe probe_seed=0 texcoord_source=direct texcoord_space=normalized texel_bias_eighths=-4 hold_frame=1`
+
+Correcting the texgen source to row 5 eliminates the historical direct-TEX0
+stall. The expanded FIFO drains to `RDoff == WToff == 0x0440`, all PE markers
+complete, and the held XFB is captured normally. The user observed purple;
+the exact XFB confirms uniform copy-clear output with Y=62 at all 307200
+pixels. The textured primitive still wrote no visible EFB pixels.
+
+The direct path updated CP VCD and VAT but missed the paired XF vertex-spec
+register. libogc's `__GX_SetVCD()` always calls `__GX_XfVtxSpecs()`, which
+counts direct/indexed attributes and writes XF 0x1008. The established color
+path programs `0x01` for one color and zero texture attributes. Direct TEX0
+requires `0x11`: one color in bits 1:0 and one texture attribute in bits 7:4.
+Leaving `0x01` makes CP parsing and XF input expectations disagree.
+
+Add XF 0x1008=`0x11` only in direct mode, retaining source row 5, the
+validated VCD/VAT values, normalized negative-half endpoints, and every
+downstream state value. Purple remains the negative control; eight probe luma
+levels indicate the direct path has become active.
