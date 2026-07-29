@@ -358,3 +358,25 @@ texture frame in one contiguous submission eliminated green draw failures on
 seven of seven cold boots. The modern reference path currently sends its
 preamble in an earlier, separate init submission. Restore the validated
 contiguous ordering before expanding the preamble further.
+
+## 2026-07-29: Contiguous preamble still green in warm-state test
+
+- Test implementation: `6b554cea98d9`
+- Kernel image SHA-256:
+  `87f3732a65c836824ba8bcff450a872d5fc036c990dc244a93262cc6d86e041a`
+- GX module SHA-256:
+  `aa66ff9a3565680cac3a3c2ebe130dc9c74bfe0fef965c9303ec5739ba28ec72`
+- Runtime kernel: `6.18.40-wii+ #12 PREEMPT Tue Jul 28 17:07:44 CDT 2026`
+- Parameters: `renderer=reference texture_source=pattern hold_frame=1`
+
+The first exact reference frame contained the conservative preamble in the
+same submission and drained the expected padded `WT=RD=0x03e0`. The user still
+observed lime green, matching the captured frame's clear color. All PE, token,
+and same-boot unload controls passed. The webcam remained unavailable.
+
+This run occurred after many module state permutations on one boot and its
+preamble also contained the newly added `GX_InvVtxCache()` opcode, unlike the
+old seven-of-seven cold-boot control. It therefore proves that contiguous
+ordering is not sufficient to recover the current warm GX state, but it is not
+an exact rejection of the historical startup result. Remove the unhelpful
+opcode and retest the exact historical stream after a real full power-off boot.
