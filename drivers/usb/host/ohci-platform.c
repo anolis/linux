@@ -15,6 +15,7 @@
  */
 
 #include <linux/clk.h>
+#include <linux/dma-map-ops.h>
 #include <linux/dma-mapping.h>
 #include <linux/hrtimer.h>
 #include <linux/io.h>
@@ -100,6 +101,7 @@ static int ohci_platform_probe(struct platform_device *dev)
 	struct ohci_hcd *ohci;
 	int err, irq, clk = 0;
 	bool is_hlwd = false;
+	bool has_coherent_pool = false;
 
 	if (usb_disabled())
 		return -ENODEV;
@@ -115,29 +117,35 @@ static int ohci_platform_probe(struct platform_device *dev)
 		of_device_is_compatible(dev->dev.of_node,
 					"nintendo,hollywood-usb-ohci");
 
-	if (is_hlwd) {
-		/*
-		 * Streaming buffers may live in MEM2, but coherent OHCI schedule
-		 * structures must stay in MEM1: uncached MEM2 rejects the subword
-		 * CPU stores used by the generic OHCI data structures.
-		 */
-		err = dma_set_mask(&dev->dev, DMA_BIT_MASK(32));
-		if (!err)
-			err = dma_set_coherent_mask(&dev->dev, DMA_BIT_MASK(24));
-	} else {
-		err = dma_coerce_mask_and_coherent(&dev->dev, DMA_BIT_MASK(32));
-	}
+	err = dma_coerce_mask_and_coherent(&dev->dev, DMA_BIT_MASK(32));
 	if (err)
 		return err;
+	if (is_hlwd) {
+		/* Keep coherent OHCI schedule structures in subword-safe MEM1. */
+		res_mem = platform_get_resource(dev, IORESOURCE_MEM, 1);
+		if (!res_mem)
+			return -ENODEV;
+		err = dma_declare_coherent_memory(&dev->dev, res_mem->start,
+						  res_mem->start,
+						  resource_size(res_mem));
+		if (err)
+			return err;
+		has_coherent_pool = true;
+		dev_info(&dev->dev, "using MEM1 coherent pool %pr\n", res_mem);
+	}
 
 	irq = platform_get_irq(dev, 0);
-	if (irq < 0)
-		return irq;
+	if (irq < 0) {
+		err = irq;
+		goto err_release_coherent;
+	}
 
 	hcd = usb_create_hcd(&ohci_platform_hc_driver, &dev->dev,
 			dev_name(&dev->dev));
-	if (!hcd)
-		return -ENOMEM;
+	if (!hcd) {
+		err = -ENOMEM;
+		goto err_release_coherent;
+	}
 
 	platform_set_drvdata(dev, hcd);
 	dev->dev.platform_data = pdata;
@@ -271,6 +279,10 @@ err_put_clks:
 
 	usb_put_hcd(hcd);
 
+err_release_coherent:
+	if (has_coherent_pool)
+		dma_release_coherent_memory(&dev->dev);
+
 	return err;
 }
 
@@ -291,6 +303,11 @@ static void ohci_platform_remove(struct platform_device *dev)
 
 	for (clk = 0; clk < OHCI_MAX_CLKS && priv->clks[clk]; clk++)
 		clk_put(priv->clks[clk]);
+
+	if (IS_ENABLED(CONFIG_USB_OHCI_HCD_HLWD) &&
+	    of_device_is_compatible(dev->dev.of_node,
+				    "nintendo,hollywood-usb-ohci"))
+		dma_release_coherent_memory(&dev->dev);
 
 	usb_put_hcd(hcd);
 

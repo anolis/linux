@@ -20,6 +20,7 @@
 /*/memreserve/ 0x10000000 0x0004000;*/	/* DSP RAM */
 /memreserve/ 0x01698000 0x00168000;	/* two 640x576 YUYV XFBs */
 /memreserve/ 0x01200000 0x00180000;	/* two GX texture buffers */
+/memreserve/ 0x01400000 0x00100000;	/* two 512K OHCI DMA pools */
 /memreserve/ 0x01684000 0x00010000;	/* GX command FIFO */
 
 / {
@@ -129,7 +130,8 @@
 		usb@d050000 {
 			compatible = "nintendo,hollywood-usb-ohci",
 					"usb-ohci";
-			reg = <0x0d050000 0x100>;
+			reg = <0x0d050000 0x100
+			       0x01400000 0x80000>;
 			interrupts = <5>;
 			interrupt-parent = <&PIC1>;
 		};
@@ -137,7 +139,8 @@
 		usb@d060000 {
 			compatible = "nintendo,hollywood-usb-ohci",
 					"usb-ohci";
-			reg = <0x0d060000 0x100>;
+			reg = <0x0d060000 0x100
+			       0x01480000 0x80000>;
 			interrupts = <6>;
 			interrupt-parent = <&PIC1>;
 		};
