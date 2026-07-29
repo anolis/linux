@@ -220,3 +220,32 @@ texture coordinates, LOD/filter state, TMEM/cache behavior, or sampling. The
 correct large-scale textured-pattern geometry makes a gross coordinate or
 dimension error unlikely. Audit BP 0x80 texMode0 encoding first, especially
 min/mag filter and LOD fields, against libogc and Dolphin.
+
+## 2026-07-29: Near-identity copy filter still blurry
+
+- Test implementation: `be2d3c13943a`
+- Kernel image SHA-256:
+  `87f3732a65c836824ba8bcff450a872d5fc036c990dc244a93262cc6d86e041a`
+- GX module SHA-256:
+  `1b09ced4f16359211329e72285f234fc45cf36349de322ca1bd4feb57cae1451`
+- Runtime kernel before the post-test restart:
+  `6.18.40-wii+ #12 PREEMPT Tue Jul 28 17:07:44 CDT 2026`
+- Parameters: `renderer=generated texture_source=pattern hold_frame=1`
+
+The copy filter used `[0,0,0,63,1,0,0]`, the closest unity-sum hardware
+filter to an identity operation because each coefficient is only six bits.
+The user still observed blurry output. A full-frame webcam capture obtained
+while the frame was held confirmed that the one-pixel grid remained visibly
+degraded. FIFO drains, PE IRQs, token waits, texture digest, and pattern
+geometry all passed as before.
+
+The Wii was manually restarted after the visual result and capture, before a
+same-boot unload recovery control could be trusted. The next boot reached
+Wi-Fi and SSH normally with no GX module loaded. Do not classify the restart
+as either a GX crash or a clean unload result.
+
+This rules out programmable EFB vertical filtering as the primary blur cause,
+including the broad seven-tap, libogc three-tap, and near-identity variants.
+Retest the direct-color pattern with a one-pixel grid to match feature width;
+without that control, the clear two-pixel direct pattern does not yet prove
+that texture sampling alone causes the degradation.
