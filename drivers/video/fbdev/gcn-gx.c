@@ -1149,6 +1149,7 @@ static void gx_setup_rgb565_texture_state(u16 width, u16 height)
 		gx_load_xf_reg(0x1018, 30 << 6);
 
 		/* Append direct TEX0 ST/F32 after the existing POS and CLR0. */
+		gx_load_xf_reg(0x1008, 0x00000011);
 		gx_load_cp_reg(0x60, 0x00000001);
 		gx_load_cp_reg(0x70, 0x41216008);
 	} else {
