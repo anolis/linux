@@ -1379,3 +1379,23 @@ coherent-mask mechanism is ruled out. Replace it with explicit per-controller
 coherent pools reserved in the free MEM1 gap between the GX texture buffers
 and FIFO. Keep the streaming mask at 32 bits. This preserves the intended
 memory safety property while satisfying the direct-DMA layer.
+
+## 2026-07-29: Explicit MEM1 OHCI coherent-pool test
+
+- Test implementation: `8cc37053f84c`
+- Kernel image SHA-256:
+  `3240ec66718963035d177779cb31d849811325a3e025414c207ffdee0e8cebd9`
+
+This test changes only the DMA allocation mechanism rejected by the first
+hardware run. The DT reserves `0x01400000-0x014fffff` in the unused MEM1 gap
+and assigns `0x01400000+0x80000` and `0x01480000+0x80000` to the two OHCI
+nodes. The platform driver retains a 32-bit DMA mask for streaming payloads,
+declares each second resource as the controller's coherent pool, and releases
+it on all probe-failure and remove paths.
+
+The complete kernel/modules build passes. Decompiling the built DT confirms
+the memreserve and both resources, while `ohci-platform.o` references both
+`dma_declare_coherent_memory` and `dma_release_coherent_memory`. Hardware
+positive controls remain two registered OHCI root hubs and a keyboard in
+`/proc/bus/input/devices`; the stronger functional control is key input at the
+tty1 getty. No conclusion is valid until the exact image checksum is deployed.
