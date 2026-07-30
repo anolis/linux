@@ -192,8 +192,8 @@ static void tty_message(const char *message)
 static void usage(const char *program)
 {
 	fprintf(stderr,
-		"Usage: %s [--duration SECONDS] [--fps RATE] [--device PATH]\n"
-		"Defaults: duration=120, fps=30, device=/dev/fb0\n",
+		"Usage: %s [--duration SECONDS] [--fps RATE] [--device PATH] [--single-buffer]\n"
+		"Defaults: duration=120, fps=30, device=/dev/fb0, double-buffered\n",
 		program);
 }
 
@@ -201,15 +201,19 @@ int main(int argc, char **argv)
 {
 	struct fb_fix_screeninfo fixed;
 	struct fb_var_screeninfo variable;
+	struct fb_var_screeninfo original_variable;
+	struct fb_var_screeninfo pan;
 	struct sigaction action = { .sa_handler = request_stop };
 	const char *device = "/dev/fb0";
 	unsigned int duration = 120;
 	unsigned int fps = 30;
+	unsigned int page = 0;
+	int double_buffer = 1;
 	uint64_t start_ns, next_ns, report_ns, end_ns, frame_number = 0;
 	uint64_t interval_ns;
-	size_t frame_bytes;
+	size_t frame_bytes, map_bytes;
 	uint8_t *frame, *row_templates, *fb;
-	int fd, i;
+	int fd, i, mode_changed = 0, status = 0;
 
 	for (i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "--duration") && i + 1 < argc) {
@@ -218,6 +222,8 @@ int main(int argc, char **argv)
 			fps = strtoul(argv[++i], NULL, 10);
 		} else if (!strcmp(argv[i], "--device") && i + 1 < argc) {
 			device = argv[++i];
+		} else if (!strcmp(argv[i], "--single-buffer")) {
+			double_buffer = 0;
 		} else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
 			usage(argv[0]);
 			return 0;
@@ -242,6 +248,28 @@ int main(int argc, char **argv)
 		close(fd);
 		return 1;
 	}
+	original_variable = variable;
+	if (double_buffer) {
+		variable.yoffset = 0;
+		variable.yres_virtual = variable.yres * 2;
+		variable.activate = FB_ACTIVATE_NOW;
+		if (ioctl(fd, FBIOPUT_VSCREENINFO, &variable) < 0) {
+			perror("enable double-buffered virtual framebuffer");
+			close(fd);
+			return 1;
+		}
+		mode_changed = 1;
+		if (ioctl(fd, FBIOGET_FSCREENINFO, &fixed) < 0 ||
+		    ioctl(fd, FBIOGET_VSCREENINFO, &variable) < 0) {
+			perror("read double-buffered framebuffer mode");
+			(void)ioctl(fd, FBIOPUT_VSCREENINFO, &original_variable);
+			close(fd);
+			return 1;
+		}
+		if (variable.yres_virtual < variable.yres * 2)
+			status = 1;
+		page = 1;
+	}
 	if (variable.bits_per_pixel != 16 || variable.red.offset != 11 ||
 	    variable.red.length != 5 || variable.green.offset != 5 ||
 	    variable.green.length != 6 || variable.blue.offset != 0 ||
@@ -254,14 +282,25 @@ int main(int argc, char **argv)
 			fixed.line_length, variable.red.length, variable.red.offset,
 			variable.green.length, variable.green.offset,
 			variable.blue.length, variable.blue.offset);
+		if (mode_changed)
+			(void)ioctl(fd, FBIOPUT_VSCREENINFO, &original_variable);
+		close(fd);
+		return 1;
+	}
+	if (status) {
+		fprintf(stderr, "driver did not enable two complete VFB pages\n");
+		(void)ioctl(fd, FBIOPUT_VSCREENINFO, &original_variable);
 		close(fd);
 		return 1;
 	}
 
 	frame_bytes = (size_t)fixed.line_length * variable.yres;
-	fb = mmap(NULL, frame_bytes, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+	map_bytes = (size_t)fixed.line_length * variable.yres_virtual;
+	fb = mmap(NULL, map_bytes, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
 	if (fb == MAP_FAILED) {
 		perror("mmap framebuffer");
+		if (mode_changed)
+			(void)ioctl(fd, FBIOPUT_VSCREENINFO, &original_variable);
 		close(fd);
 		return 1;
 	}
@@ -271,7 +310,9 @@ int main(int argc, char **argv)
 		fprintf(stderr, "unable to allocate framebuffer staging memory\n");
 		free(frame);
 		free(row_templates);
-		munmap(fb, frame_bytes);
+		munmap(fb, map_bytes);
+		if (mode_changed)
+			(void)ioctl(fd, FBIOPUT_VSCREENINFO, &original_variable);
 		close(fd);
 		return 1;
 	}
@@ -281,8 +322,9 @@ int main(int argc, char **argv)
 	sigaction(SIGTERM, &action, NULL);
 	sigaction(SIGHUP, &action, NULL);
 	build_row_templates(row_templates, fixed.line_length, variable.xres);
-	printf("WII_FB_STRESS_START width=%u height=%u stride=%u fps=%u duration=%u\n",
-	       variable.xres, variable.yres, fixed.line_length, fps, duration);
+	printf("WII_FB_STRESS_START width=%u height=%u stride=%u fps=%u duration=%u buffers=%u\n",
+	       variable.xres, variable.yres, fixed.line_length, fps, duration,
+	       double_buffer ? 2 : 1);
 	fflush(stdout);
 	tty_message("\n=== GX RGB565 STRESS STARTING ===\n");
 
@@ -297,7 +339,17 @@ int main(int argc, char **argv)
 
 		draw_frame(frame, row_templates, fixed.line_length, variable.xres,
 			   variable.yres, frame_number);
-		memcpy(fb, frame, frame_bytes);
+		memcpy(fb + (size_t)page * frame_bytes, frame, frame_bytes);
+		if (double_buffer) {
+			pan = variable;
+			pan.yoffset = page * variable.yres;
+			if (ioctl(fd, FBIOPAN_DISPLAY, &pan) < 0) {
+				perror("FBIOPAN_DISPLAY");
+				status = 1;
+				break;
+			}
+			page ^= 1;
+		}
 		frame_number++;
 
 		next_ns += interval_ns;
@@ -324,11 +376,16 @@ int main(int argc, char **argv)
 	       frame_number * 1000000000.0 / start_ns, stop_requested != 0);
 	fflush(stdout);
 
-	/* Make fbcon repaint a useful recovery screen after direct framebuffer use. */
-	tty_message("\033[2J\033[H=== GX RGB565 STRESS COMPLETE: CONSOLE LIVE ===\n");
 	free(frame);
 	free(row_templates);
-	munmap(fb, frame_bytes);
+	munmap(fb, map_bytes);
+	if (mode_changed &&
+	    ioctl(fd, FBIOPUT_VSCREENINFO, &original_variable) < 0) {
+		perror("restore framebuffer mode");
+		status = 1;
+	}
+	/* Make fbcon repaint a useful recovery screen after direct framebuffer use. */
+	tty_message("\033[2J\033[H=== GX RGB565 STRESS COMPLETE: CONSOLE LIVE ===\n");
 	close(fd);
-	return 0;
+	return status;
 }

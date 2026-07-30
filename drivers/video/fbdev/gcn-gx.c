@@ -99,6 +99,7 @@ static struct gx_rgb565_work gx_rgb565_work;
 static DEFINE_SPINLOCK(gx_rgb565_work_lock);
 static u32 gx_live_texture_frame;
 static u32 gx_rgb565_ready_xfb;
+static const void *gx_rgb565_ready_vfb;
 static bool gx_rgb565_work_busy;
 static bool gx_rgb565_boot_deferred;
 static bool gx_rgb565_publish_xfb;
@@ -2172,6 +2173,7 @@ static void gx_rgb565_workfn(struct work_struct *work)
 	spin_lock_irqsave(&gx_rgb565_work_lock, flags);
 	if (submitted && gx_rgb565_publish_xfb) {
 		gx_rgb565_ready_xfb = xfb_phys;
+		gx_rgb565_ready_vfb = vfb;
 		gx_rgb565_publish_xfb = false;
 	} else {
 		gx_rgb565_work_busy = false;
@@ -2179,7 +2181,7 @@ static void gx_rgb565_workfn(struct work_struct *work)
 	spin_unlock_irqrestore(&gx_rgb565_work_lock, flags);
 }
 
-static bool gcn_gx_take_completed_rgb565(u32 *xfb_phys)
+static bool gcn_gx_take_completed_rgb565(u32 *xfb_phys, const void **vfb)
 {
 	unsigned long flags;
 	bool ready = false;
@@ -2190,7 +2192,9 @@ static bool gcn_gx_take_completed_rgb565(u32 *xfb_phys)
 	spin_lock_irqsave(&gx_rgb565_work_lock, flags);
 	if (gx_rgb565_ready_xfb) {
 		*xfb_phys = gx_rgb565_ready_xfb;
+		*vfb = gx_rgb565_ready_vfb;
 		gx_rgb565_ready_xfb = 0;
+		gx_rgb565_ready_vfb = NULL;
 		gx_rgb565_work_busy = false;
 		ready = true;
 	}
@@ -2428,6 +2432,7 @@ static int gcn_gx_init(void)
 	gx_rgb565_work.vfb = NULL;
 	gx_live_texture_frame = 0;
 	gx_rgb565_ready_xfb = 0;
+	gx_rgb565_ready_vfb = NULL;
 	gx_rgb565_work_busy = false;
 	gx_rgb565_boot_deferred = false;
 	gx_rgb565_publish_xfb = false;

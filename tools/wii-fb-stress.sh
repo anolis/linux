@@ -14,6 +14,7 @@ Options:
   --host HOST          Wii address (default: WII_SSH_HOST or 10.3.10.12)
   --duration SECONDS   workload duration, 0 runs until interrupted (default: 120)
   --fps RATE           requested framebuffer update rate, 1..60 (default: 30)
+  --single-buffer      run the known tearing-prone control without VFB panning
   --no-build           reuse /tmp/wii-fb-stress-$USER
   --allow-dirty        permit a test from an uncommitted source tree
 
@@ -28,6 +29,7 @@ duration=120
 fps=30
 build=1
 allow_dirty=0
+single_buffer=0
 
 while (($#)); do
 	case "$1" in
@@ -45,6 +47,9 @@ while (($#)); do
 		;;
 	--no-build)
 		build=0
+		;;
+	--single-buffer)
+		single_buffer=1
 		;;
 	--allow-dirty)
 		allow_dirty=1
@@ -112,6 +117,12 @@ ssh_options=(
 remote_binary=/tmp/wii-fb-stress
 run_id="$(git rev-parse --short=12 HEAD)-$(date +%s)-$$"
 run_log=${TMPDIR:-/tmp}/wii-fb-stress-${run_id}.log
+target_args="--duration $duration --fps $fps"
+buffer_mode=double
+if ((single_buffer)); then
+	target_args+=" --single-buffer"
+	buffer_mode=single
+fi
 
 remote_exec()
 {
@@ -153,11 +164,14 @@ if [[ ! $dmesg_lines_before =~ ^[0-9]+$ ]]; then
 	exit 1
 fi
 
-remote_exec "printf '<6>wii-fb-stress: begin $run_id duration=$duration fps=$fps sha256=$binary_sha\\n' > /dev/kmsg"
-printf 'Running %ss at %s fps; watch the Wii for smooth moving bars and intact grid lines.\n' \
-	"$duration" "$fps"
+begin_marker="wii-fb-stress: begin $run_id duration=$duration fps=$fps"
+begin_marker+=" buffers=$buffer_mode sha256=$binary_sha"
+remote_exec "printf '<6>%s\\n' '$begin_marker' > /dev/kmsg"
+printf 'Running %ss at %s fps (%s-buffered); ' \
+	"$duration" "$fps" "$buffer_mode"
+printf 'watch the Wii for smooth moving bars and intact grid lines.\n'
 set +e
-remote_exec "$remote_binary --duration $duration --fps $fps" | tee "$run_log"
+remote_exec "$remote_binary $target_args" | tee "$run_log"
 workload_status=${PIPESTATUS[0]}
 set -e
 
@@ -187,6 +201,7 @@ printf '\nRGB565 stress result\n'
 printf '  commit:       %s\n' "$(git rev-parse --short=12 HEAD)"
 printf '  binary sha:   %s\n' "$binary_sha"
 printf '  exit status:  %s\n' "$workload_status"
+printf '  VFB mode:     %s-buffered\n' "$buffer_mode"
 printf '  source rate:  %s fps requested, %s fps achieved\n' \
 	"$fps" "${achieved_fps:-unknown}"
 printf '  PE finish IRQ: %s -> %s (delta %s, %s/s)\n' \

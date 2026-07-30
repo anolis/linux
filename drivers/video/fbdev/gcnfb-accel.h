@@ -13,7 +13,8 @@
 
 struct gcnfb_accel_ops {
 	const char *name;
-	bool (*take_completed_rgb565)(u32 *xfb_phys);
+	/* Return the XFB and immutable VFB source associated with one completion. */
+	bool (*take_completed_rgb565)(u32 *xfb_phys, const void **vfb);
 	void (*blit_rgb565)(const void *vfb, u32 xfb_phys,
 			    u16 width, u16 height);
 	void (*blit_rgb888)(const void *vfb, u32 xfb_phys,

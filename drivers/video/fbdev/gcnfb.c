@@ -511,6 +511,9 @@ struct vi_ctl {
 
 	int in_vtrace;
 	wait_queue_head_t vtrace_waitq;
+	u32 vtrace_seq;
+	u32 source_yoffset;
+	u32 presented_yoffset;
 
 	int visible_page;
 	unsigned long page_address[2];
@@ -1395,7 +1398,30 @@ static void vi_enable_interrupts(struct vi_ctl *ctl, int enable)
 	out_be32(io_base + VI_DI3, 0);
 }
 
-static void vi_transcode_RGB565_to(struct vi_ctl *ctl, uint32_t *dst)
+static const void *vifb_source_page(struct vi_ctl *ctl)
+{
+	struct fb_info *info = ctl->info;
+	u32 yoffset = READ_ONCE(ctl->source_yoffset);
+
+	return (u8 *)vfb_mem + (size_t)yoffset * info->fix.line_length;
+}
+
+static void vifb_source_presented(struct vi_ctl *ctl, const void *source)
+{
+	struct fb_info *info = ctl->info;
+	size_t offset = (const u8 *)source - (const u8 *)vfb_mem;
+	u32 yoffset;
+
+	if (offset % info->fix.line_length)
+		return;
+	yoffset = offset / info->fix.line_length;
+	if (yoffset > info->var.yres_virtual - info->var.yres)
+		return;
+	WRITE_ONCE(ctl->presented_yoffset, yoffset);
+}
+
+static void vi_transcode_RGB565_to(struct vi_ctl *ctl, const void *source,
+				   uint32_t *dst)
 {
 	/* Copy and convert contents of virtual framebuffer,
 	 * uses a secondary buffer to check data which needs to be copied */
@@ -1404,7 +1430,7 @@ static void vi_transcode_RGB565_to(struct vi_ctl *ctl, uint32_t *dst)
 	unsigned int height = info->var.yres;
 	uint32_t *dst_start = dst;
 	/* address of the virtual framebuffer */
-	uint32_t *src = (uint32_t *)info->screen_base;
+	const uint32_t *src = source;
 	
 	/* divided by 4 as two 16bit units (read as a single uint32_t) are mapped to two YUYV pixels */
 	width = info->fix.line_length >> 2;
@@ -1422,9 +1448,9 @@ static void vi_transcode_RGB565_to(struct vi_ctl *ctl, uint32_t *dst)
 		     info->fix.line_length * info->var.yres);
 }
 
-static void vi_transcode_RGB565(struct vi_ctl *ctl)
+static void vi_transcode_RGB565(struct vi_ctl *ctl, const void *source)
 {
-	vi_transcode_RGB565_to(ctl, fb_mem);
+	vi_transcode_RGB565_to(ctl, source, fb_mem);
 }
 
 static void __maybe_unused vi_transcode_RGB565_diff(struct vi_ctl *ctl)
@@ -1527,15 +1553,18 @@ static void vi_transcode_RGB888_diff(struct vi_ctl *ctl)
 static void gcnfb_restore_software(void)
 {
 	struct vi_ctl *ctl = READ_ONCE(gcnfb_active_ctl);
+	const void *source;
 	unsigned long flags;
 
 	if (!ctl)
 		return;
 
 	disable_irq(ctl->irq);
+	source = vifb_source_page(ctl);
 	switch (vfb_format) {
 	case V4L2_PIX_FMT_RGB565:
-		vi_transcode_RGB565(ctl);
+		vi_transcode_RGB565(ctl, source);
+		vifb_source_presented(ctl, source);
 		break;
 	case PIX_FMT_RGB888:
 		vi_transcode_RGB888(ctl);
@@ -1548,6 +1577,7 @@ static void gcnfb_restore_software(void)
 	vi_set_framebuffer(ctl, (u32)ctl->page_address[0]);
 	spin_unlock_irqrestore(&ctl->lock, flags);
 	enable_irq(ctl->irq);
+	wake_up_interruptible(&ctl->vtrace_waitq);
 }
 
 static void vi_dispatch_vtrace(struct vi_ctl *ctl)
@@ -1557,6 +1587,7 @@ static void vi_dispatch_vtrace(struct vi_ctl *ctl)
 	spin_lock_irqsave(&ctl->lock, flags);
 	if (ctl->flip_pending)
 		vi_flip_page(ctl);
+	ctl->vtrace_seq++;
 	spin_unlock_irqrestore(&ctl->lock, flags);
 
 	wake_up_interruptible(&ctl->vtrace_waitq);
@@ -1566,6 +1597,7 @@ static u32 vi_accel_present_rgb565(struct vi_ctl *ctl,
 				   const struct gcnfb_accel_ops *accel)
 {
 	static u32 present_diag_count;
+	const void *completed_vfb;
 	unsigned long flags;
 	u32 completed_xfb;
 	u32 page_bytes;
@@ -1578,7 +1610,7 @@ static u32 vi_accel_present_rgb565(struct vi_ctl *ctl,
 	u8 __iomem *xfb_page;
 	int page;
 
-	if (accel->take_completed_rgb565(&completed_xfb)) {
+	if (accel->take_completed_rgb565(&completed_xfb, &completed_vfb)) {
 		spin_lock_irqsave(&ctl->lock, flags);
 		for (page = 0; page < 2; page++) {
 			if ((u32)ctl->page_address[page] != completed_xfb)
@@ -1592,7 +1624,10 @@ static u32 vi_accel_present_rgb565(struct vi_ctl *ctl,
 			drv_printk(KERN_WARNING,
 				   "GX completed unknown XFB 0x%08x\n",
 				   completed_xfb);
-		else if (present_diag_count < 4) {
+		else {
+			vifb_source_presented(ctl, completed_vfb);
+		}
+		if (page != 2 && present_diag_count < 4) {
 			page_bytes = ctl->info->fix.line_length *
 				ctl->info->var.yres;
 			page_off = completed_xfb - (u32)gx_fb_start;
@@ -1631,6 +1666,7 @@ static irqreturn_t vi_irq_handler(int irq, void *dev)
 	struct fb_info *info = dev_get_drvdata((struct device *)dev);
 	struct vi_ctl *ctl = info->par;
 	const struct gcnfb_accel_ops *accel;
+	const void *source;
 	void __iomem *io_base = ctl->io_base;
 	u32 val;
 
@@ -1652,12 +1688,15 @@ static irqreturn_t vi_irq_handler(int irq, void *dev)
 			/* do nothing */
 			break;
 		case V4L2_PIX_FMT_RGB565:
+			source = vifb_source_page(ctl);
 			if (accel)
-				accel->blit_rgb565(vfb_mem,
+				accel->blit_rgb565(source,
 					vi_accel_present_rgb565(ctl, accel),
 					info->var.xres, info->var.yres);
-			else
-				vi_transcode_RGB565(ctl);
+			else {
+				vi_transcode_RGB565(ctl, source);
+				vifb_source_presented(ctl, source);
+			}
 			break;
 		case PIX_FMT_RGB888:
 			if (accel)
@@ -2072,10 +2111,9 @@ static int vifb_check_var(struct fb_var_screeninfo *var, struct fb_info *info)
 	unsigned int bytes_per_pixel;
 	__u32 xres, yres, xres_virtual, yres_virtual;
 
-	/* no custom viewports, sorry */
-	if ((var->xoffset != 0) ||
-		(var->yoffset != 0)) {
-		drv_printk(KERN_ERR, "Non-zero x/y offsets are not supported\n");
+	/* Horizontal panning is not supported. */
+	if (var->xoffset != 0) {
+		drv_printk(KERN_ERR, "Non-zero xoffset is not supported\n");
 		return -EINVAL;
 	}
 	
@@ -2158,6 +2196,11 @@ static int vifb_check_var(struct fb_var_screeninfo *var, struct fb_info *info)
 		xres_virtual = ALIGN(xres_virtual, VI_HORZ_ALIGN+1);
 	if (!xres_virtual || xres_virtual < xres)
 		xres_virtual = xres;
+	if (var->yoffset > yres_virtual - yres) {
+		drv_printk(KERN_ERR, "yoffset %u outside virtual height %u\n",
+			   var->yoffset, yres_virtual);
+		return -EINVAL;
+	}
 
 	bytes_per_pixel = var->bits_per_pixel / 8;
 	if (xres_virtual * yres_virtual * bytes_per_pixel >
@@ -2266,6 +2309,8 @@ static int vifb_set_par(struct fb_info *info)
 
 	/* set page 1 as the visible page and cancel pending flips */
 	spin_lock_irqsave(&ctl->lock, flags);
+	ctl->source_yoffset = var->yoffset;
+	ctl->presented_yoffset = var->yoffset;
 	ctl->visible_page = 1;
 	vi_flip_page(ctl);
 	spin_unlock_irqrestore(&ctl->lock, flags);
@@ -2323,6 +2368,39 @@ static int vfb_mmap(struct fb_info *info,
 
 }
 
+static int vifb_pan_display(struct fb_var_screeninfo *var,
+			    struct fb_info *info)
+{
+	struct vi_ctl *ctl = info->par;
+	u32 old_yoffset;
+	long ret;
+
+	if (vfb_format != V4L2_PIX_FMT_RGB565 || var->xoffset ||
+	    var->yoffset > info->var.yres_virtual - info->var.yres)
+		return -EINVAL;
+
+	/* The old page is writable only after the requested page is presented. */
+	old_yoffset = READ_ONCE(ctl->source_yoffset);
+	WRITE_ONCE(ctl->source_yoffset, var->yoffset);
+	if (READ_ONCE(ctl->presented_yoffset) == var->yoffset)
+		return 0;
+
+	ret = wait_event_interruptible_timeout(ctl->vtrace_waitq,
+		READ_ONCE(ctl->presented_yoffset) == var->yoffset,
+		msecs_to_jiffies(2000));
+	if (ret > 0)
+		return 0;
+
+	WRITE_ONCE(ctl->source_yoffset, old_yoffset);
+	if (!ret) {
+		drv_printk(KERN_WARNING,
+			   "timed out presenting VFB yoffset %u\n",
+			   var->yoffset);
+		return -ETIMEDOUT;
+	}
+	return ret;
+}
+
 static int vifb_ioctl(struct fb_info *info,
 		       unsigned int cmd, unsigned long arg)
 {
@@ -2334,8 +2412,9 @@ static int vifb_ioctl(struct fb_info *info,
 	switch (cmd) {
 	case FBIO_WAITFORVSYNC:
 	case FBIOWAITRETRACE:
-		wait_event_interruptible(ctl->vtrace_waitq, signal_pending(current));
-		return signal_pending(current) ? -EINTR : 0;
+		page = READ_ONCE(ctl->vtrace_seq);
+		return wait_event_interruptible(ctl->vtrace_waitq,
+			READ_ONCE(ctl->vtrace_seq) != page);
 	case FBIOFLIPHACK:
 		/*
 		 * If arg == NULL then
@@ -2391,6 +2470,7 @@ struct fb_ops vifb_ops = {
 	.fb_ioctl = vifb_ioctl,
 	.fb_set_par = vifb_set_par,
 	.fb_check_var = vifb_check_var,
+	.fb_pan_display = vifb_pan_display,
 	.fb_mmap = vfb_mmap,
 	.fb_fillrect = cfb_fillrect,
 	.fb_copyarea = cfb_copyarea,
@@ -2500,6 +2580,9 @@ static int vifb_do_probe(struct device *dev,
 
 	spin_lock_init(&ctl->lock);
 	init_waitqueue_head(&ctl->vtrace_waitq);
+	ctl->vtrace_seq = 0;
+	ctl->source_yoffset = 0;
+	ctl->presented_yoffset = 0;
 
 	vi_reset_video(ctl);
 	vi_detect_tv_mode(ctl);
