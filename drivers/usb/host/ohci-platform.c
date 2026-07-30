@@ -250,6 +250,9 @@ static int ohci_platform_probe(struct platform_device *dev)
 	err = usb_add_hcd(hcd, irq, IRQF_SHARED);
 	if (err)
 		goto err_power;
+	if (is_hlwd)
+		dev_info(&dev->dev, "Hollywood OHCI active, flags=0x%lx\n",
+			 ohci->flags);
 
 	device_wakeup_enable(hcd->self.controller);
 
