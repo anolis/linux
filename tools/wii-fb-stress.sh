@@ -17,6 +17,7 @@ Options:
   --single-buffer      run the known tearing-prone control without VFB panning
   --rgb888             request a 32-bit XRGB8888 virtual framebuffer
   --no-build           reuse /tmp/wii-fb-stress-$USER
+  --reuse-remote       verify and reuse /tmp/wii-fb-stress on the Wii
   --allow-dirty        permit a test from an uncommitted source tree
 
 Environment:
@@ -32,6 +33,7 @@ build=1
 allow_dirty=0
 single_buffer=0
 rgb888=0
+reuse_remote=0
 
 while (($#)); do
 	case "$1" in
@@ -49,6 +51,9 @@ while (($#)); do
 		;;
 	--no-build)
 		build=0
+		;;
+	--reuse-remote)
+		reuse_remote=1
 		;;
 	--single-buffer)
 		single_buffer=1
@@ -136,6 +141,8 @@ fi
 
 remote_exec()
 {
+	# Commands are intentionally assembled locally for the controlled Wii shell.
+	# shellcheck disable=SC2029
 	ssh "${ssh_options[@]}" "$remote" "$1"
 }
 
@@ -147,15 +154,26 @@ restore_console()
 trap restore_console EXIT
 
 binary_sha=$(sha256sum "$binary" | awk '{print $1}')
-printf 'Deploying RGB565 stress workload to %s\n' "$remote"
-remote_exec "cat > $remote_binary.new" < "$binary"
-remote_sha=$(remote_exec "sha256sum $remote_binary.new | cut -d' ' -f1")
-if [[ $remote_sha != "$binary_sha" ]]; then
-	remote_exec "rm -f $remote_binary.new"
-	echo "Remote checksum mismatch: local=$binary_sha remote=$remote_sha" >&2
-	exit 1
+if (( reuse_remote )); then
+	printf 'Reusing checksum-verified %s stress workload on %s\n' \
+		"$pixel_format" "$remote"
+	remote_sha=$(remote_exec "sha256sum $remote_binary 2>/dev/null | cut -d' ' -f1")
+	if [[ $remote_sha != "$binary_sha" ]]; then
+		printf 'Reusable remote workload mismatch: local=%s remote=%s\n' \
+			"$binary_sha" "${remote_sha:-missing}" >&2
+		exit 1
+	fi
+else
+	printf 'Deploying %s stress workload to %s\n' "$pixel_format" "$remote"
+	remote_exec "cat > $remote_binary.new" < "$binary"
+	remote_sha=$(remote_exec "sha256sum $remote_binary.new | cut -d' ' -f1")
+	if [[ $remote_sha != "$binary_sha" ]]; then
+		remote_exec "rm -f $remote_binary.new"
+		echo "Remote checksum mismatch: local=$binary_sha remote=$remote_sha" >&2
+		exit 1
+	fi
+	remote_exec "chmod 755 $remote_binary.new && mv -f $remote_binary.new $remote_binary"
 fi
-remote_exec "chmod 755 $remote_binary.new && mv -f $remote_binary.new $remote_binary"
 
 module_state=$(remote_exec "awk '\$1 == \"gcn_gx\" { print \$1 }' /proc/modules")
 if [[ $module_state != gcn_gx ]]; then

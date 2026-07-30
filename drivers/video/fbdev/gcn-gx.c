@@ -150,6 +150,11 @@ module_param_named(debug_capture, gx_debug_capture, bool, 0444);
 MODULE_PARM_DESC(debug_capture,
 		 "Allocate debugfs VFB/XFB capture buffers (default: false)");
 
+static bool gx_source_dedup;
+module_param_named(source_dedup, gx_source_dedup, bool, 0444);
+MODULE_PARM_DESC(source_dedup,
+		 "Skip repeat submissions of a consumed VFB generation (default: false)");
+
 static char *gx_texture_source = "console";
 module_param_named(texture_source, gx_texture_source, charp, 0444);
 MODULE_PARM_DESC(texture_source, "RGB565 texture source: console, pattern, or probe");
@@ -2236,7 +2241,7 @@ static void gx_frame_workfn(struct work_struct *work)
 	gcnfb_accel_source_consumed(&gcn_gx_accel_ops, vfb, source_generation);
 
 	spin_lock_irqsave(&gx_frame_work_lock, flags);
-	if (live_submission && submitted) {
+	if (gx_source_dedup && live_submission && submitted) {
 		gx_frame_last_vfb = vfb;
 		gx_frame_last_format = format;
 		gx_frame_last_generation = source_generation;
@@ -2304,7 +2309,8 @@ static void gcn_gx_queue_frame(const void *vfb, u32 xfb_phys,
 		spin_unlock_irqrestore(&gx_frame_work_lock, flags);
 		return;
 	}
-	if (gx_frame_last_valid && gx_frame_last_vfb == vfb &&
+	if (gx_source_dedup && gx_frame_last_valid &&
+	    gx_frame_last_vfb == vfb &&
 	    gx_frame_last_format == format &&
 	    gx_frame_last_generation == source_generation) {
 		spin_unlock_irqrestore(&gx_frame_work_lock, flags);
@@ -2567,10 +2573,10 @@ static int gcn_gx_init(void)
 				   &gx_xfb_snapshot_phys);
 	}
 
-	pr_info("gcn-gx: ready fifo=%08x tex=%08x/%08x irq=%u renderer=%s bias8=%d debug_capture=%u\n",
+	pr_info("gcn-gx: ready fifo=%08x tex=%08x/%08x irq=%u renderer=%s bias8=%d source_dedup=%u debug_capture=%u\n",
 		fifo_phys, GX_TEX_BUF_MEM1_PHYS, GX_TEX_BUF_ALT_MEM1_PHYS,
 		gx_pe_finish_irq, gx_renderer, gx_texel_bias_eighths,
-		gx_debug_capture);
+		gx_source_dedup, gx_debug_capture);
 	gx_accel_ready = true;
 	return 0;
 

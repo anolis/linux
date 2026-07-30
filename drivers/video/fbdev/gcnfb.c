@@ -1428,6 +1428,23 @@ static u32 vifb_frame_generation(struct vi_ctl *ctl)
 	return vifb_next_source_generation(ctl);
 }
 
+static const void *vifb_frame_source(struct vi_ctl *ctl, u32 *generation)
+{
+	struct fb_info *info = ctl->info;
+	unsigned long flags;
+	u32 yoffset;
+
+	spin_lock_irqsave(&ctl->lock, flags);
+	yoffset = ctl->source_yoffset;
+	if (info->var.yres_virtual > info->var.yres)
+		*generation = ctl->source_generation;
+	else
+		*generation = vifb_next_source_generation(ctl);
+	spin_unlock_irqrestore(&ctl->lock, flags);
+
+	return (u8 *)vfb_mem + (size_t)yoffset * info->fix.line_length;
+}
+
 static bool vifb_source_yoffset(struct vi_ctl *ctl, const void *source,
 				u32 *yoffset)
 {
@@ -1443,12 +1460,15 @@ static bool vifb_source_yoffset(struct vi_ctl *ctl, const void *source,
 static void vifb_source_consumed(struct vi_ctl *ctl, const void *source,
 				 u32 generation)
 {
+	unsigned long flags;
 	u32 yoffset;
 
 	if (!vifb_source_yoffset(ctl, source, &yoffset))
 		return;
-	WRITE_ONCE(ctl->consumed_yoffset, yoffset);
-	WRITE_ONCE(ctl->consumed_generation, generation);
+	spin_lock_irqsave(&ctl->lock, flags);
+	ctl->consumed_yoffset = yoffset;
+	ctl->consumed_generation = generation;
+	spin_unlock_irqrestore(&ctl->lock, flags);
 	wake_up_interruptible(&ctl->vtrace_waitq);
 }
 
@@ -1751,8 +1771,7 @@ static irqreturn_t vi_irq_handler(int irq, void *dev)
 			/* do nothing */
 			break;
 		case V4L2_PIX_FMT_RGB565:
-			source = vifb_source_page(ctl);
-			generation = vifb_frame_generation(ctl);
+			source = vifb_frame_source(ctl, &generation);
 			if (accel)
 				accel->blit_rgb565(source,
 					vi_accel_present(ctl, accel),
@@ -1765,8 +1784,7 @@ static irqreturn_t vi_irq_handler(int irq, void *dev)
 			}
 			break;
 		case PIX_FMT_RGB888:
-			source = vifb_source_page(ctl);
-			generation = vifb_frame_generation(ctl);
+			source = vifb_frame_source(ctl, &generation);
 			if (accel) {
 				accel->blit_rgb888(source,
 					vi_accel_present(ctl, accel),
@@ -2382,7 +2400,7 @@ static int vifb_set_par(struct fb_info *info)
 	/* set page 1 as the visible page and cancel pending flips */
 	spin_lock_irqsave(&ctl->lock, flags);
 	ctl->source_yoffset = var->yoffset;
-	ctl->source_generation = vifb_next_source_generation(ctl);
+	vifb_next_source_generation(ctl);
 	ctl->consumed_yoffset = var->yoffset;
 	ctl->consumed_generation = ctl->source_generation;
 	ctl->presented_yoffset = var->yoffset;
@@ -2447,6 +2465,7 @@ static int vifb_pan_display(struct fb_var_screeninfo *var,
 			    struct fb_info *info)
 {
 	struct vi_ctl *ctl = info->par;
+	unsigned long flags;
 	u32 old_yoffset;
 	u32 generation;
 	long ret;
@@ -2457,9 +2476,19 @@ static int vifb_pan_display(struct fb_var_screeninfo *var,
 		return -EINVAL;
 
 	/* The old page is writable once the accelerator has consumed its source. */
-	old_yoffset = READ_ONCE(ctl->source_yoffset);
-	WRITE_ONCE(ctl->source_yoffset, var->yoffset);
+	if (info->var.yres_virtual <= info->var.yres) {
+		spin_lock_irqsave(&ctl->lock, flags);
+		ctl->source_yoffset = var->yoffset;
+		vifb_next_source_generation(ctl);
+		spin_unlock_irqrestore(&ctl->lock, flags);
+		return 0;
+	}
+
+	spin_lock_irqsave(&ctl->lock, flags);
+	old_yoffset = ctl->source_yoffset;
+	ctl->source_yoffset = var->yoffset;
 	generation = vifb_next_source_generation(ctl);
+	spin_unlock_irqrestore(&ctl->lock, flags);
 
 	ret = wait_event_interruptible_timeout(ctl->vtrace_waitq,
 		READ_ONCE(ctl->consumed_generation) == generation,
@@ -2467,8 +2496,12 @@ static int vifb_pan_display(struct fb_var_screeninfo *var,
 	if (ret > 0)
 		return 0;
 
-	WRITE_ONCE(ctl->source_yoffset, old_yoffset);
-	vifb_next_source_generation(ctl);
+	spin_lock_irqsave(&ctl->lock, flags);
+	if (ctl->source_generation == generation) {
+		ctl->source_yoffset = old_yoffset;
+		vifb_next_source_generation(ctl);
+	}
+	spin_unlock_irqrestore(&ctl->lock, flags);
 	if (!ret) {
 		drv_printk(KERN_WARNING,
 			   "timed out consuming VFB yoffset %u\n",
