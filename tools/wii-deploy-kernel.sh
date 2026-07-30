@@ -169,6 +169,9 @@ if [[ -n $ssh_host ]]; then
 		chunks=$(((source_size + chunk_bytes - 1) / chunk_bytes))
 		remote_exec ": > $target"
 		for ((index = 0; index < chunks; index++)); do
+			if ((index % 16 == 0)); then
+				printf '  upload:   %d/%d chunks\r' "$index" "$chunks"
+			fi
 			expected_size=$(((index + 1) * chunk_bytes))
 			if ((expected_size > source_size)); then
 				expected_size=$source_size
@@ -191,6 +194,7 @@ if [[ -n $ssh_host ]]; then
 				return 1
 			fi
 		done
+		printf '  upload:   %d/%d chunks\n' "$chunks" "$chunks"
 	}
 
 	remote_download()
@@ -205,6 +209,9 @@ if [[ -n $ssh_host ]]; then
 		chunks=$(((source_size + chunk_bytes - 1) / chunk_bytes))
 		: > "$target"
 		for ((index = 0; index < chunks; index++)); do
+			if ((index % 16 == 0)); then
+				printf '  download: %d/%d chunks\r' "$index" "$chunks"
+			fi
 			chunk_size=$((source_size - index * chunk_bytes))
 			if ((chunk_size > chunk_bytes)); then
 				chunk_size=$chunk_bytes
@@ -227,6 +234,7 @@ if [[ -n $ssh_host ]]; then
 			fi
 			command cat "$chunk_file" >> "$target"
 		done
+		printf '  download: %d/%d chunks\n' "$chunks" "$chunks"
 		rm -f "$chunk_file"
 	}
 
