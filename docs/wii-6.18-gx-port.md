@@ -2191,3 +2191,25 @@ but treat this as measurement rather than a rate acceptance test. Use the
 client stage totals together with kernel tile/flush timing to account for the
 observed approximately 65 ms source-frame interval before selecting an
 optimization.
+
+Hardware result: the 30-second run completed 596 RGB888 source presentations
+at 19.83 fps. The shorter run was faster than the prior 120-second average but
+remained below target. PE finish interrupts advanced by 1,946 at 64.87 per
+second; output remained correct, and the user confirmed a clear responsive
+console after RGB565 restoration.
+
+Client timing averaged 8,081 us for pattern generation, 17,313 us for the
+complete VFB copy, and 24,964 us blocked in pan, totaling approximately 50.36
+ms per source frame. The kernel reported XRGB8888-to-tiled-RGB565 conversion at
+12,220 us average by frame 768, with a 30,231 us maximum. Texture-cache flush
+averaged only 303 us. The worker converted 768 frames while the client produced
+596 because the VI callback resubmitted the unchanged selected VFB near 61
+times per second.
+
+This identifies redundant conversion as the primary driver-side bottleneck:
+12.22 ms multiplied by approximately 61 worker frames consumes roughly 75
+percent of the single Broadway CPU before userspace generation/copy work. Add
+a source-generation value to the accelerator submission contract. Increment it
+for each synchronized pan and skip a queued source generation already handled;
+retain per-vblank refresh for one-page fbcon, whose contents can change without
+a pan ioctl. Re-profile before optimizing the conversion loop itself.
