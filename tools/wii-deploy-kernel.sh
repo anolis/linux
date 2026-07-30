@@ -159,6 +159,20 @@ if [[ -n $ssh_host ]]; then
 	fi
 	remote_destination=$remote_mount/gumboot/zImage.ngx
 	remote_staged=$remote_destination.new
+	if remote_exec "test -f $remote_destination"; then
+		previous_sha=$(remote_exec "sha256sum $remote_destination | cut -d' ' -f1")
+		previous=$archive/zImage.ngx.$previous_sha
+		if [[ ! -f $previous ]]; then
+			previous_tmp=$previous.new
+			remote_exec "cat $remote_destination" > "$previous_tmp"
+			if [[ $(sha256sum "$previous_tmp" | awk '{print $1}') != "$previous_sha" ]]; then
+				rm -f "$previous_tmp"
+				echo "Remote kernel backup checksum mismatch" >&2
+				exit 1
+			fi
+			mv "$previous_tmp" "$previous"
+		fi
+	fi
 
 	remote_status "receiving zImage $source_sha"
 	remote_exec "cat > $remote_staged" < "$image"
