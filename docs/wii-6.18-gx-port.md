@@ -2166,3 +2166,28 @@ oops, stall, or reboot. Classify this as an RGB888 functionality,
 synchronization, and recovery pass but a performance failure. Instrument
 userspace generation/copy, pan wait, and kernel XRGB8888-to-RGB565 tiling
 separately before changing the conversion path.
+
+## 2026-07-30: Stage RGB888 source-pipeline profiling
+
+- Test implementation: `2fd2b6759`
+- GX module SHA-256:
+  `fec433a79024f15df22f805e30a07cafa6f2e724df97de3c5f37ce3abc78a71b`
+- Static PowerPC workload SHA-256:
+  `6cab962d96314a264afc2f464451d5cd44efc21d6677173ee6a2710ca1cc780b`
+- Kernel: unchanged checksum-verified build `#25`
+
+Instrument the failed 15.25 fps RGB888 path without changing rendering or
+ownership behavior. The workload measures pattern generation, the complete
+1.2 MiB userspace-to-VFB copy, and blocking `FBIOPAN_DISPLAY` separately,
+reporting cumulative average and maximum microseconds. The GX worker measures
+XRGB8888-to-tiled-RGB565 conversion and the following texture-cache flush,
+emitting one aggregate report every 256 RGB888 frames. Timing uses monotonic
+nanoseconds and kernel-safe 64-bit division on 32-bit PowerPC.
+
+Deploy only the checksum-matched module and client over SSH; no card exchange
+or kernel replacement is required. Run RGB888 double-buffered for 30 seconds at
+30 requested fps. Preserve the visual correctness and clean recovery controls,
+but treat this as measurement rather than a rate acceptance test. Use the
+client stage totals together with kernel tile/flush timing to account for the
+observed approximately 65 ms source-frame interval before selecting an
+optimization.
