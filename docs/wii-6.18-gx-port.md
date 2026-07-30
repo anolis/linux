@@ -1840,3 +1840,26 @@ ready/active/registration information in the healthy log, no debugfs capture
 directory, and no recurring `gcn-gx` output after steady state. Then unload and
 require the same clear CPU fallback. A separate opt-in capture control must
 subsequently prove that `debug_capture=1` still exposes working VFB/XFB files.
+
+Hardware result: the exact module loaded with production defaults and reported
+`debug_capture=0`. `/sys/kernel/debug/gcn_gx` was absent, `MemFree` remained
+3,096 kB across the 20-second control, and `VmallocUsed` increased by only 28
+kB rather than allocating the former 1.2 MB of snapshots. Healthy startup
+emitted exactly three bounded lines: driver ready, accelerator registered, and
+generated renderer active. No recurring GX output followed. The user confirmed
+a clear GX console, then confirmed the same clear CPU console after unload.
+
+The same module was loaded separately with `debug_capture=1` and
+`hold_frame=8`. The live-cycle tool retrieved checksum-verified 614,400-byte
+captures from both debugfs files:
+
+- XFB YUYV SHA-256:
+  `6d95c07564420ef68da1f53ec2a0b18e473bf1e29eab86ece34565dae5ecfa98`
+- VFB RGB565BE SHA-256:
+  `bc5ce5bdfd43eaf6b9b05694204a3a44bbc6d6db4c363b4972ab401586e3e47b`
+
+The generated PNG from the hardware XFB capture is a clear, correctly framed
+console. Final unload removed the debugfs directory, restored software
+conversion, returned `VmallocUsed` to 3,936 kB, and left the CPU console as the
+recovery state. This validates both low-overhead production defaults and the
+explicit diagnostic capture path.
