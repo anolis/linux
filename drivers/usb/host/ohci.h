@@ -17,6 +17,17 @@ typedef __u32 __bitwise __hc32;
 typedef __u16 __bitwise __hc16;
 
 /*
+ * Broadway cannot reliably update subword software fields in the uncached
+ * DMA memory used for Hollywood OHCI descriptors. Keep those fields 32-bit
+ * on Wii; the hardware-defined prefix of each descriptor is unchanged.
+ */
+#ifdef CONFIG_USB_OHCI_HCD_HLWD
+#define ohci_fld(type)	u32
+#else
+#define ohci_fld(type)	type
+#endif
+
+/*
  * OHCI Endpoint Descriptor (ED) ... holds TD queue
  * See OHCI spec, section 4.2
  *
@@ -53,21 +64,21 @@ struct ed {
 	/* create --> IDLE --> OPER --> ... --> IDLE --> destroy
 	 * usually:  OPER --> UNLINK --> (IDLE | OPER) --> ...
 	 */
-	u8			state;		/* ED_{IDLE,UNLINK,OPER} */
+	ohci_fld(u8)		state;		/* ED_{IDLE,UNLINK,OPER} */
 #define ED_IDLE		0x00		/* NOT linked to HC */
 #define ED_UNLINK	0x01		/* being unlinked from hc */
 #define ED_OPER		0x02		/* IS linked to hc */
 
-	u8			type;		/* PIPE_{BULK,...} */
+	ohci_fld(u8)		type;		/* PIPE_{BULK,...} */
 
 	/* periodic scheduling params (for intr and iso) */
-	u8			branch;
-	u16			interval;
-	u16			load;
-	u16			last_iso;	/* iso only */
+	ohci_fld(u8)		branch;
+	ohci_fld(u16)		interval;
+	ohci_fld(u16)		load;
+	ohci_fld(u16)		last_iso;	/* iso only */
 
 	/* HC may see EDs on rm_list until next frame (frame_no == tick) */
-	u16			tick;
+	ohci_fld(u16)		tick;
 
 	/* Detect TDs not added to the done queue */
 	unsigned		takeback_wdh_cnt;
@@ -127,7 +138,7 @@ struct td {
 	__hc16		hwPSW [MAXPSW];
 
 	/* rest are purely for the driver's use */
-	__u8		index;
+	ohci_fld(__u8)	index;
 	struct ed	*ed;
 	struct td	*td_hash;	/* dma-->td hashtable */
 	struct td	*next_dl_td;
