@@ -1718,10 +1718,35 @@ The credential-free `tools/rootfs/wii-network` script reproduces the proven
 manual sequence while reading the existing private WPA configuration from the
 rootfs. It requires eight consecutive seconds of WPA `COMPLETED` state before
 starting a bounded one-shot DHCP request and emits status to the visible boot
-console. POSIX shell syntax and ShellCheck both pass.
+console. POSIX shell syntax passes; ShellCheck was not installed on the build
+host, so no ShellCheck result is claimed.
 
 Install it as `/etc/init.d/wii-network`, replace only the failing
 `/etc/rcS.d/S11networking` link with `S11wii-network`, and reboot normally.
 Success requires automatic `wlan0` association, DHCP address acquisition, and
 SSH availability without console commands. Retain normal PID 1/getty, OHCI,
 and CPU-framebuffer controls during this rootfs-only test.
+
+Hardware result: the exact script succeeded when invoked manually and acquired
+the expected WLAN address, validating its WPA stabilization and DHCP sequence.
+It was not invoked during boot. Debian's `/etc/init.d/rc` uses makefile-style
+concurrent startup from `/etc/init.d/.depend.boot`; manually adding the rcS
+symlink did not add `wii-network` to that dependency graph. This is a boot
+registration failure, not a script or wireless failure.
+
+## 2026-07-29: Stage insserv-registered wireless startup
+
+- Rootfs script implementation: `926eaa7f2`
+- Rootfs script SHA-256:
+  `1f7b5ed1264c9338c536938d9eb94bcfa00eca448938c150c4e6ffda22acc416`
+
+The LSB metadata now requires only local filesystems. Requiring remote
+filesystems was directionally wrong because wireless networking must be ready
+before remote mounts are attempted. Install the revised checksum-identified
+script and run `insserv wii-network` to regenerate `.depend.boot`, `.depend.start`,
+and `.depend.stop`. Verify that `wii-network` appears in the boot dependency
+targets before rebooting.
+
+The unattended positive control remains automatic WPA, DHCP, and SSH return at
+`10.3.10.12` without console commands. The unchanged normal-init kernel and
+CPU framebuffer control remain in place.
