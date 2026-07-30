@@ -2322,3 +2322,30 @@ the Wii reachable, the baseline is visually correct, no one-page restoration
 timeout occurs, and the console returns clear and responsive. Do not promote a
 candidate based only on numerical ranking; use full-frame HDMI or direct visual
 confirmation for display correctness.
+
+## 2026-07-30: Partial sweep result and harness stdin fix
+
+- Deployed implementation: `717caa172`
+- Original harness commit: `717caa172`
+- Corrected harness commit: `387d7aba2`
+- Corrected harness SHA-256:
+  `de66059344f31f8f3e00722b49e560f93620f6cedf16d801f92b6bf6485dad6e`
+
+The first automated run executed only the `source_dedup=0` baseline. It
+completed 295 RGB888 frames in 15.000 seconds, or 19.67 fps, with 1,072 PE
+finish interrupts (71.47 per second), no kernel fault or generation timeout,
+and an average kernel conversion time of 11,930 us by worker frame 256. Client
+timings averaged 7,328 us drawing, 16,666 us copying, and 26,725 us waiting in
+pan. This remains below the 27 fps acceptance threshold. Direct visual status
+was not recorded during this candidate, so the run is not a visual validation.
+
+The dedup candidate did not execute. Child SSH processes inherited the matrix
+loop's stdin and consumed its next row. The first ranking also reported an IRQ
+delta of zero because it searched for `delta` while the stress report emits
+`(delta`. Commit `387d7aba2` redirects inherited child stdin from `/dev/null`,
+preserving explicit upload redirections inside the child tools, fixes the
+parenthesized IRQ parser, and requires positive PE interrupt progress for a
+technically valid result. Bash syntax and ShellCheck pass. No kernel, module,
+or workload bytes changed, so no card exchange or target artifact replacement
+is required. Repeat the complete default matrix from the current deployed
+artifacts and record direct visual behavior for both named candidates.
