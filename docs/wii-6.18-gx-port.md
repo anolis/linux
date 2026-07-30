@@ -1863,3 +1863,19 @@ console. Final unload removed the debugfs directory, restored software
 conversion, returned `VmallocUsed` to 3,936 kB, and left the CPU console as the
 recovery state. This validates both low-overhead production defaults and the
 explicit diagnostic capture path.
+
+## 2026-07-30: Stage cleaned GX boot-default deployment
+
+- GX module SHA-256:
+  `128f477e24920471c8d4d2e1c7a250a1c3979201a78eab53f692ca77d68794bd`
+
+Install the already hardware-validated production module at
+`/lib/modules/6.18.40-wii+/gcn-gx.ko`, regenerate module dependencies, and cold
+boot through the existing `gcn_gx` entry in `/etc/modules`. Preserve the prior
+module as a checksum-addressed rootfs backup.
+
+Success requires unattended normal init, Wi-Fi, SSH, OHCI, and automatic GX
+registration at low uptime; `debug_capture` must remain disabled, the healthy
+boot must emit only bounded GX startup lines, and the user must again confirm a
+clear console. This is deployment verification of the tested binary, not a new
+renderer experiment.
