@@ -1553,3 +1553,25 @@ already proves unsupported accesses through the coherent `memset()` alignment
 exception, and the old driver explicitly widened `state`, `type`, `branch`,
 periodic 16-bit fields, `tick`, and `td->index` for this hardware. Port exactly
 that layout change next while retaining the trace as a positive control.
+
+## 2026-07-29: Wii 32-bit OHCI descriptor software fields
+
+- Test implementation: `d76d69d80`
+- Kernel image SHA-256:
+  `ca38449316333276a1907508e3d25880adf91afd94f972699419b798624eeddc`
+
+This test ports the original Wii driver's descriptor-layout workaround to the
+Linux 6.18 structures. Under `CONFIG_USB_OHCI_HCD_HLWD`, software-owned ED
+fields `state`, `type`, `branch`, `interval`, `load`, `last_iso`, and `tick`,
+plus `td->index`, are stored as 32-bit values. Hardware-defined ED and TD words
+retain their exact OHCI layout, and non-Wii builds retain the generic compact
+software fields.
+
+The complete `zImage modules` build passes with `make -j16`; the final image is
+6264216 bytes and remains below the shared pool after wrapper relocation. The
+retained Test 5 trace provides the positive control. Success first requires a
+`hlwd control[...]` line and a submitted ED tail different from its initial
+dummy head. Complete success requires descriptor enumeration, USB HID/input
+registration, increasing OHCI IRQ counts, and actual tty1 key input. The
+coherent-pool `memset()` alignment warning may remain independently and must
+not be conflated with whether subword field corruption is fixed.
