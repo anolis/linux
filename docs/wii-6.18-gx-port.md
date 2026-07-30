@@ -1795,3 +1795,15 @@ the accelerator was unregistered and software conversion had resumed. The user
 again confirmed that the CPU-rendered console remained clear. This passes
 production auto-load and immediate CPU fallback. A runtime reload remains as
 the final module-lifecycle control before diagnostic cleanup.
+
+## 2026-07-29: Stage production GX runtime reload
+
+- GX module SHA-256:
+  `d0f8b8ec5c2d57fb76f58adb77586b3df86e9b4a1b60ca72b31e2dc7fdcd3e4c`
+
+Reload the same module with default parameters after the successful automatic
+load and unload controls, without rebooting or rewriting the module. Success
+requires a second accelerator registration, complete PE-fenced seed/init/live
+startup, continued SSH and OHCI operation, and another visually clear live GX
+console. Unload once more after the visual control so the CPU fallback remains
+the recovery state if reload exposes a lifecycle bug.
