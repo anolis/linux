@@ -1594,6 +1594,27 @@ and HID interrupt-endpoint setup on both Hollywood OHCI hosts.
 The coherent-pool `memset()` alignment warning still appears once during host
 setup, but it no longer prevents operation and is independent cleanup work.
 The diagnostic PID 1 does not normally launch a getty, so a temporary tty1
-getty was started for an explicit physical key-input check. Remove the bounded
-enqueue/control traces after that final check, retaining the shared pool,
-Hollywood scheduling workarounds, and 32-bit descriptor software fields.
+getty was started for an explicit physical key-input check. The user pressed
+keys on the attached Dell keyboard and confirmed that tty1 responded normally.
+This completes the end-to-end keyboard positive control. Remove the bounded
+enqueue/control traces, retaining the shared pool, Hollywood scheduling
+workarounds, and 32-bit descriptor software fields.
+
+## 2026-07-29: Production Hollywood OHCI cleanup
+
+- Test implementation: `966a936a7`
+- Kernel image SHA-256:
+  `c4536d3faff99c5964c3628d18ae9d82536e8f5c4fc537e258e3a7ccf3ac2e00`
+
+The temporary platform, enqueue-stage, descriptor-pointer, and successful
+control-reset traces are removed. Special ED/TD allocation failures remain
+errors, and a failed Hollywood control-list reset poll now produces a warning.
+The validated shared pool, BE-MMIO mode, scheduling workarounds, and 32-bit
+descriptor software fields are unchanged.
+
+The complete `zImage modules` build passes with `make -j16`. This cleanup image
+is 6263544 bytes and remains below the shared pool after wrapper relocation.
+Remote hardware validation requires both USB devices to enumerate again, the
+Dell keyboard to register through `hid-generic`, both OHCI IRQ counters to rise
+above the root-hub-only baseline, and no new Hollywood timeout warning. The
+physical key-input control already passed on the immediately preceding binary.
