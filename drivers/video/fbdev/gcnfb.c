@@ -513,7 +513,9 @@ struct vi_ctl {
 	wait_queue_head_t vtrace_waitq;
 	u32 vtrace_seq;
 	u32 source_yoffset;
+	u32 source_generation;
 	u32 consumed_yoffset;
+	u32 consumed_generation;
 	u32 presented_yoffset;
 
 	int visible_page;
@@ -1407,6 +1409,25 @@ static const void *vifb_source_page(struct vi_ctl *ctl)
 	return (u8 *)vfb_mem + (size_t)yoffset * info->fix.line_length;
 }
 
+static u32 vifb_next_source_generation(struct vi_ctl *ctl)
+{
+	u32 generation = READ_ONCE(ctl->source_generation) + 1;
+
+	if (!generation)
+		generation = 1;
+	WRITE_ONCE(ctl->source_generation, generation);
+	return generation;
+}
+
+static u32 vifb_frame_generation(struct vi_ctl *ctl)
+{
+	struct fb_info *info = ctl->info;
+
+	if (info->var.yres_virtual > info->var.yres)
+		return READ_ONCE(ctl->source_generation);
+	return vifb_next_source_generation(ctl);
+}
+
 static bool vifb_source_yoffset(struct vi_ctl *ctl, const void *source,
 				u32 *yoffset)
 {
@@ -1419,13 +1440,15 @@ static bool vifb_source_yoffset(struct vi_ctl *ctl, const void *source,
 	return *yoffset <= info->var.yres_virtual - info->var.yres;
 }
 
-static void vifb_source_consumed(struct vi_ctl *ctl, const void *source)
+static void vifb_source_consumed(struct vi_ctl *ctl, const void *source,
+				 u32 generation)
 {
 	u32 yoffset;
 
 	if (!vifb_source_yoffset(ctl, source, &yoffset))
 		return;
 	WRITE_ONCE(ctl->consumed_yoffset, yoffset);
+	WRITE_ONCE(ctl->consumed_generation, generation);
 	wake_up_interruptible(&ctl->vtrace_waitq);
 }
 
@@ -1439,7 +1462,7 @@ static void vifb_source_presented(struct vi_ctl *ctl, const void *source)
 }
 
 void gcnfb_accel_source_consumed(const struct gcnfb_accel_ops *ops,
-				 const void *source)
+				 const void *source, u32 source_generation)
 {
 	struct vi_ctl *ctl;
 
@@ -1448,7 +1471,7 @@ void gcnfb_accel_source_consumed(const struct gcnfb_accel_ops *ops,
 		goto out;
 	ctl = READ_ONCE(gcnfb_active_ctl);
 	if (ctl)
-		vifb_source_consumed(ctl, source);
+		vifb_source_consumed(ctl, source, source_generation);
 out:
 	rcu_read_unlock();
 }
@@ -1589,21 +1612,23 @@ static void gcnfb_restore_software(void)
 	struct vi_ctl *ctl = READ_ONCE(gcnfb_active_ctl);
 	const void *source;
 	unsigned long flags;
+	u32 generation;
 
 	if (!ctl)
 		return;
 
 	disable_irq(ctl->irq);
 	source = vifb_source_page(ctl);
+	generation = vifb_frame_generation(ctl);
 	switch (vfb_format) {
 	case V4L2_PIX_FMT_RGB565:
 		vi_transcode_RGB565(ctl, source);
-		vifb_source_consumed(ctl, source);
+		vifb_source_consumed(ctl, source, generation);
 		vifb_source_presented(ctl, source);
 		break;
 	case PIX_FMT_RGB888:
 		vi_transcode_RGB888(ctl, source);
-		vifb_source_consumed(ctl, source);
+		vifb_source_consumed(ctl, source, generation);
 		vifb_source_presented(ctl, source);
 		break;
 	}
@@ -1705,6 +1730,7 @@ static irqreturn_t vi_irq_handler(int irq, void *dev)
 	const struct gcnfb_accel_ops *accel;
 	const void *source;
 	void __iomem *io_base = ctl->io_base;
+	u32 generation;
 	u32 val;
 
 	/* DI0 and DI1 are used to account for the vertical retrace */
@@ -1726,27 +1752,31 @@ static irqreturn_t vi_irq_handler(int irq, void *dev)
 			break;
 		case V4L2_PIX_FMT_RGB565:
 			source = vifb_source_page(ctl);
+			generation = vifb_frame_generation(ctl);
 			if (accel)
 				accel->blit_rgb565(source,
 					vi_accel_present(ctl, accel),
-					info->var.xres, info->var.yres);
+					info->var.xres, info->var.yres,
+					generation);
 			else {
 				vi_transcode_RGB565(ctl, source);
-				vifb_source_consumed(ctl, source);
+				vifb_source_consumed(ctl, source, generation);
 				vifb_source_presented(ctl, source);
 			}
 			break;
 		case PIX_FMT_RGB888:
 			source = vifb_source_page(ctl);
+			generation = vifb_frame_generation(ctl);
 			if (accel) {
 				accel->blit_rgb888(source,
 					vi_accel_present(ctl, accel),
-					info->var.xres, info->var.yres);
+					info->var.xres, info->var.yres,
+					generation);
 			} else if (vfb_diff) {
 				vi_transcode_RGB888_diff(ctl);
 			} else {
 				vi_transcode_RGB888(ctl, source);
-				vifb_source_consumed(ctl, source);
+				vifb_source_consumed(ctl, source, generation);
 				vifb_source_presented(ctl, source);
 			}
 			break;
@@ -2352,7 +2382,9 @@ static int vifb_set_par(struct fb_info *info)
 	/* set page 1 as the visible page and cancel pending flips */
 	spin_lock_irqsave(&ctl->lock, flags);
 	ctl->source_yoffset = var->yoffset;
+	ctl->source_generation = vifb_next_source_generation(ctl);
 	ctl->consumed_yoffset = var->yoffset;
+	ctl->consumed_generation = ctl->source_generation;
 	ctl->presented_yoffset = var->yoffset;
 	ctl->visible_page = 1;
 	vi_flip_page(ctl);
@@ -2416,6 +2448,7 @@ static int vifb_pan_display(struct fb_var_screeninfo *var,
 {
 	struct vi_ctl *ctl = info->par;
 	u32 old_yoffset;
+	u32 generation;
 	long ret;
 
 	if ((vfb_format != V4L2_PIX_FMT_RGB565 &&
@@ -2426,16 +2459,16 @@ static int vifb_pan_display(struct fb_var_screeninfo *var,
 	/* The old page is writable once the accelerator has consumed its source. */
 	old_yoffset = READ_ONCE(ctl->source_yoffset);
 	WRITE_ONCE(ctl->source_yoffset, var->yoffset);
-	if (READ_ONCE(ctl->consumed_yoffset) == var->yoffset)
-		return 0;
+	generation = vifb_next_source_generation(ctl);
 
 	ret = wait_event_interruptible_timeout(ctl->vtrace_waitq,
-		READ_ONCE(ctl->consumed_yoffset) == var->yoffset,
+		READ_ONCE(ctl->consumed_generation) == generation,
 		msecs_to_jiffies(2000));
 	if (ret > 0)
 		return 0;
 
 	WRITE_ONCE(ctl->source_yoffset, old_yoffset);
+	vifb_next_source_generation(ctl);
 	if (!ret) {
 		drv_printk(KERN_WARNING,
 			   "timed out consuming VFB yoffset %u\n",
@@ -2626,7 +2659,9 @@ static int vifb_do_probe(struct device *dev,
 	init_waitqueue_head(&ctl->vtrace_waitq);
 	ctl->vtrace_seq = 0;
 	ctl->source_yoffset = 0;
+	ctl->source_generation = 1;
 	ctl->consumed_yoffset = 0;
+	ctl->consumed_generation = 1;
 	ctl->presented_yoffset = 0;
 
 	vi_reset_video(ctl);
