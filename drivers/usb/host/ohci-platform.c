@@ -15,7 +15,6 @@
  */
 
 #include <linux/clk.h>
-#include <linux/dma-map-ops.h>
 #include <linux/dma-mapping.h>
 #include <linux/hrtimer.h>
 #include <linux/io.h>
@@ -23,6 +22,7 @@
 #include <linux/module.h>
 #include <linux/err.h>
 #include <linux/of.h>
+#include <linux/of_reserved_mem.h>
 #include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
 #include <linux/reset.h>
@@ -121,17 +121,10 @@ static int ohci_platform_probe(struct platform_device *dev)
 	if (err)
 		return err;
 	if (is_hlwd) {
-		/* Keep coherent OHCI schedule structures in subword-safe MEM1. */
-		res_mem = platform_get_resource(dev, IORESOURCE_MEM, 1);
-		if (!res_mem)
-			return -ENODEV;
-		err = dma_declare_coherent_memory(&dev->dev, res_mem->start,
-						  res_mem->start,
-						  resource_size(res_mem));
+		err = of_reserved_mem_device_init(&dev->dev);
 		if (err)
 			return err;
 		has_coherent_pool = true;
-		dev_info(&dev->dev, "using MEM1 coherent pool %pr\n", res_mem);
 	}
 
 	irq = platform_get_irq(dev, 0);
@@ -281,7 +274,7 @@ err_put_clks:
 
 err_release_coherent:
 	if (has_coherent_pool)
-		dma_release_coherent_memory(&dev->dev);
+		of_reserved_mem_device_release(&dev->dev);
 
 	return err;
 }
@@ -307,7 +300,7 @@ static void ohci_platform_remove(struct platform_device *dev)
 	if (IS_ENABLED(CONFIG_USB_OHCI_HCD_HLWD) &&
 	    of_device_is_compatible(dev->dev.of_node,
 				    "nintendo,hollywood-usb-ohci"))
-		dma_release_coherent_memory(&dev->dev);
+		of_reserved_mem_device_release(&dev->dev);
 
 	usb_put_hcd(hcd);
 
