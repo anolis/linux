@@ -2105,3 +2105,42 @@ This validates the source-consumed handoff as both correct and fast enough for
 RGB565 presentation. Keep the separate consumed and presented markers and the
 double-VFB stress test as regression coverage. The synchronized RGB565 phase
 is complete; proceed to RGB888 functionality and performance validation.
+
+## 2026-07-30: Stage synchronized RGB888 functionality and load test
+
+- Test implementation: `9ebee9c99`
+- Kernel zImage SHA-256:
+  `830cb8921a7a7ab5dc6d792c261588f5b4da90017d0123eb951a15f0ddb1ae96`
+- GX module SHA-256:
+  `81c0d4db8ee79f6a478603935e0676ea4570e5d6c2ee20bd433dec7fa3a013ae`
+- Static PowerPC workload SHA-256:
+  `ae375e8e255f6ef8b3b4a54c87a00a270300a9f254f9c8892da03e119a0844cb`
+
+The previous RGB888 accelerator callback tiled a complete frame and submitted
+GX commands directly from the VI hard IRQ, always read the first VFB page,
+always targeted the first XFB, and exposed no ownership or completion event.
+Replace that path with the validated process-context frame worker. Each work
+item carries its RGB565 or XRGB8888 source format. RGB888 pages are converted
+to tiled RGB565 in alternating private MEM1 texture buffers, after which the
+same consumed notification, PE completion, alternate-XFB presentation, and
+double-VFB pan protocol used by RGB565 applies unchanged. Software fallback
+also converts the selected RGB888 page and advances both ownership markers.
+
+The workload's `--rgb888` mode requests two 640x480 32-bit XRGB pages, checks
+the returned 8:8:8 channel layout, renders native 8-bit primary/secondary color
+bars plus the independent motion and static controls, and restores the
+original RGB565 console mode from every normal/error exit. The kernel image,
+module, and static client built cleanly using `-j16`; diff-only checkpatch
+reported zero errors and zero warnings, and the new built-in consumed callback
+is present in `Module.symvers`.
+
+Deploy all three checksum-matched artifacts and cold boot. Run the 120-second
+double-buffered workload at 30 requested fps with `--rgb888`. Success requires
+at least 27 source frames per second, approximately 60 PE finish interrupts per
+second, correctly ordered white/yellow/cyan/green/magenta/red/blue/gray bars,
+two smooth tear-free moving markers, intact static geometry, no consume timeout
+or kernel fault, continued module/Wi-Fi/SSH residency, restoration to the
+640x480 RGB565 console mode, and a clear responsive console. Because this path
+currently converts XRGB8888 to RGB565 before texturing, the test validates
+32-bit framebuffer API compatibility and synchronization, not preservation of
+all eight source bits per color channel.
