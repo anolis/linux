@@ -27,7 +27,7 @@ Options:
   --allow-dirty           permit loading from an uncommitted source tree
 
 Environment:
-  JOBS                    parallel build jobs (default: nproc)
+  JOBS                    parallel build jobs (default: 16)
   WII_SSH_KEY             SSH private key (default: $HOME/.ssh/id_rsa)
 EOF
 }
@@ -177,7 +177,7 @@ module=$repo/drivers/video/fbdev/gcn-gx.ko
 commit=$(git rev-parse --short=12 HEAD)
 if (( build && ! unload_only )); then
 	CCACHE_DISABLE=1 ARCH=powerpc CROSS_COMPILE=powerpc-linux-gnu- \
-		make -j"${JOBS:-$(nproc)}" drivers/video/fbdev/gcn-gx.ko
+		make -j"${JOBS:-16}" drivers/video/fbdev/gcn-gx.ko
 fi
 
 ssh_key=${WII_SSH_KEY:-$HOME/.ssh/id_rsa}
