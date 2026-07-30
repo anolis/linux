@@ -170,7 +170,7 @@ restore_baseline()
 	fi
 	tools/wii-gx-cycle.sh "${common_cycle[@]}" --reuse-remote \
 		--renderer generated --source-dedup 0 --texel-bias-eighths -2 \
-		> "$results/restore.log" 2>&1 || true
+		< /dev/null > "$results/restore.log" 2>&1 || true
 }
 trap restore_baseline EXIT
 trap 'exit 130' INT
@@ -194,7 +194,7 @@ while IFS='|' read -r name argument_text; do
 	printf '\n=== GX sweep candidate: %s ===\n' "$name"
 	set +e
 	tools/wii-gx-cycle.sh "${cycle_args[@]}" "${candidate_args[@]}" \
-		> "$candidate/cycle.log" 2>&1
+		< /dev/null > "$candidate/cycle.log" 2>&1
 	cycle_status=$?
 	set -e
 	if ((cycle_status)); then
@@ -223,7 +223,7 @@ while IFS='|' read -r name argument_text; do
 	fi
 	set +e
 	tools/wii-fb-stress.sh "${stress_args[@]}" \
-		> "$candidate/stress.log" 2>&1
+		< /dev/null > "$candidate/stress.log" 2>&1
 	stress_status=$?
 	set -e
 	if grep -q '^Running ' "$candidate/stress.log"; then
@@ -243,7 +243,9 @@ while IFS='|' read -r name argument_text; do
 	irq_delta=$(awk '
 		/PE finish IRQ:/ {
 			for (i = 1; i <= NF; i++)
-				if ($i == "delta") { gsub(/[(),]/, "", $(i + 1)); irq = $(i + 1) }
+				if ($i == "(delta") {
+					gsub(/[(),]/, "", $(i + 1)); irq = $(i + 1)
+				}
 		}
 		END { print irq + 0 }
 	' "$candidate/stress.log")
@@ -252,7 +254,7 @@ while IFS='|' read -r name argument_text; do
 	technical=pass
 	if ! grep -q 'WII_FB_STRESS_DONE' "$candidate/stress.log" ||
 	   ! grep -q 'exit status:  0' "$candidate/stress.log" ||
-	   ((faults > 0)); then
+	   ((irq_delta <= 0 || faults > 0)); then
 		technical=fail
 	fi
 	printf '%s\t%s\t%d\t%d\t%s\t%s\t%s\t%s\n' \
