@@ -1689,3 +1689,39 @@ built and checksum-staged but not yet deployed. Hardware success requires PID
 1 to be `/sbin/init`, runlevel 2 with a tty1 getty, Wi-Fi and SSH to return, both
 Hollywood OHCI devices to enumerate, and no resident `gcn_gx` module. Do not
 enable GX auto-loading until those controls pass.
+
+Hardware result: the exact image booted successfully with `/sbin/init` as PID
+1, runlevel 2, active gettys, and the root filesystem correctly processed from
+the read-only kernel mount. Both the BCM2045A and Dell keyboard enumerated, the
+keyboard bound through `hid-generic`, and `gcn_gx` remained unloaded under the
+intended CPU framebuffer control.
+
+Automatic networking exposed two independent rootfs issues. A stale persistent
+rule assigned another Wii MAC to `wlan0` and renamed this Wii to `wlan1`; the
+rule was backed up and corrected for MAC `00:1e:35:98:ea:c9`. On the following
+boot, legacy ifupdown associated `wlan0` at approximately 18 seconds but its WPA
+helper deliberately deauthenticated at approximately 27 seconds. The spawned
+`dhclient` then retried indefinitely against the disconnected interface. The
+known manual sequence immediately associated, acquired `10.3.10.12`, and
+restored SSH. This validates normal userspace boot and isolates the remaining
+failure to legacy network orchestration.
+
+## 2026-07-29: Stage stable SysV wireless startup
+
+- Rootfs script implementation: `f12a5b2c0`
+- Rootfs script SHA-256:
+  `456c6ca0ed9e3967e16cc830c3540e3b0d96fb8f488d31d2428fc295738b712e`
+- Unchanged kernel image SHA-256:
+  `adcf9687fe91a6ce481f795d47d77c300ca38c1e83401a6c492ed158b5b652df`
+
+The credential-free `tools/rootfs/wii-network` script reproduces the proven
+manual sequence while reading the existing private WPA configuration from the
+rootfs. It requires eight consecutive seconds of WPA `COMPLETED` state before
+starting a bounded one-shot DHCP request and emits status to the visible boot
+console. POSIX shell syntax and ShellCheck both pass.
+
+Install it as `/etc/init.d/wii-network`, replace only the failing
+`/etc/rcS.d/S11networking` link with `S11wii-network`, and reboot normally.
+Success requires automatic `wlan0` association, DHCP address acquisition, and
+SSH availability without console commands. Retain normal PID 1/getty, OHCI,
+and CPU-framebuffer controls during this rootfs-only test.
