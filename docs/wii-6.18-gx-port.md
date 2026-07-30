@@ -1891,3 +1891,34 @@ and generated renderer active. No GX timeout, slow, stall, failure, warning,
 oops, or recurring progress message appeared. The user confirmed a clear
 console. This passes final production boot deployment and leaves the Wii
 running the cleaned automatically loaded accelerator.
+
+## 2026-07-30: Stage sustained changing-frame RGB565 workload
+
+- Test implementation: `80dce19d9828`
+- Static PowerPC workload SHA-256:
+  `38c81219ee84cbffadd0e66aaa53e628d101ba4cb12b4b4f13db7eb4839859b2`
+- Workload size: 784,652 bytes
+- Planned duration and input rate: 120 seconds at 30 frames per second
+
+Add a reusable target workload and host runner for the first sustained-motion
+test of the production GX path. The target validates the live framebuffer as
+RGB565, generates a deterministic full-screen colour-bar and alignment grid,
+and moves independent vertical, horizontal, diagonal, and binary frame-count
+markers. It regenerates one 614,400-byte staging frame and copies that complete
+frame into `/dev/fb0` on every update. This bounds target memory use while
+continuously changing the source image consumed by the GX worker.
+
+The host runner cross-builds a static big-endian PowerPC executable, verifies
+its checksum after SSH deployment, requires `gcn_gx` to be loaded, brackets the
+run with unique kernel-log markers, and samples the `gcn-gx-pe-finish`
+interrupt. It leaves the module and boot state unchanged and asks fbcon to
+repaint a recovery status screen when the workload exits.
+
+The pattern itself is the visual positive control: the red/white vertical bar,
+cyan horizontal bar, white diagonal, and binary frame blocks must visibly move
+while the static grid and colour boundaries remain spatially intact. Success
+requires the target process to complete near 30 fps, the PE finish IRQ to
+advance throughout the run, SSH and `gcn_gx` to remain live, no new GX
+timeout/stall/warning/oops messages, and the clear console to return afterward.
+Any tearing, stale regions, blur, duplicated rows or columns, solid diagnostic
+fill, reboot, or lost SSH is a failure even if the process exits successfully.
