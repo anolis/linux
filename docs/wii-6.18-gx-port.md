@@ -1625,3 +1625,20 @@ keyboard registered through `hid-generic` with its full input handlers, and
 OHCI IRQ counts reached 64 and 46. No retired `hlwd enqueue`/`hlwd control`
 trace and no Hollywood timeout warning appeared. Combined with the physical
 key-input control on build `#19`, this closes the Hollywood OHCI keyboard port.
+
+## 2026-07-29: Automated deployment reboot validation
+
+- Deployment helper: `9b0bafd82`
+- Re-deployed kernel image SHA-256:
+  `c4536d3faff99c5964c3628d18ae9d82536e8f5c4fc537e258e3a7ccf3ac2e00`
+
+The deployment helper now defaults every kernel make invocation to `-j16` and
+uses the tested SysRq reboot path after syncing and unmounting the boot volume.
+This replaces `reboot -f`, which the diagnostic PID 1 did not reliably service.
+
+The helper checksum-verified and re-deployed the unchanged production OHCI
+image over SSH, successfully forced a reboot, and the Wii returned to SSH at
+approximately 50 seconds uptime on kernel build `#20`. The BCM2045A and Dell
+USB keyboard both enumerated again, and `hid-generic` registered the keyboard.
+This validates the automated deploy/reboot path without introducing a new
+kernel binary or changing the already-validated hardware result.
