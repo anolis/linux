@@ -1642,3 +1642,30 @@ approximately 50 seconds uptime on kernel build `#20`. The BCM2045A and Dell
 USB keyboard both enumerated again, and `hid-generic` registered the keyboard.
 This validates the automated deploy/reboot path without introducing a new
 kernel binary or changing the already-validated hardware result.
+
+## 2026-07-29: Normal SysV init test with writable root
+
+- Test implementation: `15b1fea7f`
+- Kernel image SHA-256:
+  `4fec4709a6c47e21a8ca71fa4e97c4bfea92563e0903ca1eeebfd866ccc43eba`
+
+This test removed only the temporary `init=/init-diag.sh` command-line override
+and left the existing `rootwait rw` root-mount arguments unchanged. Before
+deployment, the rootfs received a generated module dependency index, `b43` in
+`/etc/modules`, and a checksum-verified copy of the stable `gcn-gx.ko`. GX was
+intentionally not listed for automatic loading so this test isolated normal
+userspace boot under the CPU framebuffer fallback.
+
+The exact image deployed and the SysRq reboot path executed, but SSH did not
+return during more than four minutes of polling. The diagnostic-script control
+had returned around 50 seconds after the preceding reboot. No Wii console
+capture was available, so the exact userspace stop point is not observed and
+the failed test must not be interpreted as a Wi-Fi-specific result.
+
+The test retained an invalid normal-init boot contract: Debian SysV
+`checkroot.sh` expects the root filesystem to be mounted read-only while it
+performs the root check and then remounts it writable, but the kernel mounted
+root with `rw`. The diagnostic PID 1 required that old setting because it wrote
+logs before explicitly remounting root. Retry normal SysV init with `rootwait
+ro`; keep all other command-line arguments and the CPU-only graphics isolation
+unchanged.
