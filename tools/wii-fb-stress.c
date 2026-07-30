@@ -254,6 +254,9 @@ int main(int argc, char **argv)
 	int use_rgb888 = 0;
 	uint64_t start_ns, next_ns, report_ns, end_ns, frame_number = 0;
 	uint64_t interval_ns;
+	uint64_t draw_total_ns = 0, draw_max_ns = 0;
+	uint64_t copy_total_ns = 0, copy_max_ns = 0;
+	uint64_t pan_total_ns = 0, pan_max_ns = 0;
 	size_t frame_bytes, map_bytes;
 	uint8_t *frame, *row_templates, *fb;
 	int fd, i, mode_changed = 0, status = 0;
@@ -394,11 +397,16 @@ int main(int argc, char **argv)
 	end_ns = duration ? start_ns + (uint64_t)duration * 1000000000ULL : 0;
 
 	while (!stop_requested) {
+		uint64_t draw_start_ns, draw_end_ns, copy_end_ns, pan_end_ns;
+		uint64_t draw_ns, copy_ns, pan_ns = 0;
 		uint64_t now_ns;
 
+		draw_start_ns = monotonic_ns();
 		draw_frame(frame, row_templates, fixed.line_length, variable.xres,
 			   variable.yres, frame_number, use_rgb888 ? 4 : 2);
+		draw_end_ns = monotonic_ns();
 		memcpy(fb + (size_t)page * frame_bytes, frame, frame_bytes);
+		copy_end_ns = monotonic_ns();
 		if (double_buffer) {
 			pan = variable;
 			pan.yoffset = page * variable.yres;
@@ -407,8 +415,21 @@ int main(int argc, char **argv)
 				status = 1;
 				break;
 			}
+			pan_end_ns = monotonic_ns();
+			pan_ns = pan_end_ns - copy_end_ns;
 			page ^= 1;
 		}
+		draw_ns = draw_end_ns - draw_start_ns;
+		copy_ns = copy_end_ns - draw_end_ns;
+		draw_total_ns += draw_ns;
+		copy_total_ns += copy_ns;
+		pan_total_ns += pan_ns;
+		if (draw_ns > draw_max_ns)
+			draw_max_ns = draw_ns;
+		if (copy_ns > copy_max_ns)
+			copy_max_ns = copy_ns;
+		if (pan_ns > pan_max_ns)
+			pan_max_ns = pan_ns;
 		frame_number++;
 
 		next_ns += interval_ns;
@@ -435,6 +456,17 @@ int main(int argc, char **argv)
 	       (unsigned long long)frame_number, start_ns / 1000000000.0,
 	       frame_number * 1000000000.0 / start_ns, stop_requested != 0);
 	fflush(stdout);
+	if (frame_number) {
+		printf("WII_FB_STRESS_TIMING draw_avg_us=%llu draw_max_us=%llu",
+		       (unsigned long long)(draw_total_ns / frame_number / 1000),
+		       (unsigned long long)(draw_max_ns / 1000));
+		printf(" copy_avg_us=%llu copy_max_us=%llu pan_avg_us=%llu pan_max_us=%llu\n",
+		       (unsigned long long)(copy_total_ns / frame_number / 1000),
+		       (unsigned long long)(copy_max_ns / 1000),
+		       (unsigned long long)(pan_total_ns / frame_number / 1000),
+		       (unsigned long long)(pan_max_ns / 1000));
+		fflush(stdout);
+	}
 
 	free(frame);
 	free(row_templates);

@@ -37,6 +37,8 @@
 #include <linux/delay.h>
 #include <linux/interrupt.h>
 #include <linux/irqdomain.h>
+#include <linux/ktime.h>
+#include <linux/math64.h>
 #include <linux/string.h>
 #include <linux/workqueue.h>
 #include <linux/debugfs.h>
@@ -110,6 +112,11 @@ static bool gx_frame_work_busy;
 static bool gx_frame_boot_deferred;
 static bool gx_frame_publish_xfb;
 static bool gx_frame_hold;
+static u64 gx_rgb888_tile_total_ns;
+static u64 gx_rgb888_tile_max_ns;
+static u64 gx_rgb888_flush_total_ns;
+static u64 gx_rgb888_flush_max_ns;
+static u32 gx_rgb888_timing_frames;
 
 #define GX_XFB_SNAPSHOT_MAX	(640 * 480 * 2)
 static void *gx_xfb_snapshot;
@@ -2005,14 +2012,44 @@ static void gx_submit_generated(const void *vfb, u32 xfb_phys,
 	void *tex_buf = (live_frame & 1) ?
 		gx_tex_buf_alt : gx_tex_buf;
 	u32 pixel_count = (u32)width * height;
+	u64 tile_start = 0;
+	u64 tile_end = 0;
+	u64 flush_end;
+	u64 tile_ns;
+	u64 flush_ns;
 	int i;
 
 	if (format == GX_VFB_RGB565)
 		gx_capture_vfb(vfb, width, height);
+	else
+		tile_start = ktime_get_ns();
 	gx_prepare_texture(vfb, tex_buf, width, height, format);
+	if (format == GX_VFB_XRGB8888)
+		tile_end = ktime_get_ns();
 	flush_dcache_range((unsigned long)tex_buf,
 			   (unsigned long)tex_buf +
 			   pixel_count * sizeof(u16));
+	if (format == GX_VFB_XRGB8888) {
+		flush_end = ktime_get_ns();
+		tile_ns = tile_end - tile_start;
+		flush_ns = flush_end - tile_end;
+		gx_rgb888_tile_total_ns += tile_ns;
+		gx_rgb888_flush_total_ns += flush_ns;
+		if (tile_ns > gx_rgb888_tile_max_ns)
+			gx_rgb888_tile_max_ns = tile_ns;
+		if (flush_ns > gx_rgb888_flush_max_ns)
+			gx_rgb888_flush_max_ns = flush_ns;
+		gx_rgb888_timing_frames++;
+		if (!(gx_rgb888_timing_frames & 0xff))
+			pr_info("gcn-gx: RGB888 timing frames=%u tile_avg_us=%llu tile_max_us=%llu flush_avg_us=%llu flush_max_us=%llu\n",
+				gx_rgb888_timing_frames,
+				div_u64(div_u64(gx_rgb888_tile_total_ns,
+						gx_rgb888_timing_frames), 1000),
+				div_u64(gx_rgb888_tile_max_ns, 1000),
+				div_u64(div_u64(gx_rgb888_flush_total_ns,
+						gx_rgb888_timing_frames), 1000),
+				div_u64(gx_rgb888_flush_max_ns, 1000));
+	}
 
 	fifo_pos = 0;
 	if (!live_frame)
@@ -2450,6 +2487,11 @@ static int gcn_gx_init(void)
 	gx_frame_boot_deferred = false;
 	gx_frame_publish_xfb = false;
 	gx_frame_hold = false;
+	gx_rgb888_tile_total_ns = 0;
+	gx_rgb888_tile_max_ns = 0;
+	gx_rgb888_flush_total_ns = 0;
+	gx_rgb888_flush_max_ns = 0;
+	gx_rgb888_timing_frames = 0;
 	gx_xfb_snapshot_size = 0;
 	gx_vfb_snapshot_size = 0;
 	gx_xfb_snapshot_width = 0;
