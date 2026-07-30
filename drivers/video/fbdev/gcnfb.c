@@ -67,7 +67,7 @@ int gcnfb_register_accel(const struct gcnfb_accel_ops *ops)
 {
 	int ret = 0;
 
-	if (!ops || !ops->name || !ops->take_completed_rgb565 ||
+	if (!ops || !ops->name || !ops->take_completed ||
 	    !ops->blit_rgb565 || !ops->blit_rgb888)
 		return -EINVAL;
 
@@ -1438,8 +1438,8 @@ static void vifb_source_presented(struct vi_ctl *ctl, const void *source)
 	WRITE_ONCE(ctl->presented_yoffset, yoffset);
 }
 
-void gcnfb_accel_rgb565_source_consumed(const struct gcnfb_accel_ops *ops,
-					const void *source)
+void gcnfb_accel_source_consumed(const struct gcnfb_accel_ops *ops,
+				 const void *source)
 {
 	struct vi_ctl *ctl;
 
@@ -1452,7 +1452,7 @@ void gcnfb_accel_rgb565_source_consumed(const struct gcnfb_accel_ops *ops,
 out:
 	rcu_read_unlock();
 }
-EXPORT_SYMBOL_GPL(gcnfb_accel_rgb565_source_consumed);
+EXPORT_SYMBOL_GPL(gcnfb_accel_source_consumed);
 
 static void vi_transcode_RGB565_to(struct vi_ctl *ctl, const void *source,
 				   uint32_t *dst)
@@ -1521,7 +1521,7 @@ static void __maybe_unused vi_transcode_RGB565_diff(struct vi_ctl *ctl)
 	vi_flush_xfb(fb_mem, info->fix.line_length * info->var.yres);
 }
 
-static void vi_transcode_RGB888(struct vi_ctl *ctl)
+static void vi_transcode_RGB888(struct vi_ctl *ctl, const void *source)
 {
 	/* Copy and convert contents of virtual framebuffer,
 	 * uses a secondary buffer to check data which needs to be copied */
@@ -1529,7 +1529,7 @@ static void vi_transcode_RGB888(struct vi_ctl *ctl)
 	unsigned int width;
 	unsigned int height = info->var.yres;
 	/* address of the virtual framebuffer */
-	union double_rgba_pixel_t *src = (union double_rgba_pixel_t *)info->screen_base;
+	const union double_rgba_pixel_t *src = source;
 	/* address of the memory-mapped physical framebuffer */
 	uint32_t *dst = fb_mem;
 	
@@ -1602,7 +1602,9 @@ static void gcnfb_restore_software(void)
 		vifb_source_presented(ctl, source);
 		break;
 	case PIX_FMT_RGB888:
-		vi_transcode_RGB888(ctl);
+		vi_transcode_RGB888(ctl, source);
+		vifb_source_consumed(ctl, source);
+		vifb_source_presented(ctl, source);
 		break;
 	}
 
@@ -1628,8 +1630,8 @@ static void vi_dispatch_vtrace(struct vi_ctl *ctl)
 	wake_up_interruptible(&ctl->vtrace_waitq);
 }
 
-static u32 vi_accel_present_rgb565(struct vi_ctl *ctl,
-				   const struct gcnfb_accel_ops *accel)
+static u32 vi_accel_present(struct vi_ctl *ctl,
+			    const struct gcnfb_accel_ops *accel)
 {
 	static u32 present_diag_count;
 	const void *completed_vfb;
@@ -1645,7 +1647,7 @@ static u32 vi_accel_present_rgb565(struct vi_ctl *ctl,
 	u8 __iomem *xfb_page;
 	int page;
 
-	if (accel->take_completed_rgb565(&completed_xfb, &completed_vfb)) {
+	if (accel->take_completed(&completed_xfb, &completed_vfb)) {
 		spin_lock_irqsave(&ctl->lock, flags);
 		for (page = 0; page < 2; page++) {
 			if ((u32)ctl->page_address[page] != completed_xfb)
@@ -1663,7 +1665,7 @@ static u32 vi_accel_present_rgb565(struct vi_ctl *ctl,
 			vifb_source_presented(ctl, completed_vfb);
 		}
 		if (page != 2 && present_diag_count < 4) {
-			page_bytes = ctl->info->fix.line_length *
+			page_bytes = vifb_adjust_ll(ctl->info->fix.line_length) *
 				ctl->info->var.yres;
 			page_off = completed_xfb - (u32)gx_fb_start;
 			tfbl = in_be32(ctl->io_base + VI_TFBL);
@@ -1726,7 +1728,7 @@ static irqreturn_t vi_irq_handler(int irq, void *dev)
 			source = vifb_source_page(ctl);
 			if (accel)
 				accel->blit_rgb565(source,
-					vi_accel_present_rgb565(ctl, accel),
+					vi_accel_present(ctl, accel),
 					info->var.xres, info->var.yres);
 			else {
 				vi_transcode_RGB565(ctl, source);
@@ -1735,14 +1737,18 @@ static irqreturn_t vi_irq_handler(int irq, void *dev)
 			}
 			break;
 		case PIX_FMT_RGB888:
-			if (accel)
-				accel->blit_rgb888(vfb_mem, (u32)gx_fb_start,
-						   info->var.xres,
-						   info->var.yres);
-			else if (vfb_diff)
+			source = vifb_source_page(ctl);
+			if (accel) {
+				accel->blit_rgb888(source,
+					vi_accel_present(ctl, accel),
+					info->var.xres, info->var.yres);
+			} else if (vfb_diff) {
 				vi_transcode_RGB888_diff(ctl);
-			else
-				vi_transcode_RGB888(ctl);
+			} else {
+				vi_transcode_RGB888(ctl, source);
+				vifb_source_consumed(ctl, source);
+				vifb_source_presented(ctl, source);
+			}
 			break;
 		default:
 			BUG();
@@ -2412,7 +2418,8 @@ static int vifb_pan_display(struct fb_var_screeninfo *var,
 	u32 old_yoffset;
 	long ret;
 
-	if (vfb_format != V4L2_PIX_FMT_RGB565 || var->xoffset ||
+	if ((vfb_format != V4L2_PIX_FMT_RGB565 &&
+	     vfb_format != PIX_FMT_RGB888) || var->xoffset ||
 	    var->yoffset > info->var.yres_virtual - info->var.yres)
 		return -EINVAL;
 

@@ -14,7 +14,7 @@
 struct gcnfb_accel_ops {
 	const char *name;
 	/* Return the XFB and immutable VFB source associated with one completion. */
-	bool (*take_completed_rgb565)(u32 *xfb_phys, const void **vfb);
+	bool (*take_completed)(u32 *xfb_phys, const void **vfb);
 	void (*blit_rgb565)(const void *vfb, u32 xfb_phys,
 			    u16 width, u16 height);
 	void (*blit_rgb888)(const void *vfb, u32 xfb_phys,
@@ -23,7 +23,7 @@ struct gcnfb_accel_ops {
 
 int gcnfb_register_accel(const struct gcnfb_accel_ops *ops);
 void gcnfb_unregister_accel(const struct gcnfb_accel_ops *ops);
-void gcnfb_accel_rgb565_source_consumed(const struct gcnfb_accel_ops *ops,
-					const void *vfb);
+void gcnfb_accel_source_consumed(const struct gcnfb_accel_ops *ops,
+				 const void *vfb);
 
 #endif /* _GCNFB_ACCEL_H */

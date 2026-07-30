@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Sustained RGB565 framebuffer workload for the Wii GX acceleration path.
+ * Sustained RGB565/RGB888 framebuffer workload for Wii GX acceleration.
  *
  * Build this as a static PowerPC binary and run it from an SSH session.  The
  * pattern keeps most of the frame stable while moving high-contrast markers,
@@ -35,11 +35,17 @@ static uint16_t rgb565(unsigned int red, unsigned int green, unsigned int blue)
 	       (blue & 0x1f);
 }
 
+static uint32_t xrgb8888(unsigned int red, unsigned int green,
+			 unsigned int blue)
+{
+	return ((red & 0xff) << 16) | ((green & 0xff) << 8) | (blue & 0xff);
+}
+
 static void fill_rect(uint8_t *frame, unsigned int stride,
 		      unsigned int width, unsigned int height,
 		      unsigned int left, unsigned int top,
 		      unsigned int rect_width, unsigned int rect_height,
-		      uint16_t colour)
+		      uint32_t colour, unsigned int pixel_bytes)
 {
 	unsigned int x, y;
 
@@ -51,35 +57,65 @@ static void fill_rect(uint8_t *frame, unsigned int stride,
 		rect_height = height - top;
 
 	for (y = top; y < top + rect_height; y++) {
-		uint16_t *row = (uint16_t *)(frame + (size_t)y * stride);
+		uint8_t *row = frame + (size_t)y * stride;
 
-		for (x = left; x < left + rect_width; x++)
-			row[x] = colour;
+		if (pixel_bytes == sizeof(uint16_t)) {
+			uint16_t *pixels = (uint16_t *)row;
+
+			for (x = left; x < left + rect_width; x++)
+				pixels[x] = colour;
+		} else {
+			uint32_t *pixels = (uint32_t *)row;
+
+			for (x = left; x < left + rect_width; x++)
+				pixels[x] = colour;
+		}
 	}
 }
 
 static void build_row_templates(uint8_t *templates, unsigned int stride,
-				unsigned int width)
+				unsigned int width, unsigned int pixel_bytes)
 {
-	static const uint16_t bars[] = {
+	static const uint16_t bars565[] = {
 		0xffff, 0xffe0, 0x07ff, 0x07e0,
 		0xf81f, 0xf800, 0x001f, 0x4208,
+	};
+	static const uint32_t bars8888[] = {
+		0x00ffffff, 0x00ffff00, 0x0000ffff, 0x0000ff00,
+		0x00ff00ff, 0x00ff0000, 0x000000ff, 0x00404040,
 	};
 	unsigned int variant, x;
 
 	memset(templates, 0, (size_t)stride * 3);
 	for (variant = 0; variant < 2; variant++) {
-		uint16_t *row = (uint16_t *)(templates + (size_t)variant * stride);
+		uint8_t *row = templates + (size_t)variant * stride;
 
-		for (x = 0; x < width; x++) {
-			unsigned int band = (uint64_t)x * 8 / width;
-			uint16_t colour = bars[band > 7 ? 7 : band];
+		if (pixel_bytes == sizeof(uint16_t)) {
+			uint16_t *pixels = (uint16_t *)row;
 
-			if (((x / 16) ^ variant) & 1)
-				colour ^= rgb565(2, 4, 2);
-			if (x % 80 < 2)
-				colour = 0;
-			row[x] = colour;
+			for (x = 0; x < width; x++) {
+				unsigned int band = (uint64_t)x * 8 / width;
+				uint16_t colour = bars565[band > 7 ? 7 : band];
+
+				if (((x / 16) ^ variant) & 1)
+					colour ^= rgb565(2, 4, 2);
+				if (x % 80 < 2)
+					colour = 0;
+				pixels[x] = colour;
+			}
+		} else {
+			uint32_t *pixels = (uint32_t *)row;
+
+			for (x = 0; x < width; x++) {
+				unsigned int band = (uint64_t)x * 8 / width;
+				uint32_t colour = bars8888[band > 7 ? 7 : band];
+
+				if (((x / 16) ^ variant) & 1)
+					colour ^= xrgb8888(16, 16, 16);
+				if (x % 80 < 2)
+					colour = 0;
+				pixels[x] = colour;
+			}
 		}
 	}
 }
@@ -99,12 +135,16 @@ static void restore_base_frame(uint8_t *frame, const uint8_t *templates,
 
 static void draw_frame(uint8_t *frame, const uint8_t *templates,
 		       unsigned int stride, unsigned int width,
-		       unsigned int height, uint64_t frame_number)
+		       unsigned int height, uint64_t frame_number,
+		       unsigned int pixel_bytes)
 {
-	const uint16_t black = rgb565(0, 0, 0);
-	const uint16_t white = rgb565(31, 63, 31);
-	const uint16_t red = rgb565(31, 0, 0);
-	const uint16_t cyan = rgb565(0, 63, 31);
+	const uint32_t black = 0;
+	const uint32_t white = pixel_bytes == 2 ?
+		rgb565(31, 63, 31) : xrgb8888(255, 255, 255);
+	const uint32_t red = pixel_bytes == 2 ?
+		rgb565(31, 0, 0) : xrgb8888(255, 0, 0);
+	const uint32_t cyan = pixel_bytes == 2 ?
+		rgb565(0, 63, 31) : xrgb8888(0, 255, 255);
 	unsigned int x, marker_x, marker_y;
 	unsigned int upper_top = 44;
 	unsigned int upper_height = height / 2 - upper_top - 8;
@@ -115,25 +155,27 @@ static void draw_frame(uint8_t *frame, const uint8_t *templates,
 
 	marker_x = (frame_number * 7) % (width - 28);
 	fill_rect(frame, stride, width, height, marker_x, upper_top, 28,
-		  upper_height,
-		  black);
+		  upper_height, black, pixel_bytes);
 	fill_rect(frame, stride, width, height, marker_x + 4, upper_top, 20,
-		  upper_height, red);
+		  upper_height, red, pixel_bytes);
 	fill_rect(frame, stride, width, height, marker_x + 12, upper_top, 4,
-		  upper_height, white);
+		  upper_height, white, pixel_bytes);
 
 	marker_y = lower_top + (frame_number * 3) % (lower_range + 1);
-	fill_rect(frame, stride, width, height, 0, marker_y, width, 20, black);
+	fill_rect(frame, stride, width, height, 0, marker_y, width, 20, black,
+		  pixel_bytes);
 	fill_rect(frame, stride, width, height, 0, marker_y + 4, width, 12,
-		  cyan);
+		  cyan, pixel_bytes);
 	fill_rect(frame, stride, width, height, 0, marker_y + 8, width, 4,
-		  white);
+		  white, pixel_bytes);
 
 	/* Encode the low 16 frame bits as stable, camera-readable blocks. */
-	fill_rect(frame, stride, width, height, 8, 8, 200, 28, black);
+	fill_rect(frame, stride, width, height, 8, 8, 200, 28, black,
+		  pixel_bytes);
 	for (x = 0; x < 16; x++)
 		fill_rect(frame, stride, width, height, 12 + x * 12, 12,
-			  8, 20, (frame_number & (1ULL << x)) ? white : red);
+			  8, 20, (frame_number & (1ULL << x)) ? white : red,
+			  pixel_bytes);
 }
 
 static uint64_t monotonic_ns(void)
@@ -192,8 +234,8 @@ static void tty_message(const char *message)
 static void usage(const char *program)
 {
 	fprintf(stderr,
-		"Usage: %s [--duration SECONDS] [--fps RATE] [--device PATH] [--single-buffer]\n"
-		"Defaults: duration=120, fps=30, device=/dev/fb0, double-buffered\n",
+		"Usage: %s [--duration SECONDS] [--fps RATE] [--device PATH] [--single-buffer] [--rgb888]\n"
+		"Defaults: duration=120, fps=30, device=/dev/fb0, RGB565 double-buffered\n",
 		program);
 }
 
@@ -209,6 +251,7 @@ int main(int argc, char **argv)
 	unsigned int fps = 30;
 	unsigned int page = 0;
 	int double_buffer = 1;
+	int use_rgb888 = 0;
 	uint64_t start_ns, next_ns, report_ns, end_ns, frame_number = 0;
 	uint64_t interval_ns;
 	size_t frame_bytes, map_bytes;
@@ -224,6 +267,8 @@ int main(int argc, char **argv)
 			device = argv[++i];
 		} else if (!strcmp(argv[i], "--single-buffer")) {
 			double_buffer = 0;
+		} else if (!strcmp(argv[i], "--rgb888")) {
+			use_rgb888 = 1;
 		} else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
 			usage(argv[0]);
 			return 0;
@@ -249,9 +294,12 @@ int main(int argc, char **argv)
 		return 1;
 	}
 	original_variable = variable;
-	if (double_buffer) {
-		variable.yoffset = 0;
-		variable.yres_virtual = variable.yres * 2;
+	variable.bits_per_pixel = use_rgb888 ? 32 : 16;
+	variable.grayscale = 0;
+	variable.xoffset = 0;
+	variable.yoffset = 0;
+	variable.yres_virtual = variable.yres * (double_buffer ? 2 : 1);
+	if (double_buffer || use_rgb888) {
 		variable.activate = FB_ACTIVATE_NOW;
 		if (ioctl(fd, FBIOPUT_VSCREENINFO, &variable) < 0) {
 			perror("enable double-buffered virtual framebuffer");
@@ -266,16 +314,23 @@ int main(int argc, char **argv)
 			close(fd);
 			return 1;
 		}
-		if (variable.yres_virtual < variable.yres * 2)
+		if (double_buffer && variable.yres_virtual < variable.yres * 2)
 			status = 1;
-		page = 1;
+		if (double_buffer)
+			page = 1;
 	}
-	if (variable.bits_per_pixel != 16 || variable.red.offset != 11 ||
-	    variable.red.length != 5 || variable.green.offset != 5 ||
-	    variable.green.length != 6 || variable.blue.offset != 0 ||
-	    variable.blue.length != 5 || variable.xres < 64 ||
+	if ((use_rgb888 &&
+	     (variable.bits_per_pixel != 32 || variable.red.offset != 16 ||
+	      variable.red.length != 8 || variable.green.offset != 8 ||
+	      variable.green.length != 8 || variable.blue.offset != 0 ||
+	      variable.blue.length != 8)) ||
+	    (!use_rgb888 &&
+	     (variable.bits_per_pixel != 16 || variable.red.offset != 11 ||
+	      variable.red.length != 5 || variable.green.offset != 5 ||
+	      variable.green.length != 6 || variable.blue.offset != 0 ||
+	      variable.blue.length != 5)) || variable.xres < 64 ||
 	    variable.yres < 128 ||
-	    fixed.line_length < variable.xres * sizeof(uint16_t)) {
+	    fixed.line_length < variable.xres * (use_rgb888 ? 4 : 2)) {
 		fprintf(stderr,
 			"unsupported framebuffer: %ux%u bpp=%u stride=%u rgba=%u/%u,%u/%u,%u/%u\n",
 			variable.xres, variable.yres, variable.bits_per_pixel,
@@ -321,12 +376,16 @@ int main(int argc, char **argv)
 	sigaction(SIGINT, &action, NULL);
 	sigaction(SIGTERM, &action, NULL);
 	sigaction(SIGHUP, &action, NULL);
-	build_row_templates(row_templates, fixed.line_length, variable.xres);
-	printf("WII_FB_STRESS_START width=%u height=%u stride=%u fps=%u duration=%u buffers=%u\n",
-	       variable.xres, variable.yres, fixed.line_length, fps, duration,
+	build_row_templates(row_templates, fixed.line_length, variable.xres,
+			    use_rgb888 ? 4 : 2);
+	printf("WII_FB_STRESS_START format=%s width=%u height=%u stride=%u",
+	       use_rgb888 ? "RGB888" : "RGB565",
+	       variable.xres, variable.yres, fixed.line_length);
+	printf(" fps=%u duration=%u buffers=%u\n", fps, duration,
 	       double_buffer ? 2 : 1);
 	fflush(stdout);
-	tty_message("\n=== GX RGB565 STRESS STARTING ===\n");
+	tty_message(use_rgb888 ? "\n=== GX RGB888 STRESS STARTING ===\n" :
+		    "\n=== GX RGB565 STRESS STARTING ===\n");
 
 	interval_ns = 1000000000ULL / fps;
 	start_ns = monotonic_ns();
@@ -338,7 +397,7 @@ int main(int argc, char **argv)
 		uint64_t now_ns;
 
 		draw_frame(frame, row_templates, fixed.line_length, variable.xres,
-			   variable.yres, frame_number);
+			   variable.yres, frame_number, use_rgb888 ? 4 : 2);
 		memcpy(fb + (size_t)page * frame_bytes, frame, frame_bytes);
 		if (double_buffer) {
 			pan = variable;

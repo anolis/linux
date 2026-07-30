@@ -8,13 +8,14 @@ usage()
 	cat <<'EOF'
 Usage: tools/wii-fb-stress.sh [options]
 
-Build and run a sustained RGB565 framebuffer workload on the Wii over SSH.
+Build and run a sustained RGB framebuffer workload on the Wii over SSH.
 
 Options:
   --host HOST          Wii address (default: WII_SSH_HOST or 10.3.10.12)
   --duration SECONDS   workload duration, 0 runs until interrupted (default: 120)
   --fps RATE           requested framebuffer update rate, 1..60 (default: 30)
   --single-buffer      run the known tearing-prone control without VFB panning
+  --rgb888             request a 32-bit XRGB8888 virtual framebuffer
   --no-build           reuse /tmp/wii-fb-stress-$USER
   --allow-dirty        permit a test from an uncommitted source tree
 
@@ -30,6 +31,7 @@ fps=30
 build=1
 allow_dirty=0
 single_buffer=0
+rgb888=0
 
 while (($#)); do
 	case "$1" in
@@ -50,6 +52,9 @@ while (($#)); do
 		;;
 	--single-buffer)
 		single_buffer=1
+		;;
+	--rgb888)
+		rgb888=1
 		;;
 	--allow-dirty)
 		allow_dirty=1
@@ -119,9 +124,14 @@ run_id="$(git rev-parse --short=12 HEAD)-$(date +%s)-$$"
 run_log=${TMPDIR:-/tmp}/wii-fb-stress-${run_id}.log
 target_args="--duration $duration --fps $fps"
 buffer_mode=double
+pixel_format=RGB565
 if ((single_buffer)); then
 	target_args+=" --single-buffer"
 	buffer_mode=single
+fi
+if ((rgb888)); then
+	target_args+=" --rgb888"
+	pixel_format=RGB888
 fi
 
 remote_exec()
@@ -164,11 +174,12 @@ if [[ ! $dmesg_lines_before =~ ^[0-9]+$ ]]; then
 	exit 1
 fi
 
-begin_marker="wii-fb-stress: begin $run_id duration=$duration fps=$fps"
+begin_marker="wii-fb-stress: begin $run_id format=$pixel_format"
+begin_marker+=" duration=$duration fps=$fps"
 begin_marker+=" buffers=$buffer_mode sha256=$binary_sha"
 remote_exec "printf '<6>%s\\n' '$begin_marker' > /dev/kmsg"
-printf 'Running %ss at %s fps (%s-buffered); ' \
-	"$duration" "$fps" "$buffer_mode"
+printf 'Running %s for %ss at %s fps (%s-buffered); ' \
+	"$pixel_format" "$duration" "$fps" "$buffer_mode"
 printf 'watch the Wii for smooth moving bars and intact grid lines.\n'
 set +e
 remote_exec "$remote_binary $target_args" | tee "$run_log"
@@ -197,11 +208,12 @@ else
 fi
 remote_exec "printf '<6>wii-fb-stress: end $run_id status=$workload_status irq_delta=$irq_delta\\n' > /dev/kmsg"
 
-printf '\nRGB565 stress result\n'
+printf '\n%s stress result\n' "$pixel_format"
 printf '  commit:       %s\n' "$(git rev-parse --short=12 HEAD)"
 printf '  binary sha:   %s\n' "$binary_sha"
 printf '  exit status:  %s\n' "$workload_status"
 printf '  VFB mode:     %s-buffered\n' "$buffer_mode"
+printf '  pixel format: %s\n' "$pixel_format"
 printf '  source rate:  %s fps requested, %s fps achieved\n' \
 	"$fps" "${achieved_fps:-unknown}"
 printf '  PE finish IRQ: %s -> %s (delta %s, %s/s)\n' \

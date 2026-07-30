@@ -87,23 +87,29 @@ enum gx_finish_diag_phase {
 static enum gx_finish_diag_phase gx_diag_phase;
 static u32 gx_diag_finish_baseline;
 
-struct gx_rgb565_work {
+enum gx_vfb_format {
+	GX_VFB_RGB565,
+	GX_VFB_XRGB8888,
+};
+
+struct gx_frame_work {
 	struct work_struct work;
 	const void *vfb;
 	u32 xfb_phys;
 	u16 width;
 	u16 height;
+	enum gx_vfb_format format;
 };
 
-static struct gx_rgb565_work gx_rgb565_work;
-static DEFINE_SPINLOCK(gx_rgb565_work_lock);
+static struct gx_frame_work gx_frame_work;
+static DEFINE_SPINLOCK(gx_frame_work_lock);
 static u32 gx_live_texture_frame;
-static u32 gx_rgb565_ready_xfb;
-static const void *gx_rgb565_ready_vfb;
-static bool gx_rgb565_work_busy;
-static bool gx_rgb565_boot_deferred;
-static bool gx_rgb565_publish_xfb;
-static bool gx_rgb565_hold;
+static u32 gx_frame_ready_xfb;
+static const void *gx_frame_ready_vfb;
+static bool gx_frame_work_busy;
+static bool gx_frame_boot_deferred;
+static bool gx_frame_publish_xfb;
+static bool gx_frame_hold;
 
 #define GX_XFB_SNAPSHOT_MAX	(640 * 480 * 2)
 static void *gx_xfb_snapshot;
@@ -119,7 +125,7 @@ static u32 gx_xfb_snapshot_phys;
 
 static char *gx_renderer = "generated";
 module_param_named(renderer, gx_renderer, charp, 0444);
-MODULE_PARM_DESC(renderer, "RGB565 command path: generated, reference, or direct");
+MODULE_PARM_DESC(renderer, "Framebuffer command path: generated, reference, or direct");
 
 static const struct gcnfb_accel_ops gcn_gx_accel_ops;
 
@@ -639,13 +645,17 @@ static void gx_fill_probe_rgb565(u16 *dst, u32 width, u32 height)
 	}
 }
 
-static void gx_prepare_rgb565_texture(const void *vfb, u16 *dst,
-				      u32 width, u32 height)
+static void gx_tile_rgb888(const u32 *src, u16 *dst, u32 width, u32 height);
+
+static void gx_prepare_texture(const void *vfb, u16 *dst, u32 width,
+			       u32 height, enum gx_vfb_format format)
 {
 	if (gx_use_pattern)
 		gx_fill_reference_rgb565(dst, width, height);
 	else if (gx_use_probe)
 		gx_fill_probe_rgb565(dst, width, height);
+	else if (format == GX_VFB_XRGB8888)
+		gx_tile_rgb888(vfb, dst, width, height);
 	else
 		gx_tile_rgb565((const u16 *)vfb, dst, width, height);
 }
@@ -703,7 +713,7 @@ static void gx_tile_rgb888(const u32 *src, u16 *dst, u32 width, u32 height)
  * render from texture map 0 to the full EFB viewport.  Values derived
  * from libogc gx.c and YAGCD.
  */
-static void gx_setup_2d_state(u16 width, u16 height)
+static void __maybe_unused gx_setup_2d_state(u16 width, u16 height)
 {
 	u32 xo, yo;
 
@@ -1215,7 +1225,7 @@ static void gx_setup_texture_rgb565(void *tile_buf, u16 width, u16 height)
  *
  * GX_QUADS=0x80 | VTXFMT0=0, 4 vertices, each with XY pos + ST texcoord.
  */
-static void gx_draw_fullscreen_quad(u16 width, u16 height)
+static void __maybe_unused gx_draw_fullscreen_quad(u16 width, u16 height)
 {
 	u32 fw = f32_from_u16(width);
 	u32 fh = f32_from_u16(height);
@@ -1484,7 +1494,8 @@ static void gx_copy_efb_to_xfb(u32 xfb_phys, u16 width, u16 height, bool clear)
 	gx_load_bp_reg(0x45000002);
 }
 
-static void gcn_gx_copy_efb_to_xfb(u32 xfb_phys, u16 width, u16 height)
+static void __maybe_unused gcn_gx_copy_efb_to_xfb(u32 xfb_phys, u16 width,
+						  u16 height)
 {
 	gx_copy_efb_to_xfb(xfb_phys, width, height, false);
 }
@@ -1589,7 +1600,7 @@ static void gx_capture_vfb(const void *vfb, u16 width, u16 height)
  * Pads to 32-byte alignment, flushes dcache so GP DMA sees the writes,
  * then configures CP BASE/END/RD/WT and enables GP reads.
  *
- * Called from the RGB565 worker.  The VI DI1 hard IRQ only queues that work,
+ * Called from the framebuffer worker. The VI DI1 hard IRQ only queues work,
  * keeping the 640x480 tiling pass and hardware polling out of IRQ context.
  *
  * Critical: flush gx_fifo_buf BEFORE setting WT or enabling the GP.
@@ -1961,16 +1972,16 @@ static void gx_load_reference_texture_frame(void *tile_buf, u32 xfb_phys,
 	fifo_pos += sizeof(gx_reference_texture_frame);
 }
 
-static void gx_submit_reference_rgb565(const void *vfb, u32 xfb_phys,
-				       u16 width, u16 height,
-				       const char *phase)
+static void gx_submit_reference(const void *vfb, u32 xfb_phys,
+				u16 width, u16 height, const char *phase,
+				enum gx_vfb_format format)
 {
 	u32 live_frame = gx_live_texture_frame++;
 	void *tex_buf = (live_frame & 1) ?
 		gx_tex_buf_alt : gx_tex_buf;
 	u32 pixel_count = (u32)width * height;
 
-	gx_prepare_rgb565_texture(vfb, (u16 *)tex_buf, width, height);
+	gx_prepare_texture(vfb, tex_buf, width, height, format);
 	flush_dcache_range((unsigned long)tex_buf,
 			   (unsigned long)tex_buf +
 			   pixel_count * sizeof(u16));
@@ -1986,9 +1997,9 @@ static void gx_submit_reference_rgb565(const void *vfb, u32 xfb_phys,
 	gx_submit_cmds(phase);
 }
 
-static void gx_submit_generated_rgb565(const void *vfb, u32 xfb_phys,
-				       u16 width, u16 height,
-				       const char *phase)
+static void gx_submit_generated(const void *vfb, u32 xfb_phys,
+				u16 width, u16 height, const char *phase,
+				enum gx_vfb_format format)
 {
 	u32 live_frame = gx_live_texture_frame++;
 	void *tex_buf = (live_frame & 1) ?
@@ -1996,8 +2007,9 @@ static void gx_submit_generated_rgb565(const void *vfb, u32 xfb_phys,
 	u32 pixel_count = (u32)width * height;
 	int i;
 
-	gx_capture_vfb(vfb, width, height);
-	gx_prepare_rgb565_texture(vfb, (u16 *)tex_buf, width, height);
+	if (format == GX_VFB_RGB565)
+		gx_capture_vfb(vfb, width, height);
+	gx_prepare_texture(vfb, tex_buf, width, height, format);
 	flush_dcache_range((unsigned long)tex_buf,
 			   (unsigned long)tex_buf +
 			   pixel_count * sizeof(u16));
@@ -2050,26 +2062,27 @@ static void gx_submit_direct_pattern(u32 xfb_phys, u16 width, u16 height,
 	gx_submit_cmds(phase);
 }
 
-static void gx_submit_selected_rgb565(const void *vfb, u32 xfb_phys,
-				      u16 width, u16 height,
-				      const char *phase)
+static void gx_submit_selected(const void *vfb, u32 xfb_phys,
+			       u16 width, u16 height, const char *phase,
+			       enum gx_vfb_format format)
 {
 	if (gx_use_direct)
 		gx_submit_direct_pattern(xfb_phys, width, height, phase);
 	else if (gx_use_reference)
-		gx_submit_reference_rgb565(vfb, xfb_phys, width, height, phase);
+		gx_submit_reference(vfb, xfb_phys, width, height, phase, format);
 	else
-		gx_submit_generated_rgb565(vfb, xfb_phys, width, height, phase);
+		gx_submit_generated(vfb, xfb_phys, width, height, phase, format);
 }
 
 /*
- * gx_process_rgb565 - asynchronous PE-finish primitive diagnostic.
+ * gx_process_frame - asynchronous PE-finish primitive diagnostic.
  *
  * Validate the real PE-finish IRQ with known copies, then continuously submit
- * the captured libogc RGB565 texture frame from process context.
+ * a tiled RGB565 texture frame from process context.
  */
-static bool gx_process_rgb565(const void *vfb, u32 xfb_phys,
-			      u16 width, u16 height)
+static bool gx_process_frame(const void *vfb, u32 xfb_phys,
+			     u16 width, u16 height,
+			     enum gx_vfb_format format)
 {
 	u32 finish_count;
 	bool submitted = false;
@@ -2118,8 +2131,8 @@ static bool gx_process_rgb565(const void *vfb, u32 xfb_phys,
 		if (finish_count == gx_diag_finish_baseline)
 			break;
 		gx_diag_finish_baseline = finish_count;
-		gx_submit_selected_rgb565(vfb, xfb_phys, width, height,
-					  "live0");
+		gx_submit_selected(vfb, xfb_phys, width, height, "live0",
+				   format);
 		gx_diag_phase = GX_DIAG_WAIT_DRAW;
 		submitted = true;
 		break;
@@ -2132,11 +2145,11 @@ static bool gx_process_rgb565(const void *vfb, u32 xfb_phys,
 		break;
 
 	case GX_DIAG_DONE:
-		gx_submit_selected_rgb565(vfb, xfb_phys, width, height, "live");
-		gx_rgb565_publish_xfb = true;
+		gx_submit_selected(vfb, xfb_phys, width, height, "live", format);
+		gx_frame_publish_xfb = true;
 		if (gx_hold_frame && gx_live_texture_frame >= gx_hold_frame) {
 			gx_capture_xfb(xfb_phys, width, height);
-			gx_rgb565_hold = true;
+			gx_frame_hold = true;
 			pr_info("gcn-gx: publishing %s frame %u once and holding output\n",
 				gx_renderer, gx_live_texture_frame);
 		}
@@ -2147,45 +2160,47 @@ static bool gx_process_rgb565(const void *vfb, u32 xfb_phys,
 	return submitted;
 }
 
-static void gx_rgb565_workfn(struct work_struct *work)
+static void gx_frame_workfn(struct work_struct *work)
 {
 	const void *vfb;
 	u32 xfb_phys;
 	u16 width, height;
+	enum gx_vfb_format format;
 	unsigned long flags;
 	bool submitted;
 
 	(void)work;
-	spin_lock_irqsave(&gx_rgb565_work_lock, flags);
-	vfb = gx_rgb565_work.vfb;
-	xfb_phys = gx_rgb565_work.xfb_phys;
-	width = gx_rgb565_work.width;
-	height = gx_rgb565_work.height;
-	spin_unlock_irqrestore(&gx_rgb565_work_lock, flags);
+	spin_lock_irqsave(&gx_frame_work_lock, flags);
+	vfb = gx_frame_work.vfb;
+	xfb_phys = gx_frame_work.xfb_phys;
+	width = gx_frame_work.width;
+	height = gx_frame_work.height;
+	format = gx_frame_work.format;
+	spin_unlock_irqrestore(&gx_frame_work_lock, flags);
 
 	if (!vfb || !width || !height || !READ_ONCE(gx_accel_ready)) {
-		spin_lock_irqsave(&gx_rgb565_work_lock, flags);
-		gx_rgb565_work_busy = false;
-		spin_unlock_irqrestore(&gx_rgb565_work_lock, flags);
+		spin_lock_irqsave(&gx_frame_work_lock, flags);
+		gx_frame_work_busy = false;
+		spin_unlock_irqrestore(&gx_frame_work_lock, flags);
 		return;
 	}
 
-	submitted = gx_process_rgb565(vfb, xfb_phys, width, height);
-	/* gx_process_rgb565() has finished all CPU reads from this VFB page. */
-	gcnfb_accel_rgb565_source_consumed(&gcn_gx_accel_ops, vfb);
+	submitted = gx_process_frame(vfb, xfb_phys, width, height, format);
+	/* gx_process_frame() has finished all CPU reads from this VFB page. */
+	gcnfb_accel_source_consumed(&gcn_gx_accel_ops, vfb);
 
-	spin_lock_irqsave(&gx_rgb565_work_lock, flags);
-	if (submitted && gx_rgb565_publish_xfb) {
-		gx_rgb565_ready_xfb = xfb_phys;
-		gx_rgb565_ready_vfb = vfb;
-		gx_rgb565_publish_xfb = false;
+	spin_lock_irqsave(&gx_frame_work_lock, flags);
+	if (submitted && gx_frame_publish_xfb) {
+		gx_frame_ready_xfb = xfb_phys;
+		gx_frame_ready_vfb = vfb;
+		gx_frame_publish_xfb = false;
 	} else {
-		gx_rgb565_work_busy = false;
+		gx_frame_work_busy = false;
 	}
-	spin_unlock_irqrestore(&gx_rgb565_work_lock, flags);
+	spin_unlock_irqrestore(&gx_frame_work_lock, flags);
 }
 
-static bool gcn_gx_take_completed_rgb565(u32 *xfb_phys, const void **vfb)
+static bool gcn_gx_take_completed(u32 *xfb_phys, const void **vfb)
 {
 	unsigned long flags;
 	bool ready = false;
@@ -2193,22 +2208,23 @@ static bool gcn_gx_take_completed_rgb565(u32 *xfb_phys, const void **vfb)
 	if (!READ_ONCE(gx_accel_ready))
 		return false;
 
-	spin_lock_irqsave(&gx_rgb565_work_lock, flags);
-	if (gx_rgb565_ready_xfb) {
-		*xfb_phys = gx_rgb565_ready_xfb;
-		*vfb = gx_rgb565_ready_vfb;
-		gx_rgb565_ready_xfb = 0;
-		gx_rgb565_ready_vfb = NULL;
-		gx_rgb565_work_busy = false;
+	spin_lock_irqsave(&gx_frame_work_lock, flags);
+	if (gx_frame_ready_xfb) {
+		*xfb_phys = gx_frame_ready_xfb;
+		*vfb = gx_frame_ready_vfb;
+		gx_frame_ready_xfb = 0;
+		gx_frame_ready_vfb = NULL;
+		gx_frame_work_busy = false;
 		ready = true;
 	}
-	spin_unlock_irqrestore(&gx_rgb565_work_lock, flags);
+	spin_unlock_irqrestore(&gx_frame_work_lock, flags);
 
 	return ready;
 }
 
-static void gcn_gx_blit_fb_rgb565(const void *vfb, u32 xfb_phys,
-				   u16 width, u16 height)
+static void gcn_gx_queue_frame(const void *vfb, u32 xfb_phys,
+			       u16 width, u16 height,
+			       enum gx_vfb_format format)
 {
 	unsigned long flags;
 
@@ -2217,37 +2233,44 @@ static void gcn_gx_blit_fb_rgb565(const void *vfb, u32 xfb_phys,
 
 	/* Do not contend with built-in driver init on this single-core system. */
 	if (system_state != SYSTEM_RUNNING) {
-		if (!gx_rgb565_boot_deferred) {
-			gx_rgb565_boot_deferred = true;
-			pr_info("gcn-gx: deferring RGB565 worker until SYSTEM_RUNNING\n");
+		if (!gx_frame_boot_deferred) {
+			gx_frame_boot_deferred = true;
+			pr_info("gcn-gx: deferring framebuffer worker until SYSTEM_RUNNING\n");
 		}
 		return;
 	}
-	if (gx_rgb565_boot_deferred) {
-		gx_rgb565_boot_deferred = false;
-		pr_info("gcn-gx: SYSTEM_RUNNING; enabling RGB565 worker\n");
+	if (gx_frame_boot_deferred) {
+		gx_frame_boot_deferred = false;
+		pr_info("gcn-gx: SYSTEM_RUNNING; enabling framebuffer worker\n");
 	}
-	if (gx_rgb565_hold)
+	if (gx_frame_hold)
 		return;
 
-	spin_lock_irqsave(&gx_rgb565_work_lock, flags);
-	if (gx_rgb565_work_busy) {
-		spin_unlock_irqrestore(&gx_rgb565_work_lock, flags);
+	spin_lock_irqsave(&gx_frame_work_lock, flags);
+	if (gx_frame_work_busy) {
+		spin_unlock_irqrestore(&gx_frame_work_lock, flags);
 		return;
 	}
-	gx_rgb565_work.vfb = vfb;
-	gx_rgb565_work.xfb_phys = xfb_phys;
-	gx_rgb565_work.width = width;
-	gx_rgb565_work.height = height;
-	gx_rgb565_work_busy = true;
-	spin_unlock_irqrestore(&gx_rgb565_work_lock, flags);
+	gx_frame_work.vfb = vfb;
+	gx_frame_work.xfb_phys = xfb_phys;
+	gx_frame_work.width = width;
+	gx_frame_work.height = height;
+	gx_frame_work.format = format;
+	gx_frame_work_busy = true;
+	spin_unlock_irqrestore(&gx_frame_work_lock, flags);
 
-	if (!schedule_work(&gx_rgb565_work.work)) {
-		spin_lock_irqsave(&gx_rgb565_work_lock, flags);
-		gx_rgb565_work_busy = false;
-		spin_unlock_irqrestore(&gx_rgb565_work_lock, flags);
-		pr_warn_once("gcn-gx: failed to queue idle RGB565 work\n");
+	if (!schedule_work(&gx_frame_work.work)) {
+		spin_lock_irqsave(&gx_frame_work_lock, flags);
+		gx_frame_work_busy = false;
+		spin_unlock_irqrestore(&gx_frame_work_lock, flags);
+		pr_warn_once("gcn-gx: failed to queue idle framebuffer work\n");
 	}
+}
+
+static void gcn_gx_blit_fb_rgb565(const void *vfb, u32 xfb_phys,
+				  u16 width, u16 height)
+{
+	gcn_gx_queue_frame(vfb, xfb_phys, width, height, GX_VFB_RGB565);
 }
 
 /*
@@ -2257,22 +2280,7 @@ static void gcn_gx_blit_fb_rgb565(const void *vfb, u32 xfb_phys,
 static void gcn_gx_blit_fb_rgb888(const void *vfb, u32 xfb_phys,
 				   u16 width, u16 height)
 {
-	if (!READ_ONCE(gx_accel_ready))
-		return;
-
-	fifo_pos = 0;
-
-	gx_tile_rgb888((const u32 *)vfb, (u16 *)gx_tex_buf, width, height);
-
-	flush_dcache_range((unsigned long)gx_tex_buf,
-			   (unsigned long)gx_tex_buf +
-			   (unsigned long)width * height * 2);
-
-	gx_setup_2d_state(width, height);
-	gx_setup_texture_rgb565(gx_tex_buf, width, height);
-	gx_draw_fullscreen_quad(width, height);
-	gcn_gx_copy_efb_to_xfb(xfb_phys, width, height);
-	gx_submit_cmds("rgb888");
+	gcn_gx_queue_frame(vfb, xfb_phys, width, height, GX_VFB_XRGB8888);
 }
 
 /* ------------------------------------------------------------------ */
@@ -2432,15 +2440,16 @@ static int gcn_gx_init(void)
 	gx_tex_buf_alt = (void *)__va(GX_TEX_BUF_ALT_MEM1_PHYS);
 	memset(gx_tex_buf, 0, GX_TEX_BUF_SIZE);
 	memset(gx_tex_buf_alt, 0, GX_TEX_BUF_SIZE);
-	INIT_WORK(&gx_rgb565_work.work, gx_rgb565_workfn);
-	gx_rgb565_work.vfb = NULL;
+	INIT_WORK(&gx_frame_work.work, gx_frame_workfn);
+	gx_frame_work.vfb = NULL;
+	gx_frame_work.format = GX_VFB_RGB565;
 	gx_live_texture_frame = 0;
-	gx_rgb565_ready_xfb = 0;
-	gx_rgb565_ready_vfb = NULL;
-	gx_rgb565_work_busy = false;
-	gx_rgb565_boot_deferred = false;
-	gx_rgb565_publish_xfb = false;
-	gx_rgb565_hold = false;
+	gx_frame_ready_xfb = 0;
+	gx_frame_ready_vfb = NULL;
+	gx_frame_work_busy = false;
+	gx_frame_boot_deferred = false;
+	gx_frame_publish_xfb = false;
+	gx_frame_hold = false;
 	gx_xfb_snapshot_size = 0;
 	gx_vfb_snapshot_size = 0;
 	gx_xfb_snapshot_width = 0;
@@ -2520,7 +2529,7 @@ err_hw:
 static void gcn_gx_exit(void)
 {
 	WRITE_ONCE(gx_accel_ready, false);
-	cancel_work_sync(&gx_rgb565_work.work);
+	cancel_work_sync(&gx_frame_work.work);
 	debugfs_remove_recursive(gx_debugfs_dir);
 	gx_debugfs_dir = NULL;
 	gx_xfb_debugfs_file = NULL;
@@ -2554,7 +2563,7 @@ static void gcn_gx_exit(void)
 
 static const struct gcnfb_accel_ops gcn_gx_accel_ops = {
 	.name = "gcn-gx",
-	.take_completed_rgb565 = gcn_gx_take_completed_rgb565,
+	.take_completed = gcn_gx_take_completed,
 	.blit_rgb565 = gcn_gx_blit_fb_rgb565,
 	.blit_rgb888 = gcn_gx_blit_fb_rgb888,
 };
@@ -2586,7 +2595,7 @@ static void __exit gcn_gx_module_exit(void)
 	 * synchronize_rcu() in unregister then drains all direct IRQ callbacks.
 	 */
 	WRITE_ONCE(gx_accel_ready, false);
-	cancel_work_sync(&gx_rgb565_work.work);
+	cancel_work_sync(&gx_frame_work.work);
 	gcnfb_unregister_accel(&gcn_gx_accel_ops);
 	gcn_gx_exit();
 }
