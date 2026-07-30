@@ -1996,3 +1996,38 @@ intact output outside those boundaries argue against CP, raster, EFB, or XFB
 corruption. Do not advance to RGB888 yet. Add an explicit synchronized source
 handoff (preferably double-buffered pan/present ownership), then repeat this
 same workload as its positive control.
+
+## 2026-07-30: Stage synchronized double-VFB presentation
+
+- Test implementation: `cac528678520`
+- Kernel zImage SHA-256:
+  `767b532ca0fe1e2460037db58d7c941337ec3e02457e23bf0126193f9f107117`
+- GX module SHA-256:
+  `b0060f2a18d7b3e75e92f254252eabb22b6f79c32c0edaba0b05684efc9c4bfa`
+- Static PowerPC workload SHA-256:
+  `3c16da7d587bd0407902a22ae1a39d3ded4d59b0eb2468cab6ce08ea092b3d63`
+
+Implement vertical VFB panning as a synchronized RGB565 source-ownership
+protocol. `gcn-gx` now returns the immutable VFB source pointer paired with each
+completed XFB. `gcnfb` tracks the requested and presented source yoffsets;
+`FBIOPAN_DISPLAY` publishes a completed userspace page and returns only after
+that exact source has completed GX rendering and its XFB has been selected for
+VI display. The previous VFB page is therefore safe for userspace to reuse.
+Software fallback reports the same presentation event after conversion.
+
+Also repair `FBIO_WAITFORVSYNC`, whose previous wait condition could never
+become true without a signal, by waiting on an advancing retrace sequence. The
+stress client now requests two 640x480 RGB565 pages, alternates them through
+`FBIOPAN_DISPLAY`, and restores the original one-page mode on exit. Its
+`--single-buffer` option preserves the previously validated tearing-prone
+control.
+
+Install the checksum-matched built-in kernel and module together and cold boot.
+First require normal init, automatic Wi-Fi/SSH/GX loading, and a clear console.
+Then repeat 120 seconds at 30 source fps in the default double-buffered mode.
+Success requires at least 27 fps, approximately 60 PE finish interrupts per
+second, completely continuous upper and lower moving markers with intact
+static geometry, no VFB-present timeout or kernel fault, continued SSH/module
+residency, restoration to a 640x480 one-page mode, and a clear responsive
+console. The earlier intermittent upper-marker tear is the specific negative
+control this test must eliminate.
