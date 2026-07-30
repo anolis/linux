@@ -2144,3 +2144,25 @@ or kernel fault, continued module/Wi-Fi/SSH residency, restoration to the
 currently converts XRGB8888 to RGB565 before texturing, the test validates
 32-bit framebuffer API compatibility and synchronization, not preservation of
 all eight source bits per color channel.
+
+Hardware result: kernel build `#25` booted normally. The previous module
+correctly failed its renamed-symbol check, leaving the CPU fallback active;
+after checksum-verifying and installing the matching module, `gcn-gx`
+registered and entered the generated renderer without a warning or fault.
+
+The RGB888 workload negotiated two 640x480 XRGB8888 pages with a 2,560-byte
+stride and completed all 120 seconds. The user confirmed correct color bars,
+geometry, and tear-free motion. Motion speed varied during warm-up and then
+stabilized. The client produced 1,831 source presentations in 120.050 seconds,
+or 15.25 fps, so this run fails the 27 fps throughput requirement. PE finish
+interrupts nevertheless advanced from 2,903 to 10,221, a delta of 7,318 or
+60.98 per second. This confirms that GX/PE presentation remained healthy while
+new source frames arrived at approximately half the requested rate.
+
+The workload restored RGB565 mode, and the user confirmed a clear responsive
+console. `gcn_gx`, wlan0, and SSH remained live. The only intervening kernel
+message was routine b43 key setup; there was no consume timeout, GX warning,
+oops, stall, or reboot. Classify this as an RGB888 functionality,
+synchronization, and recovery pass but a performance failure. Instrument
+userspace generation/copy, pan wait, and kernel XRGB8888-to-RGB565 tiling
+separately before changing the conversion path.
