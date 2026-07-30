@@ -2349,3 +2349,29 @@ technically valid result. Bash syntax and ShellCheck pass. No kernel, module,
 or workload bytes changed, so no card exchange or target artifact replacement
 is required. Repeat the complete default matrix from the current deployed
 artifacts and record direct visual behavior for both named candidates.
+
+## 2026-07-30: Complete numerical sweep, host wrapper interrupted cleanup
+
+The corrected harness reached and completed both 15-second candidates from the
+same deployed artifacts. Baseline (`source_dedup=0`) completed 222 RGB888
+frames in 15.001 seconds, or 14.80 fps, with 1,058 PE finish interrupts
+(70.53 per second). Client timing averaged 8,981 us drawing, 20,209 us copying,
+and 38,367 us in pan; kernel conversion averaged 12,823 us by worker frame 256.
+
+Deduplication (`source_dedup=1`) completed 225 frames in 15.032 seconds, or
+14.97 fps, with 598 PE finish interrupts (39.87 per second). Client timing
+averaged 9,658 us drawing, 16,753 us copying, and 40,389 us in pan. Neither run
+logged a kernel fault or source-generation timeout. Deduplication materially
+reduced PE submissions but did not improve source rate, so it remains rejected
+as a throughput optimization even before visual grading.
+
+The external command-execution wrapper terminated the host harness after the
+dedup workload completed but before it appended that row, printed ranking, or
+ran its EXIT restoration trap. This was not a target or harness control-flow
+failure; both preserved candidate logs contain normal completion records. The
+baseline module was reloaded manually and registered cleanly, with
+`source_dedup=0` confirmed in dmesg. Run future long sweeps in a persistent PTY
+and poll them so the wrapper cannot terminate cleanup. The user reported that
+baseline and dedup looked approximately the same and that both were visibly
+slower than required. There is no visual or numerical reason to enable dedup;
+keep the default disabled and optimize the measured RGB888 memory and pan path.
