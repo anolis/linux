@@ -111,11 +111,19 @@ ssh_options=(
 )
 remote_binary=/tmp/wii-fb-stress
 run_id="$(git rev-parse --short=12 HEAD)-$(date +%s)-$$"
+run_log=${TMPDIR:-/tmp}/wii-fb-stress-${run_id}.log
 
 remote_exec()
 {
 	ssh "${ssh_options[@]}" "$remote" "$1"
 }
+
+restore_console()
+{
+	remote_exec "printf '\\033[2J\\033[H=== GX STRESS COMPLETE: SSH AND CONSOLE LIVE ===\\n' > /dev/tty0" \
+		>/dev/null 2>&1 || true
+}
+trap restore_console EXIT
 
 binary_sha=$(sha256sum "$binary" | awk '{print $1}')
 printf 'Deploying RGB565 stress workload to %s\n' "$remote"
@@ -139,14 +147,31 @@ if [[ ! $irq_before =~ ^[0-9]+$ ]]; then
 	echo "Unable to read gcn-gx-pe-finish interrupt counter." >&2
 	exit 1
 fi
+dmesg_lines_before=$(remote_exec "dmesg | wc -l")
+if [[ ! $dmesg_lines_before =~ ^[0-9]+$ ]]; then
+	echo "Unable to record the starting kernel-log position." >&2
+	exit 1
+fi
 
 remote_exec "printf '<6>wii-fb-stress: begin $run_id duration=$duration fps=$fps sha256=$binary_sha\\n' > /dev/kmsg"
 printf 'Running %ss at %s fps; watch the Wii for smooth moving bars and intact grid lines.\n' \
 	"$duration" "$fps"
 set +e
-remote_exec "$remote_binary --duration $duration --fps $fps"
-workload_status=$?
+remote_exec "$remote_binary --duration $duration --fps $fps" | tee "$run_log"
+workload_status=${PIPESTATUS[0]}
 set -e
+
+achieved_fps=$(awk '
+	/WII_FB_STRESS_DONE/ {
+		for (field = 1; field <= NF; field++) {
+			if ($field ~ /^fps=/) {
+				sub(/^fps=/, "", $field)
+				fps = $field
+			}
+		}
+	}
+	END { print fps }
+' "$run_log")
 
 irq_after=$(remote_exec "awk '/gcn-gx-pe-finish/ { print \$2 }' /proc/interrupts")
 irq_delta=$((irq_after - irq_before))
@@ -162,19 +187,26 @@ printf '\nRGB565 stress result\n'
 printf '  commit:       %s\n' "$(git rev-parse --short=12 HEAD)"
 printf '  binary sha:   %s\n' "$binary_sha"
 printf '  exit status:  %s\n' "$workload_status"
+printf '  source rate:  %s fps requested, %s fps achieved\n' \
+	"$fps" "${achieved_fps:-unknown}"
 printf '  PE finish IRQ: %s -> %s (delta %s, %s/s)\n' \
 	"$irq_before" "$irq_after" "$irq_delta" "$irq_rate"
 printf '  target state:\n'
 remote_exec "grep '^gcn_gx ' /proc/modules; ip -4 -o addr show dev wlan0; uptime"
 
 printf '  kernel messages since test start:\n'
-remote_exec "dmesg | sed -n '/wii-fb-stress: begin $run_id/,$p'"
-remote_exec "printf '\\033[2J\\033[H=== GX STRESS COMPLETE: SSH AND CONSOLE LIVE ===\\n' > /dev/tty0"
+remote_exec "dmesg | tail -n +$((dmesg_lines_before + 1))"
 
 if ((workload_status != 0)); then
 	exit "$workload_status"
 fi
 if ((irq_delta <= 0)); then
 	echo "GX finish IRQ did not advance during the workload." >&2
+	exit 1
+fi
+if [[ ! $achieved_fps =~ ^[0-9]+([.][0-9]+)?$ ]] ||
+   ! awk -v actual="$achieved_fps" -v requested="$fps" \
+	'BEGIN { exit !(actual >= requested * 0.90) }'; then
+	echo "Source workload did not sustain 90% of its requested frame rate." >&2
 	exit 1
 fi
