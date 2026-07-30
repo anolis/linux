@@ -1781,3 +1781,17 @@ green, `gcn_gx` to be resident, and `gcnfb` to register the accelerator. The
 display must transition from the initial CPU framebuffer to a stable readable
 GX console without freezes, repeated columns, or persistent diagnostic fills.
 Module unload must still restore the CPU console before this phase is closed.
+
+Hardware result: after a synchronized cold reboot, SSH returned at 36.13
+seconds uptime with normal init, automatic wireless, both OHCI devices, and
+`gcn_gx` resident. The module registered with `gcnfb`, completed the seed,
+isolated initialization, and first-live-frame PE token fences, and continuously
+alternated the two XFB addresses with drained submissions. The user visually
+confirmed a clear console with no blur, repeated columns, solid diagnostic
+fill, or freeze.
+
+At 78 seconds uptime, `rmmod gcn_gx` completed cleanly and `gcnfb` reported that
+the accelerator was unregistered and software conversion had resumed. The user
+again confirmed that the CPU-rendered console remained clear. This passes
+production auto-load and immediate CPU fallback. A runtime reload remains as
+the final module-lifecycle control before diagnostic cleanup.
