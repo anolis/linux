@@ -1432,3 +1432,30 @@ references. The platform object links the OF reserved-memory init and release
 APIs. Hardware positive controls remain successful pool attachment, two OHCI
 root hubs/IRQs, keyboard enumeration, and actual tty1 key input. This exact
 checksum must be deployed before drawing a conclusion.
+
+Hardware result: the exact image checksum was deployed and cold-booted. The
+first reserved-memory pool attached successfully, controller 0 registered USB
+bus 1 on IRQ 19, its root hub enumerated, and the hardware detected the
+keyboard electrically as a new low-speed device. This is the first successful
+Hollywood OHCI registration and device-connect positive control on Linux 6.18.
+The keyboard did not complete descriptor enumeration, however, so no HID/input
+device appeared and tty1 still received no keys. The controller's IRQ count
+remained at 8 while enumeration was stalled.
+
+Controller 1 failed probe with `-EINVAL`. Early boot reported that
+`dma-pool@1480000` could not be reserved. The boot wrapper relocates to
+`0x00f00000`, and this build's compressed image extends to approximately
+`0x014f9000`, overlapping the second pool at `0x01480000`. The first coherent
+allocation also raised a PowerPC alignment warning from `memset()` inside
+`dma_alloc_from_dev_coherent()`, although execution continued and the root hub
+worked. A later `memremap` warning for `0x01480000` is consistent with the
+second controller attempting to attach the failed pool.
+
+Keep the standard reserved-memory mechanism, but replace the adjacent pools
+with one shared 1 MiB pool at `0x01500000`, above the relocated image and below
+the GX FIFO at `0x01684000`. Both controllers can reference the same
+`shared-dma-pool`; its allocator bitmap will arbitrate their allocations. Add
+bounded logging around the Hollywood control-list workaround to establish
+whether the first keyboard control transfer reaches it and where controller
+state stops changing. Treat the alignment warning as an unresolved candidate
+if enumeration still stalls.
