@@ -304,7 +304,7 @@ remote_exec "mv -f $remote_module.new $remote_module"
 
 remote_status "loading renderer=$renderer source=$texture_source probe_seed=$probe_seed texsrc=$texcoord_source texmap=$texcoord_mapping prim=$direct_primitive pattern=$direct_pattern coord=$texcoord_space bias8=$texel_bias_eighths hold_frame=$hold_frame"
 remote_exec "grep -q ' /sys/kernel/debug ' /proc/mounts || mount -t debugfs debugfs /sys/kernel/debug"
-remote_exec "insmod $remote_module renderer=$renderer texture_source=$texture_source probe_seed=$probe_seed texcoord_source=$texcoord_source texcoord_mapping=$texcoord_mapping direct_primitive=$direct_primitive direct_pattern=$direct_pattern texcoord_space=$texcoord_space texel_bias_eighths=$texel_bias_eighths hold_frame=$hold_frame"
+remote_exec "insmod $remote_module renderer=$renderer texture_source=$texture_source probe_seed=$probe_seed texcoord_source=$texcoord_source texcoord_mapping=$texcoord_mapping direct_primitive=$direct_primitive direct_pattern=$direct_pattern texcoord_space=$texcoord_space texel_bias_eighths=$texel_bias_eighths hold_frame=$hold_frame debug_capture=1"
 remote_exec "printf '\\n=== GX LOADED: $renderer source=$texture_source seed=$probe_seed texsrc=$texcoord_source texmap=$texcoord_mapping prim=$direct_primitive pattern=$direct_pattern coord=$texcoord_space bias8=$texel_bias_eighths hold=$hold_frame ===\\n' > /dev/tty0"
 
 printf '\nGX live cycle complete\n'

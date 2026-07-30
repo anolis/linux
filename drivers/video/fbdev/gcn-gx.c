@@ -39,7 +39,6 @@
 #include <linux/irqdomain.h>
 #include <linux/string.h>
 #include <linux/workqueue.h>
-#include <linux/crc32.h>
 #include <linux/debugfs.h>
 #include <linux/fs.h>
 #include <linux/vmalloc.h>
@@ -70,8 +69,6 @@ static void *gx_fifo_buf;
 static void *gx_tex_raw;
 static void *gx_tex_buf;
 static void *gx_tex_buf_alt;
-static bool gx_log_next_submit;
-static u32 gx_current_frame;
 static u16 gx_expected_token;
 static unsigned int gx_pe_finish_irq;
 static u32 gx_pe_finish_count;
@@ -100,10 +97,8 @@ struct gx_rgb565_work {
 
 static struct gx_rgb565_work gx_rgb565_work;
 static DEFINE_SPINLOCK(gx_rgb565_work_lock);
-static u32 gx_rgb565_work_runs;
 static u32 gx_live_texture_frame;
 static u32 gx_rgb565_ready_xfb;
-static u32 gx_rgb565_present_count;
 static bool gx_rgb565_work_busy;
 static bool gx_rgb565_boot_deferred;
 static bool gx_rgb565_publish_xfb;
@@ -128,6 +123,11 @@ MODULE_PARM_DESC(renderer, "RGB565 command path: generated, reference, or direct
 static unsigned int gx_hold_frame;
 module_param_named(hold_frame, gx_hold_frame, uint, 0444);
 MODULE_PARM_DESC(hold_frame, "Publish this frame once, then hold output (0=continuous)");
+
+static bool gx_debug_capture;
+module_param_named(debug_capture, gx_debug_capture, bool, 0444);
+MODULE_PARM_DESC(debug_capture,
+		 "Allocate debugfs VFB/XFB capture buffers (default: false)");
 
 static char *gx_texture_source = "console";
 module_param_named(texture_source, gx_texture_source, charp, 0444);
@@ -186,7 +186,6 @@ static inline void pe_write(int reg, u16 val)
 
 static irqreturn_t gx_pe_finish_handler(int irq, void *data)
 {
-	static unsigned int log_count;
 	u16 status = pe_read(PE_REG_INTR_STATUS);
 	u32 count;
 
@@ -194,9 +193,6 @@ static irqreturn_t gx_pe_finish_handler(int irq, void *data)
 	pe_write(PE_REG_INTR_STATUS, (status & 0x0003) | PE_FINISH_BIT);
 	count = READ_ONCE(gx_pe_finish_count) + 1;
 	WRITE_ONCE(gx_pe_finish_count, count);
-	if (log_count++ < 4)
-		pr_info("gcn-gx: PE finish IRQ count=%u status=%04x\n",
-			count, status);
 
 	return IRQ_HANDLED;
 }
@@ -505,10 +501,6 @@ static void __maybe_unused gx_wait_fifo_empty(void)
 
 static int gx_fifo_init(void)
 {
-	u32 phys_start = (u32)virt_to_phys(gx_fifo_buf);
-
-	pr_info("gcn-gx: fifo_init: phys=0x%08x\n", phys_start);
-
 	/*
 	 * Disable CP reads.  Do not write CP BASE/END/WT/RD — writing those
 	 * registers causes deferred bus errors or immediate GP faults on this
@@ -520,7 +512,6 @@ static int gx_fifo_init(void)
 	 * is enabled by gx_submit_cmds() only after valid commands are queued.
 	 */
 	cp_write(CP_REG_CTRL, 0);
-	pr_info("gcn-gx: fifo_init: CR=0 SR=0x%04x\n", cp_read(CP_REG_STATUS));
 
 	/*
 	 * All remaining setup (PI BASE/END/WPTR, LINKEN, GPRESET) is
@@ -529,7 +520,6 @@ static int gx_fifo_init(void)
 	 * in interrupt context at submit time that error can't propagate.
 	 */
 
-	pr_info("gcn-gx: fifo_init: done\n");
 	return 0;
 }
 
@@ -563,31 +553,6 @@ static void gx_tile_rgb565(const u16 *src, u16 *dst, u32 width, u32 height)
 				tile[row * 4 + 3] = sl[3];
 			}
 		}
-	}
-}
-
-struct gx_rgb565_digest {
-	u32 crc;
-	u32 sum;
-	u32 nonzero;
-	u16 xor;
-};
-
-static void gx_digest_rgb565(const u16 *pixels, u32 count,
-			     struct gx_rgb565_digest *digest)
-{
-	u32 i;
-
-	digest->crc = crc32_le(~0U, (const u8 *)pixels, count * sizeof(*pixels));
-	digest->sum = 0;
-	digest->nonzero = 0;
-	digest->xor = 0;
-	for (i = 0; i < count; i++) {
-		u16 pixel = pixels[i];
-
-		digest->sum += pixel;
-		digest->nonzero += pixel != 0;
-		digest->xor ^= pixel;
 	}
 }
 
@@ -1511,9 +1476,7 @@ static void gx_copy_efb_to_xfb(u32 xfb_phys, u16 width, u16 height, bool clear)
 
 	/*
 	 * BP 0x45 = 2: PE draw-done trigger (libogc GX_DrawDone/GX_SetDrawDone).
-	 * Queued behind the copy command. PE-finish polling has not yet passed a
-	 * positive control, so this command must not currently be treated as a
-	 * validated software fence.
+	 * Queued behind the copy command and observed through the PE finish IRQ.
 	 */
 	gx_load_bp_reg(0x45000002);
 }
@@ -1632,12 +1595,9 @@ static void gx_capture_vfb(const void *vfb, u16 width, u16 height)
  */
 static void gx_submit_cmds(const char *phase)
 {
-	static int frame_log;	/* log frames 0-3 in detail */
 	static bool logged_first_slow;
 	static bool logged_first_stall;
-	bool do_log = frame_log < 4 || gx_log_next_submit;
 	bool token_seen;
-	u32 log_frame = gx_log_next_submit ? gx_current_frame : frame_log;
 	u32 phys_start = (u32)virt_to_phys(gx_fifo_buf);
 	u32 phys_end   = phys_start + GX_FIFO_SIZE - 4;
 	u32 phys_wt;
@@ -1677,11 +1637,6 @@ static void gx_submit_cmds(const char *phase)
 	pi_write(PI_REG_FIFO_END,  phys_end   & ~0x1fu);
 	pi_write(PI_REG_FIFO_WPTR, phys_wt);
 
-	if (do_log)
-		pr_info("gcn-gx: f%u %s pre: SR=%04x RD=%04x WT=%04x pos=%u\n",
-			log_frame, phase, cp_read(CP_REG_STATUS), 0,
-			phys_wt - phys_start, fifo_pos);
-
 	/* Enable PE events and acknowledge stale token/finish status. */
 	pe_write(PE_REG_INTR_STATUS,
 		 PE_TOKEN_ENABLE | PE_FINISH_ENABLE |
@@ -1714,12 +1669,6 @@ static void gx_submit_cmds(const char *phase)
 		pr_warn_once("gcn-gx: PE token positive control timed out (PE=%04x token=%04x expected=%04x)\n",
 			     pe_status, pe_token, gx_expected_token);
 	}
-	if (do_log)
-		pr_info("gcn-gx: f%u %s PE token_status=%u finish=%u token=%04x expected=%04x wait_us=%u status=%04x\n",
-			log_frame, phase, !!(pe_status & PE_TOKEN_BIT),
-			!!(pe_status & PE_FINISH_BIT), pe_token,
-			gx_expected_token, (2000 - pe_timeout) * 10, pe_status);
-
 	/* Read back RD after delay: confirms GP consumed commands */
 	cp_rd = ((u32)cp_read(CP_REG_RD_HI) << 16) |
 		cp_read(CP_REG_RD_LO);
@@ -1727,8 +1676,8 @@ static void gx_submit_cmds(const char *phase)
 		cp_read(CP_REG_WT_LO);
 	if (cp_rd != cp_wt) {
 		if (!logged_first_slow) {
-			pr_warn("gcn-gx: first_slow f%u SR=%04x RDoff=%04x WToff=%04x PIoff=%04x pos=%u\n",
-				gx_current_frame, cp_read(CP_REG_STATUS),
+			pr_warn("gcn-gx: first slow %s submit SR=%04x RDoff=%04x WToff=%04x PIoff=%04x pos=%u\n",
+				phase, cp_read(CP_REG_STATUS),
 				cp_rd - phys_start, cp_wt - phys_start,
 				pi_read(PI_REG_FIFO_WPTR) - phys_start, fifo_pos);
 			logged_first_slow = true;
@@ -1748,22 +1697,13 @@ static void gx_submit_cmds(const char *phase)
 				cp_read(CP_REG_WT_LO);
 		}
 	}
-	if (do_log) {
-		pr_info("gcn-gx: f%u %s post: SR=%04x RDoff=%04x WToff=%04x\n",
-			log_frame, phase, cp_read(CP_REG_STATUS),
-			cp_rd - phys_start, cp_wt - phys_start);
-		if (gx_log_next_submit)
-			gx_log_next_submit = false;
-		else
-			frame_log++;
-	}
 	if (!logged_first_stall && cp_rd != cp_wt) {
 		u32 off = cp_rd - phys_start;
 		u8 *fifo = (u8 *)gx_fifo_buf;
 		u32 dump = off >= 16 ? off - 16 : 0;
 
-		pr_warn("gcn-gx: first_stall f%u SR=%04x RDoff=%04x WToff=%04x PIoff=%04x pos=%u\n",
-			gx_current_frame, cp_read(CP_REG_STATUS),
+		pr_warn("gcn-gx: first stalled %s submit SR=%04x RDoff=%04x WToff=%04x PIoff=%04x pos=%u\n",
+			phase, cp_read(CP_REG_STATUS),
 			off, cp_wt - phys_start,
 			pi_read(PI_REG_FIFO_WPTR) - phys_start, fifo_pos);
 		pr_warn("gcn-gx: stall_bytes @%04x: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x\n",
@@ -2028,22 +1968,6 @@ static void gx_submit_reference_rgb565(const void *vfb, u32 xfb_phys,
 	u32 pixel_count = (u32)width * height;
 
 	gx_prepare_rgb565_texture(vfb, (u16 *)tex_buf, width, height);
-	if (!(gx_rgb565_work_runs % 120))
-		pr_info("gcn-gx: texture phase=live run=%u tex=%08x\n",
-			gx_rgb565_work_runs, (u32)virt_to_phys(tex_buf));
-	if (live_frame < 4) {
-		struct gx_rgb565_digest vfb_digest;
-		struct gx_rgb565_digest tex_digest;
-
-		gx_digest_rgb565((const u16 *)vfb, pixel_count, &vfb_digest);
-		gx_digest_rgb565((const u16 *)tex_buf, pixel_count, &tex_digest);
-		pr_info("gcn-gx: live-data frame=%u source=%s tex=%08x vfb crc=%08x sum=%08x xor=%04x nz=%u tex crc=%08x sum=%08x xor=%04x nz=%u\n",
-			live_frame, gx_texture_source,
-			(u32)virt_to_phys(tex_buf),
-			vfb_digest.crc, vfb_digest.sum, vfb_digest.xor,
-			vfb_digest.nonzero, tex_digest.crc, tex_digest.sum,
-			tex_digest.xor, tex_digest.nonzero);
-	}
 	flush_dcache_range((unsigned long)tex_buf,
 			   (unsigned long)tex_buf +
 			   pixel_count * sizeof(u16));
@@ -2071,22 +1995,6 @@ static void gx_submit_generated_rgb565(const void *vfb, u32 xfb_phys,
 
 	gx_capture_vfb(vfb, width, height);
 	gx_prepare_rgb565_texture(vfb, (u16 *)tex_buf, width, height);
-	if (!(gx_rgb565_work_runs % 120))
-		pr_info("gcn-gx: texture phase=live run=%u tex=%08x\n",
-			gx_rgb565_work_runs, (u32)virt_to_phys(tex_buf));
-	if (live_frame < 4) {
-		struct gx_rgb565_digest vfb_digest;
-		struct gx_rgb565_digest tex_digest;
-
-		gx_digest_rgb565((const u16 *)vfb, pixel_count, &vfb_digest);
-		gx_digest_rgb565((const u16 *)tex_buf, pixel_count, &tex_digest);
-		pr_info("gcn-gx: live-data frame=%u source=%s tex=%08x vfb crc=%08x sum=%08x xor=%04x nz=%u tex crc=%08x sum=%08x xor=%04x nz=%u\n",
-			live_frame, gx_texture_source,
-			(u32)virt_to_phys(tex_buf),
-			vfb_digest.crc, vfb_digest.sum, vfb_digest.xor,
-			vfb_digest.nonzero, tex_digest.crc, tex_digest.sum,
-			tex_digest.xor, tex_digest.nonzero);
-	}
 	flush_dcache_range((unsigned long)tex_buf,
 			   (unsigned long)tex_buf +
 			   pixel_count * sizeof(u16));
@@ -2180,8 +2088,6 @@ static bool gx_process_rgb565(const void *vfb, u32 xfb_phys,
 	case GX_DIAG_WAIT_SEED:
 		if (finish_count == gx_diag_finish_baseline)
 			break;
-		pr_info("gcn-gx: seed PE finish IRQ validated at count=%u\n",
-			finish_count);
 		gx_diag_finish_baseline = finish_count;
 		fifo_pos = 0;
 		gx_set_copy_clear_rgb(0xff, 0x00, 0x00);
@@ -2194,7 +2100,6 @@ static bool gx_process_rgb565(const void *vfb, u32 xfb_phys,
 	case GX_DIAG_WAIT_BLUE:
 		if (finish_count == gx_diag_finish_baseline)
 			break;
-		pr_info("gcn-gx: blue seed complete; submitting isolated libogc init\n");
 		gx_diag_finish_baseline = finish_count;
 		fifo_pos = 0;
 		gx_load_libogc_init_preamble();
@@ -2209,8 +2114,6 @@ static bool gx_process_rgb565(const void *vfb, u32 xfb_phys,
 	case GX_DIAG_WAIT_INIT:
 		if (finish_count == gx_diag_finish_baseline)
 			break;
-		pr_info("gcn-gx: isolated libogc init complete; enabling %s renderer\n",
-			gx_renderer);
 		gx_diag_finish_baseline = finish_count;
 		gx_submit_selected_rgb565(vfb, xfb_phys, width, height,
 					  "live0");
@@ -2221,8 +2124,7 @@ static bool gx_process_rgb565(const void *vfb, u32 xfb_phys,
 	case GX_DIAG_WAIT_DRAW:
 		if (finish_count == gx_diag_finish_baseline)
 			break;
-		pr_info("gcn-gx: first %s frame PE finish observed\n",
-			gx_renderer);
+		pr_info("gcn-gx: %s renderer active\n", gx_renderer);
 		gx_diag_phase = GX_DIAG_DONE;
 		break;
 
@@ -2248,7 +2150,6 @@ static void gx_rgb565_workfn(struct work_struct *work)
 	u32 xfb_phys;
 	u16 width, height;
 	unsigned long flags;
-	u32 run;
 	bool submitted;
 
 	(void)work;
@@ -2266,10 +2167,6 @@ static void gx_rgb565_workfn(struct work_struct *work)
 		return;
 	}
 
-	run = ++gx_rgb565_work_runs;
-	if (run == 1 || run == 60 || run == 300 || run == 450 ||
-	    run == 600 || run == 750)
-		pr_info("gcn-gx: RGB565 worker run=%u\n", run);
 	submitted = gx_process_rgb565(vfb, xfb_phys, width, height);
 
 	spin_lock_irqsave(&gx_rgb565_work_lock, flags);
@@ -2295,14 +2192,10 @@ static bool gcn_gx_take_completed_rgb565(u32 *xfb_phys)
 		*xfb_phys = gx_rgb565_ready_xfb;
 		gx_rgb565_ready_xfb = 0;
 		gx_rgb565_work_busy = false;
-		gx_rgb565_present_count++;
 		ready = true;
 	}
 	spin_unlock_irqrestore(&gx_rgb565_work_lock, flags);
 
-	if (ready && gx_rgb565_present_count <= 4)
-		pr_info("gcn-gx: present %u xfb=0x%08x\n",
-			gx_rgb565_present_count, *xfb_phys);
 	return ready;
 }
 
@@ -2498,12 +2391,7 @@ static int gcn_gx_init(void)
 	/* Redirect wgPipe DMA bursts to our zeroed buffer (was addr 0 in mini) */
 	iowrite32be(fifo_phys, pi_regs + PI_REG_FIFO_WPTR);
 
-	/* Now safe to printk */
-	pr_info("gcn-gx: init: A wptr=0x%08x hw_base=%p\n", fifo_phys, hw_base);
-
-	pr_info("gcn-gx: init: D fifo_init\n");
 	ret = gx_fifo_init();
-	pr_info("gcn-gx: init: E fifo_init ret=%d\n", ret);
 	if (ret)
 		goto err_hw;
 
@@ -2524,8 +2412,6 @@ static int gcn_gx_init(void)
 	pe_write(PE_REG_INTR_STATUS,
 		 PE_TOKEN_ENABLE | PE_FINISH_ENABLE |
 		 PE_TOKEN_BIT | PE_FINISH_BIT);
-	pr_info("gcn-gx: PE finish hwirq %u mapped to IRQ %u\n",
-		GX_PE_FINISH_HWIRQ, gx_pe_finish_irq);
 
 	/*
 	 * Texture tile buffer: must be in MEM1.  The GX texture unit is
@@ -2540,10 +2426,8 @@ static int gcn_gx_init(void)
 	memset(gx_tex_buf_alt, 0, GX_TEX_BUF_SIZE);
 	INIT_WORK(&gx_rgb565_work.work, gx_rgb565_workfn);
 	gx_rgb565_work.vfb = NULL;
-	gx_rgb565_work_runs = 0;
 	gx_live_texture_frame = 0;
 	gx_rgb565_ready_xfb = 0;
-	gx_rgb565_present_count = 0;
 	gx_rgb565_work_busy = false;
 	gx_rgb565_boot_deferred = false;
 	gx_rgb565_publish_xfb = false;
@@ -2555,45 +2439,46 @@ static int gcn_gx_init(void)
 	gx_xfb_snapshot_phys = 0;
 	gx_diag_phase = GX_DIAG_SEED;
 	gx_diag_finish_baseline = 0;
-	pr_info("gcn-gx: init: tex_buf phys=0x%08x/%08x virt=%p/%p\n",
-		GX_TEX_BUF_MEM1_PHYS, GX_TEX_BUF_ALT_MEM1_PHYS,
-		gx_tex_buf, gx_tex_buf_alt);
-	pr_info("gcn-gx: config renderer=%s texture_source=%s probe_seed=%u texcoord_source=%s texcoord_mapping=%s direct_primitive=%s direct_pattern=%s texcoord_space=%s texel_bias_eighths=%d hold_frame=%u\n",
-		gx_renderer, gx_texture_source, gx_probe_seed,
-		gx_texcoord_source, gx_texcoord_mapping, gx_direct_primitive,
-		gx_direct_pattern_name, gx_texcoord_space,
-		gx_texel_bias_eighths, gx_hold_frame);
+	gx_xfb_snapshot = NULL;
+	gx_vfb_snapshot = NULL;
+	gx_debugfs_dir = NULL;
+	gx_xfb_debugfs_file = NULL;
+	gx_vfb_debugfs_file = NULL;
+	if (gx_debug_capture) {
+		gx_xfb_snapshot = vzalloc(GX_XFB_SNAPSHOT_MAX);
+		if (!gx_xfb_snapshot) {
+			ret = -ENOMEM;
+			goto err_snapshot;
+		}
+		gx_vfb_snapshot = vzalloc(GX_XFB_SNAPSHOT_MAX);
+		if (!gx_vfb_snapshot) {
+			ret = -ENOMEM;
+			goto err_vfb_snapshot;
+		}
+		gx_debugfs_dir = debugfs_create_dir("gcn_gx", NULL);
+		if (IS_ERR_OR_NULL(gx_debugfs_dir)) {
+			ret = gx_debugfs_dir ? PTR_ERR(gx_debugfs_dir) : -ENODEV;
+			gx_debugfs_dir = NULL;
+			goto err_debugfs;
+		}
+		gx_xfb_debugfs_file = debugfs_create_file("xfb_yuyv", 0400,
+							 gx_debugfs_dir, NULL,
+							 &gx_xfb_snapshot_fops);
+		gx_vfb_debugfs_file = debugfs_create_file("vfb_rgb565be", 0400,
+							 gx_debugfs_dir, NULL,
+							 &gx_vfb_snapshot_fops);
+		debugfs_create_u32("xfb_width", 0400, gx_debugfs_dir,
+				   &gx_xfb_snapshot_width);
+		debugfs_create_u32("xfb_height", 0400, gx_debugfs_dir,
+				   &gx_xfb_snapshot_height);
+		debugfs_create_x32("xfb_phys", 0400, gx_debugfs_dir,
+				   &gx_xfb_snapshot_phys);
+	}
 
-	gx_xfb_snapshot = vzalloc(GX_XFB_SNAPSHOT_MAX);
-	if (!gx_xfb_snapshot) {
-		ret = -ENOMEM;
-		goto err_snapshot;
-	}
-	gx_vfb_snapshot = vzalloc(GX_XFB_SNAPSHOT_MAX);
-	if (!gx_vfb_snapshot) {
-		ret = -ENOMEM;
-		goto err_vfb_snapshot;
-	}
-	gx_debugfs_dir = debugfs_create_dir("gcn_gx", NULL);
-	if (IS_ERR(gx_debugfs_dir)) {
-		ret = PTR_ERR(gx_debugfs_dir);
-		gx_debugfs_dir = NULL;
-		goto err_debugfs;
-	}
-	gx_xfb_debugfs_file = debugfs_create_file("xfb_yuyv", 0400,
-						 gx_debugfs_dir, NULL,
-						 &gx_xfb_snapshot_fops);
-	gx_vfb_debugfs_file = debugfs_create_file("vfb_rgb565be", 0400,
-						 gx_debugfs_dir, NULL,
-						 &gx_vfb_snapshot_fops);
-	debugfs_create_u32("xfb_width", 0400, gx_debugfs_dir,
-			   &gx_xfb_snapshot_width);
-	debugfs_create_u32("xfb_height", 0400, gx_debugfs_dir,
-			   &gx_xfb_snapshot_height);
-	debugfs_create_x32("xfb_phys", 0400, gx_debugfs_dir,
-			   &gx_xfb_snapshot_phys);
-
-	pr_info("gcn-gx: init: H done (accel ON)\n");
+	pr_info("gcn-gx: ready fifo=%08x tex=%08x/%08x irq=%u renderer=%s bias8=%d debug_capture=%u\n",
+		fifo_phys, GX_TEX_BUF_MEM1_PHYS, GX_TEX_BUF_ALT_MEM1_PHYS,
+		gx_pe_finish_irq, gx_renderer, gx_texel_bias_eighths,
+		gx_debug_capture);
 	gx_accel_ready = true;
 	return 0;
 
