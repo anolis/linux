@@ -2031,3 +2031,26 @@ static geometry, no VFB-present timeout or kernel fault, continued SSH/module
 residency, restoration to a 640x480 one-page mode, and a clear responsive
 console. The earlier intermittent upper-marker tear is the specific negative
 control this test must eliminate.
+
+Hardware result: kernel build `#22` booted normally with automatic Wi-Fi, SSH,
+and the checksum-matched GX module. `/boot` returned to its intended read-only
+mount after deployment. GX registered and entered the generated renderer with
+no startup warning, pan timeout, oops, or reboot.
+
+The double-buffered workload completed 1,200 source presentations in 120.093
+seconds (9.99 fps). PE finish interrupts advanced from 3,208 to 10,554, a
+delta of 7,346 or 61.22 per second. The module, wlan0, and SSH remained live,
+the kernel log contained only the test markers, and the client restored the
+original 640x480 one-page mode. The user confirmed that both moving markers
+and the static pattern remained crisp with no tearing for the entire run, and
+that the recovered console was clear.
+
+This validates double-VFB source ownership as the fix for the prior tear, but
+the test fails its source-rate criterion. Two independent costs are present:
+the client sleeps one additional frame interval after a blocking pan misses its
+absolute deadline, and the kernel blocks `FBIOPAN_DISPLAY` until the selected
+XFB reaches VI presentation. Page reuse only needs to wait until the worker has
+copied the VFB into private GX texture memory. Split source-consumed from
+XFB-presented notification, wait on source consumption, remove the extra client
+sleep, and repeat the same 30 fps control. Preserve completed-XFB tracking for
+actual display selection and diagnostics.
