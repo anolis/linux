@@ -12,7 +12,7 @@ Usage: tools/wii-deploy-kernel.sh [--no-build] [--allow-dirty] [--keep-mounted]
 Build and deploy the Wii zImage through a local BOOTWII mount or SSH.
 
 Environment overrides:
-  JOBS                 parallel build jobs (default: nproc)
+  JOBS                 parallel build jobs (default: 16)
   WII_BOOT_MOUNT       boot mountpoint (default: /media/$USER/BOOTWII)
   WII_ROOT_MOUNT       root mountpoint (default: /media/$USER/WII-LINUX-NGX)
   WII_KERNEL_DEST      deployed image path (default: $mount/gumboot/zImage.ngx)
@@ -71,7 +71,7 @@ if (( ! allow_dirty )) && [[ -n $(git status --porcelain --untracked-files=norma
 fi
 
 commit=$(git rev-parse --short=12 HEAD)
-jobs=${JOBS:-$(nproc)}
+jobs=${JOBS:-16}
 boot_mount=${WII_BOOT_MOUNT:-/media/$USER/BOOTWII}
 root_mount=${WII_ROOT_MOUNT:-/media/$USER/WII-LINUX-NGX}
 destination=${WII_KERNEL_DEST:-$boot_mount/gumboot/zImage.ngx}
@@ -79,7 +79,7 @@ archive=${WII_DEPLOY_ARCHIVE:-/tmp/wii-kernel-deploy-backups}
 image=$repo/arch/powerpc/boot/zImage
 
 if (( build )); then
-	ARCH=powerpc CROSS_COMPILE=powerpc-linux-gnu- make wii_defconfig
+	ARCH=powerpc CROSS_COMPILE=powerpc-linux-gnu- make -j"$jobs" wii_defconfig
 	if ! grep -q '^CONFIG_FB_GAMECUBE=y$' .config; then
 		echo "wii_defconfig did not enable CONFIG_FB_GAMECUBE=y" >&2
 		exit 1
@@ -163,7 +163,9 @@ if [[ -n $ssh_host ]]; then
 	if (( remote_reboot )); then
 		printf '  reboot: requested\n'
 		remote_status "rebooting into commit $commit"
-		timeout 10 ssh "${ssh_options[@]}" "$remote" "/sbin/reboot -f" || true
+		# The diagnostic PID 1 does not reliably service reboot(8).
+		timeout 10 ssh "${ssh_options[@]}" "$remote" \
+			"sync; echo b > /proc/sysrq-trigger" || true
 	fi
 	printf '\a'
 	exit 0
