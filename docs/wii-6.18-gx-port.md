@@ -2213,3 +2213,36 @@ a source-generation value to the accelerator submission contract. Increment it
 for each synchronized pan and skip a queued source generation already handled;
 retain per-vblank refresh for one-page fbcon, whose contents can change without
 a pan ioctl. Re-profile before optimizing the conversion loop itself.
+
+## 2026-07-30: Stage source-generation deduplication
+
+- Test implementation: `6b9dd096c`
+- Kernel zImage SHA-256:
+  `230da8d9f5d3d846d26224ea659847d36dd7f34b8ee624c5dd4f36ee4556550f`
+- GX module SHA-256:
+  `bffdaffe84a26ff0d8a542edc0a123297d3226205516a8b203d6f8812823b04f`
+- Timed static workload SHA-256:
+  `6cab962d96314a264afc2f464451d5cd44efc21d6677173ee6a2710ca1cc780b`
+
+Add a source generation to the accelerator submission and consumed callback
+contract. Synchronized multi-page modes advance it only when
+`FBIOPAN_DISPLAY` publishes a source; one-page fbcon advances it every vblank
+because applications and console rendering can modify that page without a pan
+ioctl. Pan now waits for its exact consumed generation rather than accepting a
+stale matching yoffset, including when the same page is submitted repeatedly.
+
+The GX worker records the source pointer, format, and generation only after a
+live frame has finished all CPU reads and been submitted. Subsequent VI calls
+for that unchanged tuple do not queue another conversion. Diagnostic startup
+phases remain exempt until the first live submission, avoiding a deadlock while
+waiting for PE initialization. The kernel image and module built cleanly using
+`-j16`; diff-only checkpatch reported zero errors and zero warnings.
+
+Deploy the checksum-matched kernel by card and module over SSH. Repeat the timed
+RGB888 workload for 30 seconds at 30 requested fps. Success for this profiling
+rerun requires correct tear-free output, no generation timeout or kernel fault,
+a worker timing-frame count close to client source-frame count rather than PE
+interrupt count, materially lower client generation/copy/pan costs from reduced
+CPU contention, and clear responsive RGB565 console restoration. If source
+rate reaches at least 27 fps, follow immediately with the full 120-second
+acceptance run from the identical artifacts.
