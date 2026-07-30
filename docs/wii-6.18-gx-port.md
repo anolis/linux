@@ -1530,3 +1530,26 @@ request to show `flags` containing `OHCI_QUIRK_WII`, a matching enqueue triplet,
 and a control-workaround line. The submitted ED/TD pointers and later debugfs
 state will distinguish a publication failure from controller execution or
 done-list/unlink failure.
+
+Hardware result: the exact image checksum was deployed and booted as kernel
+build `#18`. Both platform probes retained live flags `0x2010`, confirming
+`OHCI_QUIRK_BE_MMIO | OHCI_QUIRK_WII` survived generic initialization. Both
+initial device requests entered enqueue with `type=2` (`PIPE_CONTROL`) and a
+64-byte transfer. ED scheduling succeeded with state `ED_OPER`, control heads
+`0x01502000` and `0x01504000`, and zero control-current/done-head values.
+
+The post-submit trace was unchanged for both devices: each ED's head and tail
+still pointed to the same dummy TD (`0x01503000` or `0x01505000`). No
+`hlwd control[...]` line appeared. Therefore `td_submit_urb()` published no
+control TDs even though the same ED was type 2 immediately before scheduling.
+The failure is before hardware transfer execution, done-list publication, and
+unlink handling.
+
+This result directly motivates the legacy Wii workaround that widens software
+subword fields inside DMA-coherent ED/TD objects to 32 bits. In particular,
+`ed_schedule()` writes byte-sized `ed->state` before `td_submit_urb()` switches
+on adjacent byte-sized `ed->type`. The pool is mapped write-combining, the boot
+already proves unsupported accesses through the coherent `memset()` alignment
+exception, and the old driver explicitly widened `state`, `type`, `branch`,
+periodic 16-bit fields, `tick`, and `td->index` for this hardware. Port exactly
+that layout change next while retaining the trace as a positive control.
