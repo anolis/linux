@@ -1762,3 +1762,22 @@ dedicated PID files and arguments. SSH and gettys were active, both the
 BCM2045A and Dell keyboard enumerated, `hid-generic` bound the keyboard, and
 `gcn_gx` remained unloaded. This passes the unattended normal-init, wireless,
 SSH, OHCI, and CPU-framebuffer control milestone.
+
+## 2026-07-29: Stage automatic production GX loading
+
+- Unchanged kernel image SHA-256:
+  `adcf9687fe91a6ce481f795d47d77c300ca38c1e83401a6c492ed158b5b652df`
+- Installed GX module SHA-256:
+  `d0f8b8ec5c2d57fb76f58adb77586b3df86e9b4a1b60ca72b31e2dc7fdcd3e4c`
+
+Add only `gcn_gx` after `b43` in the rootfs `/etc/modules` file and cold boot.
+The module is byte-identical to the previously validated exact RGB565 renderer,
+uses its production defaults (`renderer=generated`, `texture_source=console`,
+and `texel_bias_eighths=-2`), and is already indexed by `depmod` for this exact
+kernel vermagic.
+
+Success requires the unattended normal-init/Wi-Fi/SSH/OHCI controls to remain
+green, `gcn_gx` to be resident, and `gcnfb` to register the accelerator. The
+display must transition from the initial CPU framebuffer to a stable readable
+GX console without freezes, repeated columns, or persistent diagnostic fills.
+Module unload must still restore the CPU console before this phase is closed.
