@@ -1947,3 +1947,27 @@ explicit follow-up SSH command restored fbcon and confirmed the complete log.
 Optimize background generation, place moving elements in non-overlapping
 regions, make console restoration unconditional, and repeat before closing the
 sustained-motion milestone.
+
+## 2026-07-30: Stage optimized sustained-motion rerun
+
+- Test implementation: `a1cc9e37afc1`
+- Static PowerPC workload SHA-256:
+  `6d9dee1b5e59cdcf26af44cf1b51d391a13d82423c76f1a9af4fddc5b5edeb6c`
+- Workload size: 784,652 bytes
+- Planned duration and input rate: 120 seconds at 30 frames per second
+
+Replace the expensive per-pixel background reconstruction with three
+precomputed scanline templates while retaining one full staging frame and one
+complete `/dev/fb0` copy per source update. Confine the vertical marker to the
+upper half and the horizontal marker to the lower half, remove the crossing
+diagonal, and use stable marker colours. No moving element now intentionally
+clips another, so a discontinuity has a meaningful visual interpretation.
+
+The host runner now captures the workload result, rejects an achieved source
+rate below 90 percent of the request, records new dmesg lines without the prior
+shell-expansion bug, and restores fbcon from an exit trap on success or failure.
+Repeat the same 120-second visual and PE-interrupt controls. Success requires at
+least 27 source frames per second, approximately 60 PE finish interrupts per
+second, two smooth and continuous moving markers in their separate regions,
+intact static grid/band geometry, no new kernel fault, continued SSH/module
+residency, and a clear recovered console.
