@@ -1807,3 +1807,15 @@ requires a second accelerator registration, complete PE-fenced seed/init/live
 startup, continued SSH and OHCI operation, and another visually clear live GX
 console. Unload once more after the visual control so the CPU fallback remains
 the recovery state if reload exposes a lifecycle bug.
+
+Hardware result: `modprobe gcn_gx` at approximately 307 seconds uptime
+registered the accelerator a second time without rebooting. The seed,
+initialization, and first live frame each completed their PE token fence; live
+rendering resumed with alternating XFB addresses while Wi-Fi and SSH remained
+up. The user visually confirmed that the reloaded GX console was clear.
+
+The reloaded module then ran beyond 2,000 worker iterations before the planned
+final unload at approximately 379 seconds. `gcnfb` restored software conversion,
+the module left `/proc/modules`, Wi-Fi remained configured, and the user again
+confirmed a clear CPU console. This passes the complete production module
+lifecycle and leaves the Wii in the known recovery state.
