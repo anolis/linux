@@ -1819,3 +1819,24 @@ final unload at approximately 379 seconds. `gcnfb` restored software conversion,
 the module left `/proc/modules`, Wi-Fi remained configured, and the user again
 confirmed a clear CPU console. This passes the complete production module
 lifecycle and leaves the Wii in the known recovery state.
+
+## 2026-07-29: Stage production diagnostic cleanup
+
+- Test implementation: `26223813f`
+- GX module SHA-256:
+  `128f477e24920471c8d4d2e1c7a250a1c3979201a78eab53f692ca77d68794bd`
+- Module size: 41,424 bytes (previously 44,832 bytes)
+
+Normal module loading no longer allocates the two 614,400-byte debug snapshots,
+calculates first-frame CRC/sum diagnostics, or emits per-submit and recurring
+worker/texture progress logs. Debugfs capture remains available through the
+explicit `debug_capture=1` parameter, which the live-cycle tool now supplies.
+Validated startup phases, PE token fences, slow/stall/timeout warnings, exact
+generated rendering, XFB alternation, and CPU fallback are unchanged.
+
+Load this exact module with default parameters from the current CPU-console
+recovery state. Success requires a visually clear GX console, only bounded
+ready/active/registration information in the healthy log, no debugfs capture
+directory, and no recurring `gcn-gx` output after steady state. Then unload and
+require the same clear CPU fallback. A separate opt-in capture control must
+subsequently prove that `debug_capture=1` still exposes working VFB/XFB files.
