@@ -16,10 +16,8 @@ void ohci_hlwd_control_quirk(struct ohci_hcd *ohci)
 	struct ed *ed = ohci->hlwd_control_ed;
 	struct td *td;
 	unsigned long flags;
-	unsigned int count = ++ohci->hlwd_control_quirk_count;
 	int poll_ret = 0;
 	u32 current;
-	u32 current_before;
 	u32 head;
 
 	/*
@@ -30,17 +28,13 @@ void ohci_hlwd_control_quirk(struct ohci_hcd *ohci)
 	if (!ed) {
 		ed = ed_alloc(ohci, GFP_ATOMIC);
 		if (!ed) {
-			if (count <= 8)
-				ohci_info(ohci, "hlwd control[%u]: ED allocation failed\n",
-					  count);
+			ohci_err(ohci, "Hollywood control ED allocation failed\n");
 			return;
 		}
 
 		td = td_alloc(ohci, GFP_ATOMIC);
 		if (!td) {
-			if (count <= 8)
-				ohci_info(ohci, "hlwd control[%u]: TD allocation failed\n",
-					  count);
+			ohci_err(ohci, "Hollywood control TD allocation failed\n");
 			ed_free(ohci, ed);
 			return;
 		}
@@ -59,8 +53,6 @@ void ohci_hlwd_control_quirk(struct ohci_hcd *ohci)
 
 	spin_lock_irqsave(&hlwd_control_lock, flags);
 	head = ohci_readl(ohci, &ohci->regs->ed_controlhead);
-	current_before = ohci_readl(ohci, &ohci->regs->ed_controlcurrent);
-	current = current_before;
 	if (head) {
 		ohci_writel(ohci, ed->dma, &ohci->regs->ed_controlhead);
 		ohci_writel(ohci, ohci->hc_control | OHCI_CTRL_CLE,
@@ -76,11 +68,10 @@ void ohci_hlwd_control_quirk(struct ohci_hcd *ohci)
 	}
 	spin_unlock_irqrestore(&hlwd_control_lock, flags);
 
-	if (count <= 8)
-		ohci_info(ohci,
-			  "hlwd control[%u]: head=%08x current=%08x->%08x dummy=%08llx poll=%d\n",
-			  count, head, current_before, current,
-			  (unsigned long long)ed->dma, poll_ret);
+	if (poll_ret)
+		ohci_warn(ohci,
+			  "Hollywood control-list reset timed out (head=%08x current=%08x)\n",
+			  head, current);
 }
 
 void ohci_hlwd_bulk_quirk(struct ohci_hcd *ohci)

@@ -157,9 +157,6 @@ static int ohci_urb_enqueue (
 	struct ed	*ed;
 	urb_priv_t	*urb_priv;
 	unsigned int	pipe = urb->pipe;
-#ifdef CONFIG_USB_OHCI_HCD_HLWD
-	unsigned int	hlwd_trace = 0;
-#endif
 	int		i, size = 0;
 	unsigned long	flags;
 	int		retval = 0;
@@ -168,16 +165,6 @@ static int ohci_urb_enqueue (
 	ed = ed_get(ohci, urb->ep, urb->dev, pipe, urb->interval);
 	if (! ed)
 		return -ENOMEM;
-#ifdef CONFIG_USB_OHCI_HCD_HLWD
-	if (ohci->flags & OHCI_QUIRK_WII) {
-		hlwd_trace = ++ohci->hlwd_enqueue_count;
-		if (hlwd_trace <= 8)
-			ohci_info(ohci,
-				  "hlwd enqueue[%u]: enter type=%u flags=0x%lx len=%u\n",
-				  hlwd_trace, ed->type, ohci->flags,
-				  urb->transfer_buffer_length);
-	}
-#endif
 
 	/* for the private part of the URB we need the number of TDs (size) */
 	switch (ed->type) {
@@ -312,29 +299,7 @@ static int ohci_urb_enqueue (
 	 * and update count of queued periodic urbs
 	 */
 	urb->hcpriv = urb_priv;
-#ifdef CONFIG_USB_OHCI_HCD_HLWD
-	if (hlwd_trace && hlwd_trace <= 8)
-		ohci_info(ohci,
-			  "hlwd enqueue[%u]: scheduled state=%u ed=%08llx head=%08x tail=%08x ctl_head=%08x ctl_cur=%08x done=%08x\n",
-			  hlwd_trace, ed->state, (unsigned long long)ed->dma,
-			  hc32_to_cpu(ohci, ed->hwHeadP),
-			  hc32_to_cpu(ohci, ed->hwTailP),
-			  ohci_readl(ohci, &ohci->regs->ed_controlhead),
-			  ohci_readl(ohci, &ohci->regs->ed_controlcurrent),
-			  hc32_to_cpu(ohci, ohci->hcca->done_head));
-#endif
 	td_submit_urb (ohci, urb);
-#ifdef CONFIG_USB_OHCI_HCD_HLWD
-	if (hlwd_trace && hlwd_trace <= 8)
-		ohci_info(ohci,
-			  "hlwd enqueue[%u]: submitted ed=%08llx head=%08x tail=%08x ctl_head=%08x ctl_cur=%08x done=%08x\n",
-			  hlwd_trace, (unsigned long long)ed->dma,
-			  hc32_to_cpu(ohci, ed->hwHeadP),
-			  hc32_to_cpu(ohci, ed->hwTailP),
-			  ohci_readl(ohci, &ohci->regs->ed_controlhead),
-			  ohci_readl(ohci, &ohci->regs->ed_controlcurrent),
-			  hc32_to_cpu(ohci, ohci->hcca->done_head));
-#endif
 
 fail:
 	if (retval)
