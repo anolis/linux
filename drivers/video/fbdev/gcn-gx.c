@@ -121,6 +121,8 @@ static char *gx_renderer = "generated";
 module_param_named(renderer, gx_renderer, charp, 0444);
 MODULE_PARM_DESC(renderer, "RGB565 command path: generated, reference, or direct");
 
+static const struct gcnfb_accel_ops gcn_gx_accel_ops;
+
 static unsigned int gx_hold_frame;
 module_param_named(hold_frame, gx_hold_frame, uint, 0444);
 MODULE_PARM_DESC(hold_frame, "Publish this frame once, then hold output (0=continuous)");
@@ -2169,6 +2171,8 @@ static void gx_rgb565_workfn(struct work_struct *work)
 	}
 
 	submitted = gx_process_rgb565(vfb, xfb_phys, width, height);
+	/* gx_process_rgb565() has finished all CPU reads from this VFB page. */
+	gcnfb_accel_rgb565_source_consumed(&gcn_gx_accel_ops, vfb);
 
 	spin_lock_irqsave(&gx_rgb565_work_lock, flags);
 	if (submitted && gx_rgb565_publish_xfb) {

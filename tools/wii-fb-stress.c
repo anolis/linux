@@ -365,9 +365,10 @@ int main(int argc, char **argv)
 			fflush(stdout);
 			report_ns += 5000000000ULL;
 		}
-		if (next_ns <= now_ns)
-			next_ns = now_ns + interval_ns;
-		sleep_until(next_ns);
+		if (next_ns > now_ns)
+			sleep_until(next_ns);
+		else
+			next_ns = now_ns;
 	}
 
 	start_ns = monotonic_ns() - start_ns;

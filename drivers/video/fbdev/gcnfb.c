@@ -513,6 +513,7 @@ struct vi_ctl {
 	wait_queue_head_t vtrace_waitq;
 	u32 vtrace_seq;
 	u32 source_yoffset;
+	u32 consumed_yoffset;
 	u32 presented_yoffset;
 
 	int visible_page;
@@ -1406,19 +1407,52 @@ static const void *vifb_source_page(struct vi_ctl *ctl)
 	return (u8 *)vfb_mem + (size_t)yoffset * info->fix.line_length;
 }
 
-static void vifb_source_presented(struct vi_ctl *ctl, const void *source)
+static bool vifb_source_yoffset(struct vi_ctl *ctl, const void *source,
+				u32 *yoffset)
 {
 	struct fb_info *info = ctl->info;
 	size_t offset = (const u8 *)source - (const u8 *)vfb_mem;
-	u32 yoffset;
 
 	if (offset % info->fix.line_length)
+		return false;
+	*yoffset = offset / info->fix.line_length;
+	return *yoffset <= info->var.yres_virtual - info->var.yres;
+}
+
+static void vifb_source_consumed(struct vi_ctl *ctl, const void *source)
+{
+	u32 yoffset;
+
+	if (!vifb_source_yoffset(ctl, source, &yoffset))
 		return;
-	yoffset = offset / info->fix.line_length;
-	if (yoffset > info->var.yres_virtual - info->var.yres)
+	WRITE_ONCE(ctl->consumed_yoffset, yoffset);
+	wake_up_interruptible(&ctl->vtrace_waitq);
+}
+
+static void vifb_source_presented(struct vi_ctl *ctl, const void *source)
+{
+	u32 yoffset;
+
+	if (!vifb_source_yoffset(ctl, source, &yoffset))
 		return;
 	WRITE_ONCE(ctl->presented_yoffset, yoffset);
 }
+
+void gcnfb_accel_rgb565_source_consumed(const struct gcnfb_accel_ops *ops,
+					const void *source)
+{
+	struct vi_ctl *ctl;
+
+	rcu_read_lock();
+	if (rcu_dereference(gcnfb_accel) != ops)
+		goto out;
+	ctl = READ_ONCE(gcnfb_active_ctl);
+	if (ctl)
+		vifb_source_consumed(ctl, source);
+out:
+	rcu_read_unlock();
+}
+EXPORT_SYMBOL_GPL(gcnfb_accel_rgb565_source_consumed);
 
 static void vi_transcode_RGB565_to(struct vi_ctl *ctl, const void *source,
 				   uint32_t *dst)
@@ -1564,6 +1598,7 @@ static void gcnfb_restore_software(void)
 	switch (vfb_format) {
 	case V4L2_PIX_FMT_RGB565:
 		vi_transcode_RGB565(ctl, source);
+		vifb_source_consumed(ctl, source);
 		vifb_source_presented(ctl, source);
 		break;
 	case PIX_FMT_RGB888:
@@ -1695,6 +1730,7 @@ static irqreturn_t vi_irq_handler(int irq, void *dev)
 					info->var.xres, info->var.yres);
 			else {
 				vi_transcode_RGB565(ctl, source);
+				vifb_source_consumed(ctl, source);
 				vifb_source_presented(ctl, source);
 			}
 			break;
@@ -2310,6 +2346,7 @@ static int vifb_set_par(struct fb_info *info)
 	/* set page 1 as the visible page and cancel pending flips */
 	spin_lock_irqsave(&ctl->lock, flags);
 	ctl->source_yoffset = var->yoffset;
+	ctl->consumed_yoffset = var->yoffset;
 	ctl->presented_yoffset = var->yoffset;
 	ctl->visible_page = 1;
 	vi_flip_page(ctl);
@@ -2379,14 +2416,14 @@ static int vifb_pan_display(struct fb_var_screeninfo *var,
 	    var->yoffset > info->var.yres_virtual - info->var.yres)
 		return -EINVAL;
 
-	/* The old page is writable only after the requested page is presented. */
+	/* The old page is writable once the accelerator has consumed its source. */
 	old_yoffset = READ_ONCE(ctl->source_yoffset);
 	WRITE_ONCE(ctl->source_yoffset, var->yoffset);
-	if (READ_ONCE(ctl->presented_yoffset) == var->yoffset)
+	if (READ_ONCE(ctl->consumed_yoffset) == var->yoffset)
 		return 0;
 
 	ret = wait_event_interruptible_timeout(ctl->vtrace_waitq,
-		READ_ONCE(ctl->presented_yoffset) == var->yoffset,
+		READ_ONCE(ctl->consumed_yoffset) == var->yoffset,
 		msecs_to_jiffies(2000));
 	if (ret > 0)
 		return 0;
@@ -2394,7 +2431,7 @@ static int vifb_pan_display(struct fb_var_screeninfo *var,
 	WRITE_ONCE(ctl->source_yoffset, old_yoffset);
 	if (!ret) {
 		drv_printk(KERN_WARNING,
-			   "timed out presenting VFB yoffset %u\n",
+			   "timed out consuming VFB yoffset %u\n",
 			   var->yoffset);
 		return -ETIMEDOUT;
 	}
@@ -2582,6 +2619,7 @@ static int vifb_do_probe(struct device *dev,
 	init_waitqueue_head(&ctl->vtrace_waitq);
 	ctl->vtrace_seq = 0;
 	ctl->source_yoffset = 0;
+	ctl->consumed_yoffset = 0;
 	ctl->presented_yoffset = 0;
 
 	vi_reset_video(ctl);

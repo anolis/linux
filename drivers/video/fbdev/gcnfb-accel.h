@@ -23,5 +23,7 @@ struct gcnfb_accel_ops {
 
 int gcnfb_register_accel(const struct gcnfb_accel_ops *ops);
 void gcnfb_unregister_accel(const struct gcnfb_accel_ops *ops);
+void gcnfb_accel_rgb565_source_consumed(const struct gcnfb_accel_ops *ops,
+					const void *vfb);
 
 #endif /* _GCNFB_ACCEL_H */
