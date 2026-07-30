@@ -1922,3 +1922,28 @@ advance throughout the run, SSH and `gcn_gx` to remain live, no new GX
 timeout/stall/warning/oops messages, and the clear console to return afterward.
 Any tearing, stale regions, blur, duplicated rows or columns, solid diagnostic
 fill, reboot, or lost SSH is a failure even if the process exits successfully.
+
+Hardware result: the checksum-verified workload completed the full 120 seconds
+without a signal, reboot, lost SSH, module unload, or network loss. It rendered
+1,219 complete source frames in 120.021 seconds (10.16 fps). During the same
+interval, the `gcn-gx-pe-finish` interrupt advanced from 47,729 to 55,020: a
+delta of 7,291, or 60.76 completions per second. The kernel log contained only
+the test's begin/end markers after startup; there was no GX timeout, stall,
+warning, oops, or other fault.
+
+The user reported that the pattern was mostly clear and smooth, with clipping
+limited to the red/white vertical bar moving horizontally. The console returned
+clear after the run. This clipping result is not yet attributable to GX because
+the first pattern intentionally drew the independently moving cyan bar and
+white diagonal over the red/white bar, creating expected occlusion that was not
+visually distinguishable from a transfer defect.
+
+The 30 fps source-rate criterion failed because the target pattern generator
+recomputed every background pixel with integer division each frame; the GX
+completion rate itself remained at the expected approximately 60 Hz. The host
+runner also expanded an unescaped `$p` under `set -u` while printing its final
+`sed` range, after the target process and measurements had completed. An
+explicit follow-up SSH command restored fbcon and confirmed the complete log.
+Optimize background generation, place moving elements in non-overlapping
+regions, make console restoration unconditional, and repeat before closing the
+sustained-motion milestone.
