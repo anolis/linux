@@ -1575,3 +1575,25 @@ dummy head. Complete success requires descriptor enumeration, USB HID/input
 registration, increasing OHCI IRQ counts, and actual tty1 key input. The
 coherent-pool `memset()` alignment warning may remain independently and must
 not be conflated with whether subword field corruption is fixed.
+
+Hardware result: the exact image checksum was deployed and booted as kernel
+build `#19`. The positive control passed on both controllers. Every traced
+device-zero request entered as `PIPE_CONTROL`, emitted a successful
+`hlwd control[...]` record with `poll=0`, and advanced the ED tail from its
+dummy head to a published control TD chain. Control-current also changed from
+zero to the scheduled ED while the controller processed each request.
+
+Both devices completed enumeration. Controller 0 registered the Dell USB
+keyboard (`413c:2105`) through `hid-generic` as `input1`, with `kbd`, `event1`,
+LED, and SysRq handlers. Controller 1 registered the Wii's internal Broadcom
+BCM2045A Bluetooth USB device (`057e:0305`). OHCI IRQ counts advanced from the
+previous stuck value of 8 to 65 and 46 at inspection time. This validates
+control transfer submission, completion interrupts, descriptor enumeration,
+and HID interrupt-endpoint setup on both Hollywood OHCI hosts.
+
+The coherent-pool `memset()` alignment warning still appears once during host
+setup, but it no longer prevents operation and is independent cleanup work.
+The diagnostic PID 1 does not normally launch a getty, so a temporary tty1
+getty was started for an explicit physical key-input check. Remove the bounded
+enqueue/control traces after that final check, retaining the shared pool,
+Hollywood scheduling workarounds, and 32-bit descriptor software fields.
