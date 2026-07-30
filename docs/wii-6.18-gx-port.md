@@ -2375,3 +2375,33 @@ and poll them so the wrapper cannot terminate cleanup. The user reported that
 baseline and dedup looked approximately the same and that both were visibly
 slower than required. There is no visual or numerical reason to enable dedup;
 keep the default disabled and optimize the measured RGB888 memory and pan path.
+
+## 2026-07-30: Stage direct-VFB RGB888 workload sweep
+
+- Test implementation: `e50ece1ec`
+- Static workload SHA-256:
+  `ea878a366f69cb09e286dc81b03ee227d22a9ec65dae3de13fdf6515f646ba23`
+- Stress runner SHA-256:
+  `c83211c7ad819e374b40568515211b6a27dd161e8c89af07c3b7330be7ffa235`
+- Sweep harness SHA-256:
+  `f5b7737e259ce4f643fc6e5feac49a8467e7214f3baf800dbdd0e10f4ededed5`
+
+The original stress client constructs every 1.2 MiB RGB888 frame in private
+memory and then copies the complete frame into the inactive mapped VFB page.
+In the latest baseline those two userspace phases averaged approximately 29 ms
+before the driver's approximately 13 ms conversion, making 30 fps impossible
+independently of GX scheduling. Add `--direct-render` to construct the
+identical pattern directly in the inactive VFB page before synchronized pan.
+This preserves page ownership and visual content while removing only the
+redundant staging copy. Staged mode remains available as a memory-bandwidth
+stress control.
+
+Sweep matrix rows now accept `name|cycle arguments|stress arguments`. The
+default matrix runs staged baseline, direct baseline, and direct deduplication.
+Run it for 10 seconds per candidate in a persistent host PTY so external tool
+timeouts cannot interrupt ranking or baseline restoration. No card exchange or
+module replacement is required; only the checksum-verified static workload is
+new. A direct baseline at or above 27 fps with correct tear-free output would
+show that the driver can sustain the target when an application renders into
+its framebuffer pages efficiently. If direct mode remains below 27 fps, use
+its timing split to optimize the kernel conversion and pan path next.
