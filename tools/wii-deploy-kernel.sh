@@ -117,8 +117,8 @@ if [[ -n $ssh_host ]]; then
 	)
 	remote_mount=/tmp/bootwii
 	remote_device=/dev/mmcblk0p1
-	remote_destination=$remote_mount/gumboot/zImage.ngx
-	remote_staged=$remote_destination.new
+	remote_mounted_here=0
+	remote_remounted_rw=0
 
 	remote_exec()
 	{
@@ -128,13 +128,37 @@ if [[ -n $ssh_host ]]; then
 	{
 		remote_exec "printf '<6>gx-deploy: %s\\n' '$1' > /dev/kmsg"
 	}
+	restore_remote_boot_mount()
+	{
+		if ((remote_remounted_rw)); then
+			remote_exec "sync; mount -o remount,ro $remote_mount" || true
+			remote_remounted_rw=0
+		elif ((remote_mounted_here)); then
+			remote_exec "umount $remote_mount" || true
+			remote_mounted_here=0
+		fi
+	}
+	trap restore_remote_boot_mount EXIT
 
 	remote_status "preparing commit $commit"
 	if ! remote_exec "test -b $remote_device"; then
 		remote_device=/tmp/mmcblk0p1
 		remote_exec "set -- \$(tr ':' ' ' < /sys/class/block/mmcblk0p1/dev); rm -f $remote_device; mknod $remote_device b \$1 \$2"
 	fi
-	remote_exec "mkdir -p $remote_mount; grep -qs ' $remote_mount ' /proc/mounts || mount -t vfat $remote_device $remote_mount"
+	remote_existing_mount=$(remote_exec "awk '\$1 ~ /mmcblk0p1$/ { print \$2; exit }' /proc/mounts")
+	if [[ -n $remote_existing_mount ]]; then
+		remote_mount=$remote_existing_mount
+		remote_mount_options=$(remote_exec "awk '\$2 == \"$remote_mount\" { print \$4; exit }' /proc/mounts")
+		if [[ ,$remote_mount_options, == *,ro,* ]]; then
+			remote_exec "mount -o remount,rw $remote_mount"
+			remote_remounted_rw=1
+		fi
+	else
+		remote_exec "mkdir -p $remote_mount; mount -t vfat $remote_device $remote_mount"
+		remote_mounted_here=1
+	fi
+	remote_destination=$remote_mount/gumboot/zImage.ngx
+	remote_staged=$remote_destination.new
 
 	remote_status "receiving zImage $source_sha"
 	remote_exec "cat > $remote_staged" < "$image"
@@ -153,7 +177,8 @@ if [[ -n $ssh_host ]]; then
 		exit 1
 	fi
 	remote_status "installed $deployed_sha"
-	remote_exec "umount $remote_mount"
+	restore_remote_boot_mount
+	trap - EXIT
 
 	printf '\nWii kernel deployed over SSH\n'
 	printf '  commit: %s\n' "$commit"
