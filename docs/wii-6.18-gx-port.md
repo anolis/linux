@@ -2435,3 +2435,25 @@ seconds from the same kernel, module, and workload hashes. Require correct
 colors and geometry, no blanking or tearing, normal completion, and clear
 responsive baseline-console restoration before treating the direct result as
 visually accepted.
+
+## 2026-07-30: Reject direct deduplication on visual quality
+
+The isolated 30-second direct-dedup run completed normally and sustained 861
+frames in 30.033 seconds, or 28.67 fps. It recorded 1,884 PE finish interrupts
+(62.80 per second), 10,875 us average direct draw time, 1 us average copy time,
+22,074 us average pan time, and approximately 11.1 ms average kernel conversion
+across worker frames 256, 512, and 768. No kernel timeout or screened fault
+occurred.
+
+The user reported that the displayed image quality was terrible. This is a
+definitive visual rejection despite the harness's technical pass; numerical
+checks intentionally do not claim image correctness. The harness completed and
+restored baseline automatically. `/sys/module/gcn_gx/parameters/source_dedup`
+read `N`, and dmesg confirmed a clean unload followed by generated rendering
+with `source_dedup=0`.
+
+Keep deduplication disabled. Repeat only baseline
+`source_dedup=0 --direct-render` for 30 seconds from the same artifacts. It must
+retain at least 27 fps while showing correct colors and geometry without the
+quality failure, then restore a clear responsive console. If baseline-direct
+passes, promote that result rather than either dedup variant.
