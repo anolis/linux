@@ -438,6 +438,7 @@ struct ohci_hcd {
 #ifdef CONFIG_USB_OHCI_HCD_HLWD
 	struct ed		*hlwd_control_ed;
 	struct td		*hlwd_control_td;
+	unsigned int		hlwd_control_quirk_count;
 #endif
 
 	/* platform-specific data -- must come last */

@@ -33,15 +33,9 @@
 		#size-cells = <1>;
 		ranges;
 
-		ohci0_dma: dma-pool@1400000 {
+		ohci_dma: dma-pool@1500000 {
 			compatible = "shared-dma-pool";
-			reg = <0x01400000 0x00080000>;
-			no-map;
-		};
-
-		ohci1_dma: dma-pool@1480000 {
-			compatible = "shared-dma-pool";
-			reg = <0x01480000 0x00080000>;
+			reg = <0x01500000 0x00100000>;
 			no-map;
 		};
 	};
@@ -150,7 +144,7 @@
 			reg = <0x0d050000 0x100>;
 			interrupts = <5>;
 			interrupt-parent = <&PIC1>;
-			memory-region = <&ohci0_dma>;
+			memory-region = <&ohci_dma>;
 		};
 
 		usb@d060000 {
@@ -159,7 +153,7 @@
 			reg = <0x0d060000 0x100>;
 			interrupts = <6>;
 			interrupt-parent = <&PIC1>;
-			memory-region = <&ohci1_dma>;
+			memory-region = <&ohci_dma>;
 		};
 
 		sd@d070000 {
