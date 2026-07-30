@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: GPL-2.0
 ### BEGIN INIT INFO
 # Provides:          wii-network
-# Required-Start:    $local_fs $remote_fs
-# Required-Stop:     $local_fs $remote_fs
+# Required-Start:    $local_fs
+# Required-Stop:     $local_fs
 # Should-Start:      $syslog
 # Should-Stop:       $syslog
 # Default-Start:     S
