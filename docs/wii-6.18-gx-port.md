@@ -1399,3 +1399,17 @@ the memreserve and both resources, while `ohci-platform.o` references both
 positive controls remain two registered OHCI root hubs and a keyboard in
 `/proc/bus/input/devices`; the stronger functional control is key input at the
 tty1 getty. No conclusion is valid until the exact image checksum is deployed.
+
+Hardware result: the exact image checksum was deployed and cold-booted. USB
+core and `usbhid` initialized, but neither controller bound and no OHCI probe
+message, IRQ, root hub, or input device appeared. Both platform devices and
+their correct modaliases exist, and a manual bind fails before any driver
+output. The pool was incorrectly encoded as a second `reg` entry beneath the
+Hollywood bus even though that bus's `ranges` translates only Hollywood MMIO,
+not MEM1 RAM.
+
+The explicit-pool allocation strategy remains valid, but this DT
+representation is ruled out. Describe each pool under the root-level
+`reserved-memory` node, reference it from its controller with `memory-region`,
+and attach it using `of_reserved_mem_device_init()`. Restore each OHCI `reg`
+property to MMIO only.
