@@ -2087,3 +2087,21 @@ kernel fault, continued SSH/module residency, restoration to the 640x480
 one-page mode, and a clear responsive console. A source-rate pass with any
 return of tearing is a failure; the optimization must preserve the correctness
 demonstrated by the 9.99 fps test.
+
+Hardware result: kernel build `#23` booted normally and the installed GX
+module matched the staged checksum. The 120-second double-buffered workload
+completed 3,529 source presentations in 120.016 seconds, or 29.40 fps against
+the requested 30 fps. This passes the 27 fps minimum and is 2.94 times the
+previous synchronized result. PE finish interrupts advanced from 5,505 to
+12,867, a delta of 7,362 or 61.35 per second.
+
+The user observed both moving markers throughout the run and reported no
+tearing. The client exited successfully, restored the original framebuffer
+mode, and the console returned clear and responsive. `gcn_gx`, wlan0, and SSH
+remained live. The only intervening kernel messages were routine b43 group-key
+rotation; there was no consume timeout, GX warning, oops, stall, or reboot.
+
+This validates the source-consumed handoff as both correct and fast enough for
+RGB565 presentation. Keep the separate consumed and presented markers and the
+double-VFB stress test as regression coverage. The synchronized RGB565 phase
+is complete; proceed to RGB888 functionality and performance validation.
