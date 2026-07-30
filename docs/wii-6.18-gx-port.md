@@ -2246,3 +2246,39 @@ interrupt count, materially lower client generation/copy/pan costs from reduced
 CPU contention, and clear responsive RGB565 console restoration. If source
 rate reaches at least 27 fps, follow immediately with the full 120-second
 acceptance run from the identical artifacts.
+
+## 2026-07-30: Source-generation deduplication failed on hardware
+
+- Test commits: `6b9dd096c`, `1c462ce0c`
+- Kernel zImage SHA-256:
+  `230da8d9f5d3d846d26224ea659847d36dd7f34b8ee624c5dd4f36ee4556550f`
+- GX module SHA-256:
+  `bffdaffe84a26ff0d8a542edc0a123297d3226205516a8b203d6f8812823b04f`
+- Timed static workload SHA-256:
+  `6cab962d96314a264afc2f464451d5cd44efc21d6677173ee6a2710ca1cc780b`
+
+Two checksum-identical 30-second RGB888 runs failed the acceptance gate. The
+first completed 450 frames in 30.015 seconds, or 14.99 fps. The second visual
+confirmation completed 475 frames in 30.013 seconds, or 15.83 fps. Its client
+timings were `draw_avg_us=8248`, `copy_avg_us=15138`, and
+`pan_avg_us=39781`; kernel RGB888 conversion remained approximately 11.1 ms
+per submitted source. The worker timing count advanced with source frames
+rather than the roughly 60 Hz VI rate, confirming that generation
+deduplication suppressed redundant conversions, but it did not improve source
+throughput to the required 27 fps.
+
+The visual confirmation was definitively worse than the pre-deduplication
+RGB888 run: the display blanked frames and jittered. Both runs also logged
+three consecutive two-second `timed out consuming VFB yoffset 0` warnings
+during RGB565 console restoration. The timeout has a concrete one-page race:
+`vifb_pan_display()` waits for exact generation equality while the one-page VI
+path advances the generation independently every vblank, so the requested
+generation can be skipped permanently. More broadly, suppressing unchanged
+worker submissions without an explicit retained-frame presentation contract
+is not visually safe. Do not advance these artifacts to the 120-second run.
+
+Next, fix one-page pan completion independently and replace the implicit
+last-tuple skip with explicit source/presentation ownership. A retained source
+must continue to produce stable XFB presentation without rereading or
+reconverting its VFB page, and a newly published multi-page generation must be
+latched atomically and consumed exactly once.
