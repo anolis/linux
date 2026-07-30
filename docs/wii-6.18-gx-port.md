@@ -1618,3 +1618,10 @@ Remote hardware validation requires both USB devices to enumerate again, the
 Dell keyboard to register through `hid-generic`, both OHCI IRQ counters to rise
 above the root-hub-only baseline, and no new Hollywood timeout warning. The
 physical key-input control already passed on the immediately preceding binary.
+
+Hardware result: the exact cleanup image checksum was deployed and booted as
+kernel build `#20`. The BCM2045A and Dell keyboard enumerated again, the
+keyboard registered through `hid-generic` with its full input handlers, and
+OHCI IRQ counts reached 64 and 46. No retired `hlwd enqueue`/`hlwd control`
+trace and no Hollywood timeout warning appeared. Combined with the physical
+key-input control on build `#19`, this closes the Hollywood OHCI keyboard port.
