@@ -1485,3 +1485,26 @@ appears when the keyboard starts descriptor enumeration. Functional success
 requires a USB HID/input device and actual tty1 key input. If the transfer
 still stalls, the trace must be interpreted before changing descriptor memory
 handling; the Test 3 alignment warning remains unresolved.
+
+Hardware result: the exact image checksum was deployed and booted as kernel
+build `#17`. The shared pool reserved successfully and attached to both
+controllers. Both root hubs registered on IRQs 19 and 20, and hardware detected
+one low-speed and one full-speed device. Both controller frame counters advance,
+their root ports report connected and enabled, and each async schedule contains
+the device-zero control ED. This validates the shared-pool placement and both
+host-controller bring-up paths.
+
+Neither device completed its initial `get_bMaxPacketSize0()` descriptor request.
+Both USB hub workers eventually blocked in `usb_kill_urb()` after the request
+timed out, both IRQ counters remained at 8, and no USB child or HID/input device
+appeared. Debugfs showed control heads `0x01504000` and `0x01502000`, but empty
+software TD lists by the time the workers were waiting for unlink completion.
+The coherent-pool `memset()` alignment warning still occurred once.
+
+The bounded positive control also failed: no `hlwd control[...]` line appeared.
+The function exists in kallsyms, the built object contains the call from the
+control submission branch, and `CONFIG_USB_OHCI_HCD_HLWD=y`. Therefore do not
+interpret the missing line as proof that the workaround itself failed. Trace
+the enqueue path before/after ED scheduling and TD submission, including the
+live Wii flag, ED head/tail, control head/current, and HCCA done head. Only after
+that trace should the old driver's 32-bit software-field workaround be ported.
