@@ -1971,3 +1971,28 @@ least 27 source frames per second, approximately 60 PE finish interrupts per
 second, two smooth and continuous moving markers in their separate regions,
 intact static grid/band geometry, no new kernel fault, continued SSH/module
 residency, and a clear recovered console.
+
+Hardware result: the optimized workload completed all 120 seconds and passed
+every machine-checkable control. It produced 3,601 source frames in 120.011
+seconds (30.01 fps). The `gcn-gx-pe-finish` counter advanced from 78,072 to
+85,422, a delta of 7,350 or 61.25 interrupts per second. `gcn_gx`, wlan0, and
+SSH remained live. The only intervening kernel messages were routine b43 group
+key rotation; there was no GX warning, timeout, stall, oops, or reboot. The
+console recovered clear and responsive.
+
+The visual control exposed a remaining presentation defect. The lower
+cyan/white horizontal marker remained crisp and smooth throughout, and the
+static geometry was crisp. The upper red/white vertical marker moving
+horizontally was clear most of the time, but after roughly 20 seconds showed
+intermittent tearing for about five seconds. Because the markers no longer
+overlap, this is a real failure rather than intentional pattern occlusion.
+
+The orientation-sensitive result matches a source-buffer race: userspace
+copies a new linear frame from top to bottom while the GX worker tiles the same
+single VFB asynchronously. A capture boundary produces upper and lower
+sections of the vertical marker at different X positions, while the full-width
+lower marker makes the same boundary much less visible. Stable PE cadence and
+intact output outside those boundaries argue against CP, raster, EFB, or XFB
+corruption. Do not advance to RGB888 yet. Add an explicit synchronized source
+handoff (preferably double-buffered pan/present ownership), then repeat this
+same workload as its positive control.
