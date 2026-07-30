@@ -1459,3 +1459,29 @@ bounded logging around the Hollywood control-list workaround to establish
 whether the first keyboard control transfer reaches it and where controller
 state stops changing. Treat the alignment warning as an unresolved candidate
 if enumeration still stalls.
+
+## 2026-07-29: Shared MEM1 pool and control-workaround trace test
+
+- Test implementation: `ae8821ae4`
+- Kernel image SHA-256:
+  `8adf892b13fa77d73aa99cfd3be9bade33fd593fb69e05bf67382193af462963`
+
+Both Hollywood OHCI hosts now reference one 1 MiB `shared-dma-pool` at
+`0x01500000`. Linux creates one coherent-memory allocator and serializes both
+devices' allocations through its shared bitmap. The final wrapper is 6264204
+bytes and relocates to `0x00f00000`, ending at `0x014f958c`; the new pool begins
+about 27 KiB later and ends below the GX FIFO at `0x01684000`.
+
+The first eight control-list workaround calls per controller now log their
+saved control head, control-current value before and after the 10 us poll,
+dummy ED DMA address, and poll result. This is bounded diagnostic output and
+does not modify the stable GX path. The complete `zImage modules` build passes
+with `make -j16`, and the compiled DT has both controller phandles referencing
+the same pool.
+
+Hardware positive controls are: the pool reserves without an early-boot
+failure, both root hubs register, and at least one `hlwd control[...]` line
+appears when the keyboard starts descriptor enumeration. Functional success
+requires a USB HID/input device and actual tty1 key input. If the transfer
+still stalls, the trace must be interpreted before changing descriptor memory
+handling; the Test 3 alignment warning remains unresolved.
