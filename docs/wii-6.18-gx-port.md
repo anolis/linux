@@ -2054,3 +2054,36 @@ copied the VFB into private GX texture memory. Split source-consumed from
 XFB-presented notification, wait on source consumption, remove the extra client
 sleep, and repeat the same 30 fps control. Preserve completed-XFB tracking for
 actual display selection and diagnostics.
+
+## 2026-07-30: Stage source-consumed double-VFB optimization
+
+- Test implementation: `db51fdd74`
+- Kernel zImage SHA-256:
+  `a815fd2c9fe9c59d7266a9a6634d039edbc11022c7c468b8b8911d4143ec0e1d`
+- GX module SHA-256:
+  `8463f409ae44322df34b1c1b3de2c2353ed75beaad252bf964d01abab96af109`
+- Static PowerPC workload SHA-256:
+  `40b864eb6a12cb49f2339cc017ad20e416596cd4e0d1f70ac33ec5f9ef16f87b`
+
+Retain separate source-consumed and XFB-presented state. The GX worker now
+notifies `gcnfb` immediately after `gx_process_rgb565()` has finished all CPU
+reads and tiled the selected linear VFB into one of the two private MEM1
+texture buffers. `FBIOPAN_DISPLAY` waits for this consumed marker before
+allowing userspace to reuse the previous VFB page. Completed-XFB tracking still
+controls VI page selection and records which source was actually displayed.
+Mode setup, software conversion, and accelerator-unload restoration initialize
+or advance both ownership states so blocked clients retain a fallback path.
+
+The workload also no longer inserts a complete extra frame interval when a
+blocking pan has already put its absolute schedule behind. The kernel image,
+module, and static client built without compiler diagnostics using `-j16`;
+diff-only checkpatch reported zero errors and zero warnings.
+
+Deploy all three checksum-matched artifacts and cold boot. Repeat the same
+120-second 30 fps double-buffered workload. Success requires at least 27 source
+frames per second, approximately 60 PE finish interrupts per second, no visible
+tear in either moving marker, intact static geometry, no consume timeout or
+kernel fault, continued SSH/module residency, restoration to the 640x480
+one-page mode, and a clear responsive console. A source-rate pass with any
+return of tearing is a failure; the optimization must preserve the correctness
+demonstrated by the 9.99 fps test.
