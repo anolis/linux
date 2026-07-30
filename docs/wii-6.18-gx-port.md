@@ -1879,3 +1879,15 @@ registration at low uptime; `debug_capture` must remain disabled, the healthy
 boot must emit only bounded GX startup lines, and the user must again confirm a
 clear console. This is deployment verification of the tested binary, not a new
 renderer experiment.
+
+Hardware result: the checksum-verified module replaced the prior rootfs copy,
+whose SHA-256-addressed backup was retained. After the synchronized cold reboot,
+SSH returned at 39.22 seconds uptime with normal SysV init at runlevel 2,
+automatic `wlan0`, both OHCI devices, and the exact cleaned GX module resident.
+
+`debug_capture` remained disabled. The complete healthy boot log contained only
+the initial CPU-fallback probe line followed by GX ready, accelerator registered,
+and generated renderer active. No GX timeout, slow, stall, failure, warning,
+oops, or recurring progress message appeared. The user confirmed a clear
+console. This passes final production boot deployment and leaves the Wii
+running the cleaned automatically loaded accelerator.
