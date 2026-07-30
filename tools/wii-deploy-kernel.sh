@@ -115,6 +115,14 @@ if [[ -n $ssh_host ]]; then
 		-o ConnectTimeout=8
 		-o LogLevel=ERROR
 	)
+	ssh_control_path=${TMPDIR:-/tmp}/wii-deploy-ssh-${UID}-$$
+	ssh_options+=(
+		-o ControlMaster=auto
+		-o ControlPersist=30
+		-o ControlPath="$ssh_control_path"
+		-o ServerAliveInterval=5
+		-o ServerAliveCountMax=3
+	)
 	remote_mount=/tmp/bootwii
 	remote_device=/dev/mmcblk0p1
 	remote_mounted_here=0
@@ -128,6 +136,10 @@ if [[ -n $ssh_host ]]; then
 	{
 		remote_exec "printf '<6>gx-deploy: %s\\n' '$1' > /dev/kmsg"
 	}
+	close_ssh_master()
+	{
+		ssh "${ssh_options[@]}" -O exit "$remote" >/dev/null 2>&1 || true
+	}
 	restore_remote_boot_mount()
 	{
 		if ((remote_remounted_rw)); then
@@ -138,7 +150,85 @@ if [[ -n $ssh_host ]]; then
 			remote_mounted_here=0
 		fi
 	}
-	trap restore_remote_boot_mount EXIT
+	cleanup_remote()
+	{
+		restore_remote_boot_mount
+		close_ssh_master
+	}
+	trap cleanup_remote EXIT
+
+	chunk_bytes=32768
+	remote_upload()
+	{
+		local source=$1
+		local target=$2
+		local source_size chunks index expected_size attempt
+		local chunk_ok remote_size upload_command
+
+		source_size=$(stat -c %s "$source")
+		chunks=$(((source_size + chunk_bytes - 1) / chunk_bytes))
+		remote_exec ": > $target"
+		for ((index = 0; index < chunks; index++)); do
+			expected_size=$(((index + 1) * chunk_bytes))
+			if ((expected_size > source_size)); then
+				expected_size=$source_size
+			fi
+			chunk_ok=0
+			for ((attempt = 1; attempt <= 5; attempt++)); do
+				upload_command="dd of=$target bs=$chunk_bytes"
+				upload_command+=" seek=$index conv=notrunc 2>/dev/null"
+				dd if="$source" bs=$chunk_bytes skip=$index count=1 2>/dev/null |
+					remote_exec "$upload_command" || true
+				remote_size=$(remote_exec "stat -c %s $target")
+				if [[ $remote_size == "$expected_size" ]]; then
+					chunk_ok=1
+					break
+				fi
+				sleep 1
+			done
+			if (( ! chunk_ok )); then
+				echo "Remote upload failed at chunk $index/$chunks" >&2
+				return 1
+			fi
+		done
+	}
+
+	remote_download()
+	{
+		local source=$1
+		local target=$2
+		local source_size chunks index chunk_size attempt
+		local chunk_ok download_command
+		local chunk_file=${target}.chunk
+
+		source_size=$(remote_exec "stat -c %s $source")
+		chunks=$(((source_size + chunk_bytes - 1) / chunk_bytes))
+		: > "$target"
+		for ((index = 0; index < chunks; index++)); do
+			chunk_size=$((source_size - index * chunk_bytes))
+			if ((chunk_size > chunk_bytes)); then
+				chunk_size=$chunk_bytes
+			fi
+			chunk_ok=0
+			for ((attempt = 1; attempt <= 5; attempt++)); do
+				download_command="dd if=$source bs=$chunk_bytes"
+				download_command+=" skip=$index count=1 2>/dev/null"
+				remote_exec "$download_command" > "$chunk_file" || true
+				if [[ $(stat -c %s "$chunk_file") == "$chunk_size" ]]; then
+					chunk_ok=1
+					break
+				fi
+				sleep 1
+			done
+			if (( ! chunk_ok )); then
+				rm -f "$chunk_file"
+				echo "Remote download failed at chunk $index/$chunks" >&2
+				return 1
+			fi
+			command cat "$chunk_file" >> "$target"
+		done
+		rm -f "$chunk_file"
+	}
 
 	remote_status "preparing commit $commit"
 	if ! remote_exec "test -b $remote_device"; then
@@ -164,7 +254,7 @@ if [[ -n $ssh_host ]]; then
 		previous=$archive/zImage.ngx.$previous_sha
 		if [[ ! -f $previous ]]; then
 			previous_tmp=$previous.new
-			remote_exec "cat $remote_destination" > "$previous_tmp"
+			remote_download "$remote_destination" "$previous_tmp"
 			if [[ $(sha256sum "$previous_tmp" | awk '{print $1}') != "$previous_sha" ]]; then
 				rm -f "$previous_tmp"
 				echo "Remote kernel backup checksum mismatch" >&2
@@ -175,7 +265,7 @@ if [[ -n $ssh_host ]]; then
 	fi
 
 	remote_status "receiving zImage $source_sha"
-	remote_exec "cat > $remote_staged" < "$image"
+	remote_upload "$image" "$remote_staged"
 	staged_sha=$(remote_exec "sha256sum $remote_staged | cut -d' ' -f1")
 	if [[ $staged_sha != "$source_sha" ]]; then
 		remote_exec "rm -f $remote_staged"
@@ -192,6 +282,7 @@ if [[ -n $ssh_host ]]; then
 	fi
 	remote_status "installed $deployed_sha"
 	restore_remote_boot_mount
+	close_ssh_master
 	trap - EXIT
 
 	printf '\nWii kernel deployed over SSH\n'
