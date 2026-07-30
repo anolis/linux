@@ -2405,3 +2405,33 @@ new. A direct baseline at or above 27 fps with correct tear-free output would
 show that the driver can sustain the target when an application renders into
 its framebuffer pages efficiently. If direct mode remains below 27 fps, use
 its timing split to optimize the kernel conversion and pan path next.
+
+## 2026-07-30: Direct VFB rendering reaches the RGB888 target
+
+The checksum-matched 10-second persistent-PTY sweep completed all three rows,
+printed ranking, exited zero, and restored `source_dedup=0` automatically:
+
+- Staged baseline: 148 frames in 10.029 seconds, 14.76 fps, 786 PE finish
+  interrupts, 9,129 us draw average, 20,244 us copy average, and 38,381 us pan
+  average.
+- Direct baseline: 284 frames in 10.001 seconds, 28.40 fps, 770 PE finish
+  interrupts, 11,323 us draw average, 1 us copy average, and 21,297 us pan
+  average. Kernel conversion averaged 11,518 us by worker frame 256.
+- Direct dedup: 287 frames in 10.008 seconds, 28.68 fps, 774 PE finish
+  interrupts, 11,095 us draw average, 1 us copy average, and 22,047 us pan
+  average. Kernel conversion averaged 11,147 us by worker frame 256.
+
+Every candidate had positive PE progress, zero screened fault signatures, and
+normal remote workload completion. Removing the redundant private-buffer copy
+nearly doubled source throughput and put both direct modes above the 27 fps
+acceptance threshold. Deduplication again made no material difference, so keep
+it disabled. The driver can sustain the target when userspace renders directly
+into the inactive VFB page; the staged workload measures application memory
+traffic rather than a driver throughput limit.
+
+The three candidates transitioned too quickly for reliable visual grading of
+direct deduplication. Repeat only `source_dedup=1 --direct-render` for 30
+seconds from the same kernel, module, and workload hashes. Require correct
+colors and geometry, no blanking or tearing, normal completion, and clear
+responsive baseline-console restoration before treating the direct result as
+visually accepted.
