@@ -15,15 +15,16 @@ Options:
   --duration SECONDS     duration per candidate (default: 15)
   --fps RATE             requested source rate (default: 30)
   --rgb565               test RGB565 instead of RGB888
-  --matrix FILE          NAME|wii-gx-cycle arguments, one candidate per line
+  --matrix FILE          NAME|cycle arguments|stress arguments per line
   --results DIR          result directory (default: /tmp/wii-gx-sweep-TIMESTAMP)
   --capture-device PATH  record each run from a V4L2 HDMI capture device
   --capture-size WxH     capture resolution (default: 1920x1080)
   --no-build             reuse existing module and stress binary
   --allow-dirty          permit a sweep from an uncommitted tree
 
-The default matrix compares generated rendering with source deduplication off
-and on. Blank lines and lines beginning with # are ignored in matrix files.
+The default matrix compares staged and direct RGB888 rendering, then tests
+deduplication with direct rendering. Blank lines and lines beginning with #
+are ignored in matrix files.
 Each candidate is isolated by a module reload. Artifacts are uploaded once and
 then checksum-verified and reused. Numerical ranking never substitutes for
 full-frame visual confirmation.
@@ -130,8 +131,9 @@ results=$(realpath "$results")
 if [[ -z $matrix ]]; then
 	matrix=$results/default.matrix
 	cat > "$matrix" <<'EOF'
-baseline|--renderer generated --source-dedup 0 --texel-bias-eighths -2
-dedup|--renderer generated --source-dedup 1 --texel-bias-eighths -2
+baseline-staged|--renderer generated --source-dedup 0 --texel-bias-eighths -2|
+baseline-direct|--renderer generated --source-dedup 0 --texel-bias-eighths -2|--direct-render
+dedup-direct|--renderer generated --source-dedup 1 --texel-bias-eighths -2|--direct-render
 EOF
 elif [[ ! -f $matrix ]]; then
 	echo "Matrix not found: $matrix" >&2
@@ -176,7 +178,7 @@ trap restore_baseline EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-while IFS='|' read -r name argument_text; do
+while IFS='|' read -r name argument_text stress_argument_text; do
 	[[ -z $name || $name == \#* ]] && continue
 	if [[ ! $name =~ ^[A-Za-z0-9._-]+$ ]] || [[ -z $argument_text ]]; then
 		echo "Invalid matrix row: $name|$argument_text" >&2
@@ -186,6 +188,10 @@ while IFS='|' read -r name argument_text; do
 	candidate=$results/$name
 	mkdir -p "$candidate"
 	read -r -a candidate_args <<< "$argument_text"
+	candidate_stress_args=()
+	if [[ -n $stress_argument_text ]]; then
+		read -r -a candidate_stress_args <<< "$stress_argument_text"
+	fi
 	cycle_args=("${common_cycle[@]}")
 	if ((module_uploaded)); then
 		cycle_args+=(--reuse-remote)
@@ -218,6 +224,7 @@ while IFS='|' read -r name argument_text; do
 	fi
 
 	stress_args=("${common_stress[@]}")
+	stress_args+=("${candidate_stress_args[@]}")
 	if ((workload_uploaded)); then
 		stress_args+=(--reuse-remote)
 	fi

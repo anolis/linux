@@ -234,7 +234,7 @@ static void tty_message(const char *message)
 static void usage(const char *program)
 {
 	fprintf(stderr,
-		"Usage: %s [--duration SECONDS] [--fps RATE] [--device PATH] [--single-buffer] [--rgb888]\n"
+		"Usage: %s [--duration SECONDS] [--fps RATE] [--device PATH] [--single-buffer] [--rgb888] [--direct-render]\n"
 		"Defaults: duration=120, fps=30, device=/dev/fb0, RGB565 double-buffered\n",
 		program);
 }
@@ -252,6 +252,7 @@ int main(int argc, char **argv)
 	unsigned int page = 0;
 	int double_buffer = 1;
 	int use_rgb888 = 0;
+	int direct_render = 0;
 	uint64_t start_ns, next_ns, report_ns, end_ns, frame_number = 0;
 	uint64_t interval_ns;
 	uint64_t draw_total_ns = 0, draw_max_ns = 0;
@@ -272,6 +273,8 @@ int main(int argc, char **argv)
 			double_buffer = 0;
 		} else if (!strcmp(argv[i], "--rgb888")) {
 			use_rgb888 = 1;
+		} else if (!strcmp(argv[i], "--direct-render")) {
+			direct_render = 1;
 		} else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
 			usage(argv[0]);
 			return 0;
@@ -362,9 +365,9 @@ int main(int argc, char **argv)
 		close(fd);
 		return 1;
 	}
-	frame = malloc(frame_bytes);
+	frame = direct_render ? NULL : malloc(frame_bytes);
 	row_templates = malloc((size_t)fixed.line_length * 3);
-	if (!frame || !row_templates) {
+	if ((!direct_render && !frame) || !row_templates) {
 		fprintf(stderr, "unable to allocate framebuffer staging memory\n");
 		free(frame);
 		free(row_templates);
@@ -384,8 +387,8 @@ int main(int argc, char **argv)
 	printf("WII_FB_STRESS_START format=%s width=%u height=%u stride=%u",
 	       use_rgb888 ? "RGB888" : "RGB565",
 	       variable.xres, variable.yres, fixed.line_length);
-	printf(" fps=%u duration=%u buffers=%u\n", fps, duration,
-	       double_buffer ? 2 : 1);
+	printf(" fps=%u duration=%u buffers=%u render=%s\n", fps, duration,
+	       double_buffer ? 2 : 1, direct_render ? "direct" : "staged");
 	fflush(stdout);
 	tty_message(use_rgb888 ? "\n=== GX RGB888 STRESS STARTING ===\n" :
 		    "\n=== GX RGB565 STRESS STARTING ===\n");
@@ -400,12 +403,16 @@ int main(int argc, char **argv)
 		uint64_t draw_start_ns, draw_end_ns, copy_end_ns, pan_end_ns;
 		uint64_t draw_ns, copy_ns, pan_ns = 0;
 		uint64_t now_ns;
+		uint8_t *draw_target;
 
+		draw_target = direct_render ?
+			fb + (size_t)page * frame_bytes : frame;
 		draw_start_ns = monotonic_ns();
-		draw_frame(frame, row_templates, fixed.line_length, variable.xres,
+		draw_frame(draw_target, row_templates, fixed.line_length, variable.xres,
 			   variable.yres, frame_number, use_rgb888 ? 4 : 2);
 		draw_end_ns = monotonic_ns();
-		memcpy(fb + (size_t)page * frame_bytes, frame, frame_bytes);
+		if (!direct_render)
+			memcpy(fb + (size_t)page * frame_bytes, frame, frame_bytes);
 		copy_end_ns = monotonic_ns();
 		if (double_buffer) {
 			pan = variable;

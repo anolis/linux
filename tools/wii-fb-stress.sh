@@ -16,6 +16,7 @@ Options:
   --fps RATE           requested framebuffer update rate, 1..60 (default: 30)
   --single-buffer      run the known tearing-prone control without VFB panning
   --rgb888             request a 32-bit XRGB8888 virtual framebuffer
+  --direct-render      render directly into the inactive mapped VFB page
   --no-build           reuse /tmp/wii-fb-stress-$USER
   --reuse-remote       verify and reuse /tmp/wii-fb-stress on the Wii
   --allow-dirty        permit a test from an uncommitted source tree
@@ -33,6 +34,7 @@ build=1
 allow_dirty=0
 single_buffer=0
 rgb888=0
+direct_render=0
 reuse_remote=0
 
 while (($#)); do
@@ -60,6 +62,9 @@ while (($#)); do
 		;;
 	--rgb888)
 		rgb888=1
+		;;
+	--direct-render)
+		direct_render=1
 		;;
 	--allow-dirty)
 		allow_dirty=1
@@ -130,6 +135,7 @@ run_log=${TMPDIR:-/tmp}/wii-fb-stress-${run_id}.log
 target_args="--duration $duration --fps $fps"
 buffer_mode=double
 pixel_format=RGB565
+render_mode=staged
 if ((single_buffer)); then
 	target_args+=" --single-buffer"
 	buffer_mode=single
@@ -137,6 +143,10 @@ fi
 if ((rgb888)); then
 	target_args+=" --rgb888"
 	pixel_format=RGB888
+fi
+if ((direct_render)); then
+	target_args+=" --direct-render"
+	render_mode=direct
 fi
 
 remote_exec()
@@ -198,7 +208,8 @@ begin_marker+=" buffers=$buffer_mode sha256=$binary_sha"
 remote_exec "printf '<6>%s\\n' '$begin_marker' > /dev/kmsg"
 printf 'Running %s for %ss at %s fps (%s-buffered); ' \
 	"$pixel_format" "$duration" "$fps" "$buffer_mode"
-printf 'watch the Wii for smooth moving bars and intact grid lines.\n'
+printf 'render=%s; watch for smooth moving bars and intact grid lines.\n' \
+	"$render_mode"
 set +e
 remote_exec "$remote_binary $target_args" | tee "$run_log"
 workload_status=${PIPESTATUS[0]}
@@ -232,6 +243,7 @@ printf '  binary sha:   %s\n' "$binary_sha"
 printf '  exit status:  %s\n' "$workload_status"
 printf '  VFB mode:     %s-buffered\n' "$buffer_mode"
 printf '  pixel format: %s\n' "$pixel_format"
+printf '  render mode:  %s\n' "$render_mode"
 printf '  source rate:  %s fps requested, %s fps achieved\n' \
 	"$fps" "${achieved_fps:-unknown}"
 printf '  PE finish IRQ: %s -> %s (delta %s, %s/s)\n' \
