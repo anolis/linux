@@ -1,0 +1,120 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0
+### BEGIN INIT INFO
+# Provides:          wii-network
+# Required-Start:    $local_fs $remote_fs
+# Required-Stop:     $local_fs $remote_fs
+# Should-Start:      $syslog
+# Should-Stop:       $syslog
+# Default-Start:     S
+# Default-Stop:      0 1 6
+# Short-Description: Bring up the Wii SDIO wireless interface
+### END INIT INFO
+
+PATH=/sbin:/usr/sbin:/bin:/usr/bin
+
+IFACE=${WII_WLAN_IFACE:-wlan0}
+WPA_CONF=${WII_WPA_CONF:-/etc/wpa_supplicant/wpa_supplicant.conf}
+WPA_CTRL=/run/wpa_supplicant
+WPA_PID=/run/wpa_supplicant-wii.pid
+DHCP_PID=/run/dhclient-wii.pid
+DHCP_LEASE=/var/lib/dhcp/dhclient.${IFACE}.leases
+
+log()
+{
+	echo "wii-network: $*"
+}
+
+pid_is_running()
+{
+	[ -s "$1" ] && kill -0 "$(cat "$1")" 2>/dev/null
+}
+
+stop_pid()
+{
+	if pid_is_running "$1"; then
+		kill "$(cat "$1")" 2>/dev/null || true
+	fi
+	rm -f "$1"
+}
+
+start_network()
+{
+	modprobe b43 || return 1
+	mkdir -p "$WPA_CTRL" /run /var/lib/dhcp
+	ifconfig "$IFACE" up || return 1
+
+	if ! pid_is_running "$WPA_PID"; then
+		rm -f "$WPA_PID" "$WPA_CTRL/$IFACE"
+		log "starting WPA on $IFACE"
+		wpa_supplicant -B -P "$WPA_PID" -i "$IFACE" \
+			-Dnl80211,wext -C "$WPA_CTRL" -c "$WPA_CONF" || return 1
+	fi
+
+	elapsed=0
+	stable=0
+	while [ "$elapsed" -lt 60 ]; do
+		state=$(wpa_cli -p "$WPA_CTRL" -i "$IFACE" status 2>/dev/null |
+			sed -n 's/^wpa_state=//p')
+		if [ "$state" = COMPLETED ]; then
+			stable=$((stable + 1))
+		else
+			stable=0
+		fi
+		if [ "$stable" -ge 8 ]; then
+			break
+		fi
+		sleep 1
+		elapsed=$((elapsed + 1))
+	done
+
+	if [ "$stable" -lt 8 ]; then
+		log "WPA did not stabilize after ${elapsed}s (state=${state:-unknown})"
+		return 1
+	fi
+
+	log "WPA stable; requesting DHCP lease"
+	if ! timeout 30 dhclient -4 -1 -v -pf "$DHCP_PID" \
+		-lf "$DHCP_LEASE" "$IFACE"; then
+		log "DHCP failed"
+		return 1
+	fi
+
+	address=$(ip -4 addr show dev "$IFACE" 2>/dev/null |
+		sed -n 's/^[[:space:]]*inet \([^ ]*\).*/\1/p' | head -n 1)
+	log "ready on ${address:-no-address}"
+}
+
+stop_network()
+{
+	if pid_is_running "$DHCP_PID"; then
+		dhclient -4 -r -pf "$DHCP_PID" "$IFACE" 2>/dev/null || true
+	fi
+	stop_pid "$DHCP_PID"
+	stop_pid "$WPA_PID"
+	ifconfig "$IFACE" down 2>/dev/null || true
+}
+
+case "${1:-}" in
+start)
+	start_network
+	;;
+stop)
+	stop_network
+	;;
+restart|force-reload)
+	stop_network
+	start_network
+	;;
+status)
+	if pid_is_running "$WPA_PID"; then
+		ip -4 addr show dev "$IFACE"
+	else
+		exit 3
+	fi
+	;;
+*)
+	echo "Usage: $0 {start|stop|restart|force-reload|status}" >&2
+	exit 2
+	;;
+esac
