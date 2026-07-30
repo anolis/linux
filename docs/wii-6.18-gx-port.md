@@ -1750,3 +1750,15 @@ targets before rebooting.
 The unattended positive control remains automatic WPA, DHCP, and SSH return at
 `10.3.10.12` without console commands. The unchanged normal-init kernel and
 CPU framebuffer control remain in place.
+
+Hardware result: after removing and re-adding the service through `insserv`,
+`.depend.boot` included `wii-network` after local mounts and generated matching
+start and shutdown links. A manual cold reboot then returned SSH with only
+45.94 seconds uptime and no network commands entered at the console.
+
+PID 1 was normal SysV init at runlevel 2. `wlan0` held `10.3.10.12/24` with the
+expected default route, and the live WPA and DHCP processes used the script's
+dedicated PID files and arguments. SSH and gettys were active, both the
+BCM2045A and Dell keyboard enumerated, `hid-generic` bound the keyboard, and
+`gcn_gx` remained unloaded. This passes the unattended normal-init, wireless,
+SSH, OHCI, and CPU-framebuffer control milestone.
