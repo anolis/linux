@@ -1413,3 +1413,22 @@ representation is ruled out. Describe each pool under the root-level
 `reserved-memory` node, reference it from its controller with `memory-region`,
 and attach it using `of_reserved_mem_device_init()`. Restore each OHCI `reg`
 property to MMIO only.
+
+## 2026-07-29: Standard reserved-memory OHCI pool test
+
+- Test implementation: `0969cee575cf`
+- Kernel image SHA-256:
+  `c53d336a88ec81c41721782eaa038732257cb7dc090dc91607b105f5839bc86f`
+
+The two MEM1 pools are now root-level `shared-dma-pool` reserved-memory nodes.
+Each OHCI node has only its translatable Hollywood MMIO in `reg` and references
+one pool through `memory-region`. The platform driver calls
+`of_reserved_mem_device_init()` after configuring 32-bit DMA and releases the
+association on every failure/remove path.
+
+The complete build passes. Decompiling the built DT confirms both pool nodes,
+their `no-map` properties, MMIO-only controller resources, and correct phandle
+references. The platform object links the OF reserved-memory init and release
+APIs. Hardware positive controls remain successful pool attachment, two OHCI
+root hubs/IRQs, keyboard enumeration, and actual tty1 key input. This exact
+checksum must be deployed before drawing a conclusion.
