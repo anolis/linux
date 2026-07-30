@@ -2282,3 +2282,43 @@ last-tuple skip with explicit source/presentation ownership. A retained source
 must continue to produce stable XFB presentation without rereading or
 reconverting its VFB page, and a newly published multi-page generation must be
 latched atomically and consumed exactly once.
+
+## 2026-07-30: Stage reloadable GX configuration sweep
+
+- Test implementation: `717caa172`
+- Kernel zImage SHA-256:
+  `c5b6b8f5b5d731d2958ed06b1e2c26ceddafa77cc62667016138551df76d5d11`
+- GX module SHA-256:
+  `43592f3e08cd8935b15447d7e989394cab6484c7cdfe09f25967ed754ad1d724`
+- Timed static workload SHA-256:
+  `6cab962d96314a264afc2f464451d5cd44efc21d6677173ee6a2710ca1cc780b`
+- Sweep harness SHA-256:
+  `1d67aa614c6d3f2a596ee32374fca7989f8bcb6334c3bd55a89abcef83eb31dc`
+
+Make the rejected source-generation suppression selectable at module load as
+`source_dedup=0|1`, defaulting to the previously stable repeated-submission
+behavior. The framebuffer core now latches source yoffset and generation under
+one lock. One-page pan notifications return immediately instead of waiting for
+an exact generation that per-vblank refresh can advance past; multi-page pan
+still waits for exact source consumption and only rolls back if no newer
+generation has replaced it.
+
+Add `tools/wii-gx-sweep.sh`. It builds once with `-j16`, performs one
+checksum-verified upload of the module and workload, reloads named module
+parameter combinations, runs isolated timed workloads, records per-candidate
+logs, rejects kernel timeouts/fault signatures, optionally records a V4L2 HDMI
+feed, ranks technically clean candidates, and restores generated rendering
+with deduplication disabled. The existing cycle and stress tools can now
+checksum-verify and reuse their remote artifacts, eliminating repeated Wi-Fi
+transfers. Bash syntax, ShellCheck, diff-only checkpatch, the kernel image, the
+module, and the static workload all validate cleanly.
+
+Deploy this kernel once by SD card and its matching module over SSH. Run the
+default 15-second RGB888 matrix at 30 requested fps. It compares the stable
+baseline (`source_dedup=0`) with the rejected optimization
+(`source_dedup=1`) from identical binaries and restores the baseline
+automatically. The apparatus passes only if both candidates execute and leave
+the Wii reachable, the baseline is visually correct, no one-page restoration
+timeout occurs, and the console returns clear and responsive. Do not promote a
+candidate based only on numerical ranking; use full-frame HDMI or direct visual
+confirmation for display correctness.
