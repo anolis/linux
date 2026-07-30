@@ -1669,3 +1669,23 @@ root with `rw`. The diagnostic PID 1 required that old setting because it wrote
 logs before explicitly remounting root. Retry normal SysV init with `rootwait
 ro`; keep all other command-line arguments and the CPU-only graphics isolation
 unchanged.
+
+## 2026-07-29: Stage read-only-root SysV init retry
+
+- Test implementation: `9af3d245d`
+- Kernel image SHA-256:
+  `adcf9687fe91a6ce481f795d47d77c300ca38c1e83401a6c492ed158b5b652df`
+- Stable GX module SHA-256, installed but not auto-loaded:
+  `d0f8b8ec5c2d57fb76f58adb77586b3df86e9b4a1b60ca72b31e2dc7fdcd3e4c`
+
+The complete `zImage modules` build passes with `make -j16`. This retry changes
+only the root mount argument from `rw` to `ro`, allowing the existing Debian
+SysV root check to run before userspace remounts root writable. The diagnostic
+init override remains removed and GX remains absent from `/etc/modules` so the
+test continues to use the known CPU framebuffer fallback.
+
+The preceding failed image left the Wii unreachable over SSH, so this image is
+built and checksum-staged but not yet deployed. Hardware success requires PID
+1 to be `/sbin/init`, runlevel 2 with a tty1 getty, Wi-Fi and SSH to return, both
+Hollywood OHCI devices to enumerate, and no resident `gcn_gx` module. Do not
+enable GX auto-loading until those controls pass.
