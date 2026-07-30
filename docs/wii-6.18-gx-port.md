@@ -1508,3 +1508,25 @@ interpret the missing line as proof that the workaround itself failed. Trace
 the enqueue path before/after ED scheduling and TD submission, including the
 live Wii flag, ED head/tail, control head/current, and HCCA done head. Only after
 that trace should the old driver's 32-bit software-field workaround be ported.
+
+## 2026-07-29: OHCI descriptor enqueue-stage trace
+
+- Test implementation: `03efbcbd7`
+- Kernel image SHA-256:
+  `e56fd333762f29fc6a311d31a67af9652b6486ec766b1716215f1183f04f8d27`
+
+This test retains the validated shared MEM1 pool and changes no GX or OHCI
+scheduling behavior. Each Hollywood platform probe logs the live quirk flags
+after `usb_add_hcd()`. For only the first eight Wii URBs per controller, the
+enqueue path logs entry, the state after ED scheduling, and the state after TD
+publication. The latter two records include ED DMA/head/tail, hardware control
+head/current, and HCCA done head. The existing bounded control-workaround trace
+remains enabled.
+
+The complete `zImage modules` build passes with `make -j16`. The image is
+6264404 bytes; at the wrapper's `0x00f00000` relocation it still ends below the
+shared pool at `0x01500000`. Hardware interpretation requires the first device
+request to show `flags` containing `OHCI_QUIRK_WII`, a matching enqueue triplet,
+and a control-workaround line. The submitted ED/TD pointers and later debugfs
+state will distinguish a publication failure from controller execution or
+done-list/unlink failure.
