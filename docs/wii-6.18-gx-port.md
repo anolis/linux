@@ -3035,3 +3035,21 @@ sequence, a live final frame, continuing SSH/ping, no kernel or conversion
 fault, and no visual blanking, corruption, loss of sync, or persistent tearing.
 Rapid left/right marker alternation may appear as flicker and is not itself a
 failure.
+
+## 2026-07-31: Accept sustained zero-delay page-flip stress
+
+The checksum-pinned client completed all 300 serialized zero-delay page flips
+and reported `flips=300 last-vblank=776`. Completion was already present at the
+20-second check; the process remained alive holding the final frame. The
+subsequent 30-second soak passed with three of three ICMP replies, responsive
+SSH, advancing uptime, retained `gcn-vi` ownership, and no conversion failure
+or kernel fault signature.
+
+Direct observation confirmed the full base pattern stayed visually correct
+throughout the stress run, with no blanking, corruption, loss of sync,
+persistent tearing, or instability. This accepts sustained event-serialized
+page flipping and repeated full-frame CPU conversion on the current KMS path.
+
+Next validate the second advertised primary-plane format, RGB565, with the same
+deterministic static pattern and synchronized page-flip gates before declaring
+the initial userspace format contract complete.
