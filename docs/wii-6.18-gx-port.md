@@ -2878,3 +2878,32 @@ and accepted `gcn-drm` instance; no reboot or module cycle is required. Replace
 the remote client only after checksum verification, then launch it and require
 the `active 640x480` status line plus a live process. Apply the same liveness,
 fault, and full-frame visual gates defined for the first attempt.
+
+## 2026-07-31: Accept first DRM/KMS userspace scanout
+
+The checksum-verified msync-free client completed its ioctl sequence and
+reported:
+
+```text
+wii-drm-test: active 640x480 640x480 crtc=36 connector=33
+wii-drm-test: fb=38 handle=1 pitch=2560 size=1228800
+```
+
+The process remained alive, `gcn-vi` retained the platform binding, and the
+30-second soak completed with three of three ICMP replies, continuing SSH and
+uptime, and no conversion failure, BUG, Oops, panic, machine check, unhandled
+access, or watchdog report.
+
+Direct visual inspection passed. The displayed frame was clear and showed all
+four color quadrants with the black grid and the teal/pink center checkerboard
+overlay, matching the deterministic XRGB8888 source pattern. The HDMI capture
+device was not connected, so no PNG artifact exists for this run; acceptance
+is based on the user's direct full-frame observation rather than sampled XFB
+values or kernel logs.
+
+This accepts dumb-buffer allocation/mapping, XRGB8888 framebuffer creation,
+legacy `SETCRTC` through the atomic helper path, CPU XRGB8888-to-YUYV
+conversion, XFB programming, and stable VI scanout. Next milestones are a
+reversible return to legacy `gcnfb`, then repeated page flips with vblank events
+to validate frame updates and synchronization before adding DRM fbdev console
+support.
