@@ -2549,3 +2549,23 @@ restored console was nominal. RGB565 therefore passes numerical, PE-progress,
 visual, fault, and recovery gates. Proceed with the separately staged
 30-second RGB888 direct-render regression using the same kernel, cleaned
 module, and static workload hashes.
+
+## 2026-07-30: Cleaned module passes RGB888 regression
+
+The separate 30-second direct-render RGB888 workload completed 839 frames in
+30.014 seconds, or 27.95 fps against a requested 30 fps. This remains above
+the established 27 fps acceptance floor. PE finish interrupts advanced from
+61,237 to 63,203, a delta of 1,966 or 65.53 per second. Direct draw time
+averaged 11,257 us with a 33,916 us maximum; pan time averaged 22,531 us with
+a 62,305 us maximum. Kernel conversion remained stable at approximately
+11.9 ms through worker frames 256, 512, and 768.
+
+The workload exited zero and logged no GX timeout, source-generation timeout,
+or kernel fault. The user confirmed that the full-frame pattern remained
+visually correct and that the restored console was clear and responsive.
+RGB888 therefore passes numerical, PE-progress, visual, fault, and recovery
+gates.
+
+Together with the preceding RGB565 result, this accepts the source-dedup
+removal as the hardened accelerated-framebuffer baseline. Preserve this point
+on `feature/wii-6.18-gx-port` before starting DRM/KMS work on a separate branch.
