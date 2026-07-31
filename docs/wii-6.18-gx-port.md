@@ -3843,3 +3843,28 @@ After both visual passes, terminate the test, remove the temporary empty-client
 override, and restore legacy ownership. Require only `gcn_gx` loaded and no
 kernel fault. Passing permits removal of the temporary conversion diagnostics,
 followed by a final service-managed console color and interaction regression.
+
+## 2026-07-31: Accept corrected XFB chroma order in both formats
+
+The installed module matched SHA-256
+`7e9b6082bc811ad0c61cbd76e27db2a0349839f10d59f8d50158e25b44b3db7c`.
+Under one module load and VI programming interval, the no-flip RGB565 pattern
+displayed top-left red, top-right green, bottom-right white, bottom-left blue,
+and a teal/magenta checkerboard. Without reloading the module or stopping the
+service, XRGB8888 displayed the same correct pattern.
+
+The diagnostics retained the exact validated source words while confirming
+the intended packed-byte change. RGB565 source red `f904` changed from
+`725a72ef` to `72ef725a`; XRGB8888 source red `00ff2020` produced the same
+corrected output. Blue similarly changed to `5d605de4` for RGB565 and
+`5c605ce4` for XRGB8888. White remained neutral `eb80eb80`.
+
+This accepts `Y0,Cr,Y1,Cb` as the DRM driver's Wii XFB word layout and closes
+the deterministic red/blue plus cyan/yellow exchange. The test processes
+handled termination, service stop restored `gcn-vifb`, only `gcn_gx` remained
+loaded, and no fault appeared.
+
+Remove both temporary one-shot sample loggers and their state flags without
+changing the accepted packer. Rebuild and run the service-managed default
+RGB565 console with explicit labeled colors, live tty update, cursor blink,
+client liveness, automatic stop, module cleanup, and clear legacy recovery.
