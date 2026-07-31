@@ -18283,6 +18283,13 @@ W:	http://www.netlab.is.tsukuba.ac.jp/~yokota/izumi/ninja/
 F:	Documentation/scsi/NinjaSCSI.rst
 F:	drivers/scsi/nsp32*
 
+NINTENDO GAMECUBE/WII DRM DRIVER
+M:	Bill Carson <anolisporcatus@gmail.com>
+L:	dri-devel@lists.freedesktop.org
+S:	Maintained
+F:	Documentation/gpu/gcn-drm.rst
+F:	drivers/gpu/drm/gcn/
+
 NINTENDO HID DRIVER
 M:	Daniel J. Ogorchock <djogorchock@gmail.com>
 L:	linux-input@vger.kernel.org

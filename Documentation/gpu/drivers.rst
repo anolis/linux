@@ -26,6 +26,7 @@ GPU Driver Documentation
    panthor
    zynqmp
    nova/index
+   gcn-drm
 
 .. only::  subproject and html
 

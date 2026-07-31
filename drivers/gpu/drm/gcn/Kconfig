@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+config DRM_GCN_VI
+	tristate "Nintendo GameCube/Wii Video Interface KMS"
+	depends on DRM && WII
+	select DRM_CLIENT_SELECTION
+	select DRM_GEM_SHMEM_HELPER
+	select DRM_KMS_HELPER
+	help
+	  Build an atomic DRM/KMS driver for the Nintendo GameCube/Wii Video
+	  Interface. The initial driver converts RGB scanout buffers into the
+	  packed YUYV external framebuffer consumed by the VI.
+
+	  The legacy FB_GAMECUBE driver and this driver may be compiled
+	  together for migration testing, but only one can bind the VI device
+	  at a time. Production configurations should select one display
+	  driver.
+
+	  If M is selected, the module will be called gcn-drm.
