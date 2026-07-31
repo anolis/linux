@@ -2528,3 +2528,24 @@ visual result before testing RGB888. Follow with a separate 30-second RGB888
 direct-render regression. Both formats must complete normally with positive PE
 progress, no source-generation timeout or kernel fault, correct stable output,
 and a clear responsive console after the baseline module is restored.
+
+## 2026-07-30: Cleaned module passes RGB565 regression
+
+The checksum-matched module loaded normally from implementation `c7bd62a0a`.
+The removed `source_dedup` parameter was absent from both the live sysfs module
+parameter directory and `modinfo`; `/tmp/gcn-gx.ko` on the Wii matched the
+staged SHA-256
+`88474048238caad1e992ca961969f6d42b07fece9fa5438937deac94720dffe1`.
+
+The isolated 30-second direct-render RGB565 workload completed 895 frames in
+30.018 seconds, or 29.82 fps against a requested 30 fps. PE finish interrupts
+advanced from 43,127 to 45,093, a delta of 1,966 or 65.53 per second. Direct
+draw time averaged 5,419 us with a 17,098 us maximum; pan time averaged
+18,410 us with a 42,352 us maximum. The workload exited zero and logged no GX
+timeout, source-generation timeout, or kernel fault.
+
+The user confirmed that the full-frame output looked correct and that the
+restored console was nominal. RGB565 therefore passes numerical, PE-progress,
+visual, fault, and recovery gates. Proceed with the separately staged
+30-second RGB888 direct-render regression using the same kernel, cleaned
+module, and static workload hashes.
