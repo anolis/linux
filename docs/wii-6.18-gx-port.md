@@ -2952,3 +2952,17 @@ Because `gcn-vifb` and `gcn_gx` are already active, the operation must be
 idempotent: preserve their binding/module state, clear console, SSH access, and
 fault-free kernel. This validates artifact availability for future automatic
 rollback without performing another DRM transition.
+
+## 2026-07-31: Accept self-contained restore harness
+
+The checksum-pinned restore-only run uploaded and remotely verified
+`gcn-gx.ko` as
+`88474048238caad1e992ca961969f6d42b07fece9fa5438937deac94720dffe1`,
+then completed normally. `gcn-vifb` remained bound to `c002000.video`,
+`gcn_gx` remained the only matching graphics module loaded, SSH stayed
+responsive, and no kernel fault signature appeared. Direct observation
+confirmed the console remained clear throughout the idempotent restore.
+
+This accepts the artifact-upload fix and makes both normal rollback and
+restore-only operation independent of prior `/tmp` contents. Proceed to the
+two-buffer vblank/page-flip milestone.
