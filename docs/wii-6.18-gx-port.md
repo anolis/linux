@@ -3413,3 +3413,27 @@ if text is at least as clear and red is materially improved or no worse. If
 quality is unchanged, retain the lower-memory RGB565 path provisionally and
 test interlace-stable glyph filtering next; if quality regresses, restore
 XRGB8888 before any font experiment.
+
+## 2026-07-31: RGB565 quality comparison invalidated by VGA index bug
+
+The checksum-pinned binary started normally and reported `640x480 rgb565` with
+an 80x25 VCSA source. Live updates, cursor blinking, process stability, clean
+SIGTERM, full DRM unload, and legacy restoration continued to pass.
+
+The labeled color control exposed a pre-existing console-client bug: `RED
+SAMPLE` appeared blue, `BLUE SAMPLE` appeared red, and `YELLOW SAMPLE`
+appeared teal; green remained green. A raw `/dev/vcsa1` capture independently
+showed red glyphs tagged with attribute `0x04`, blue with `0x01`, yellow with
+`0x06`, and green with `0x02`. This exactly matches the VGA/BGR attribute-bit
+order. The client instead indexed an RGB-ordered palette directly.
+
+Kernel source confirms the required mapping in `drivers/tty/vt/vt.c`:
+`color_table[]` begins `{ 0, 4, 2, 6, 1, 5, 3, 7 }`, translating console
+attributes before indexing the RGB `default_red/default_grn/default_blu`
+arrays. The client omitted this translation. Therefore the observed red/blue
+swap is not evidence of an RGB565 endian bug, and both this RGB565 quality
+comparison and the preceding XRGB8888 color-identity claim are invalid.
+
+Keep RGB565 provisionally, correct only the 16-entry userspace palette into
+direct VGA attribute order, and repeat the labeled screen. Require all four
+labels to match before evaluating red blur or comparing source formats.
