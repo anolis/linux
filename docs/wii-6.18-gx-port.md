@@ -3748,3 +3748,25 @@ identify the displayed top-left, top-right, bottom-left, and bottom-right
 quadrants. Correct quadrants constrain the defect to console framebuffer
 production or update handling; swapped quadrants contradict the logged YUYV
 values and require a matched XRGB pattern comparison at the XFB boundary.
+
+## 2026-07-31: RGB565 visual pattern confirms chroma-pair exchange
+
+The exact staged RGB565 pattern was displayed without flips. Direct visual
+identification reported top-left blue instead of source red, top-right green,
+bottom-right white, and bottom-left red instead of source blue. The center
+checkerboard displayed magenta and gold instead of source magenta and cyan.
+
+This independently reproduces the console result on a second userspace client:
+red and blue exchange, cyan becomes yellow/gold, while green, white, and
+magenta remain invariant. Combined with the immediately preceding driver log,
+source red word `f904` was decoded into `yuyv=725a72ef` yet appeared blue. That
+is the visual signature expected if the hardware interprets the two chroma
+bytes in the opposite Cb/Cr order from the driver's current assumption.
+
+The test process was terminated and service stop restored `gcn-vifb` with only
+`gcn_gx` loaded. Do not change XFB packing until resolving the passing
+XRGB8888 contradiction. Extend the one-shot diagnostic to sample the identical
+XRGB8888 pattern and log source words plus packed YUYV. If XRGB source red
+produces the same YUYV as RGB565 source red, repeat its visual quadrant test;
+if it produces the blue YUYV word, locate the 32-bit source-channel reversal
+that currently cancels the XFB chroma-order defect.
