@@ -117,10 +117,10 @@ struct gcn_drm {
 	bool flip_pending;
 };
 
-static bool program_mode;
+static bool program_mode = true;
 module_param(program_mode, bool, 0444);
 MODULE_PARM_DESC(program_mode,
-		 "program a fixed 640x480 NTSC interlaced VI mode");
+		 "program fixed 640x480 NTSC interlaced VI timing (default: true)");
 
 static const u32 gcn_drm_vi_filter[] = {
 	0x1ae771f0, 0x0db4a574, 0x00c1188e, 0xc4c0cbe2,
