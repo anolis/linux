@@ -3260,3 +3260,31 @@ correct image, events, network, and fault gates. Terminate the client, run
 clear legacy output, and an idempotent final status. Any start failure must
 restore legacy ownership automatically; never enable the service at boot until
 this full manual transaction passes.
+
+## 2026-07-31: Reject first service stop due to module auto-reload race
+
+The installed service and all six modules matched their staged SHA-256 values;
+no runlevel link was present. Initial `status` correctly reported legacy gcnfb.
+`start` then preflighted the modular dependencies, unloaded GX, unbound gcnfb,
+loaded parameterless gcn-drm, and verified both `c002000.video` ownership and
+`card0`.
+
+The accepted XRGB8888 client completed all 20 validated flips through vblank
+sequence 310. Direct observation confirmed the full pattern appeared
+correctly, and no conversion or kernel fault was logged.
+
+The first `stop` restored the visible legacy path: gcnfb rebound, the accepted
+GX renderer loaded, and final status identified legacy ownership. However,
+`gcn_drm` and its generic dependencies remained in `/proc/modules`. The stop
+implementation removed gcn-drm before binding gcnfb, briefly leaving the VI
+device ownerless; udev matched its platform alias and automatically loaded
+gcn-drm again. The reloaded module stayed unbound because gcnfb won ownership,
+so there was no concurrent hardware access, but the transaction failed the
+module-cleanup gate.
+
+The unbound DRM stack was manually removed after confirming gcnfb ownership;
+the target is back at the accepted legacy state with only `gcn_gx` loaded.
+Fix recovery ordering to unbind the DRM platform driver while retaining its
+module, bind gcnfb while the device cannot trigger a competing probe, then
+unload gcn-drm and generic dependencies. Re-run the complete staged service
+transaction after a separately committed implementation and artifact hash.
