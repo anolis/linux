@@ -3330,3 +3330,35 @@ the target but have no runlevel links, so boot behavior remains legacy-first.
 Next connect this accepted service to a practical userspace DRM client or
 desktop session before enabling it automatically at boot; starting DRM without
 a client would intentionally leave only the initialized black XFB visible.
+
+## 2026-07-31: Stage first raw-DRM virtual-console mirror
+
+- Console implementation: `ec8d3b94d`
+- Static stripped PowerPC binary size: `726988` bytes
+- `wii-drm-console` SHA-256:
+  `317911dc539f0b8413557d80078fcfb5927be44117cb59c71b614df731d705b6`
+- Accepted init-service SHA-256:
+  `facbb0471ca8de26149fc5c9d5dd04cc55f69ec02f5b56b0d93e862be2f0a23e`
+
+The console is built without libdrm or other target libraries:
+
+```sh
+powerpc-linux-gnu-gcc -static -O2 -Wall -Wextra -Werror \
+  -idirafter include tools/wii-drm-console.c -o /tmp/wii-drm-console
+powerpc-linux-gnu-strip -s /tmp/wii-drm-console
+```
+
+Upload and remotely verify the binary, start DRM through the accepted target
+service, and launch the mirror against `/dev/vcsa1` and `/dev/dri/card0`.
+Require its startup log to report 640x480 DRM and an 80x30 virtual console.
+Write a deterministic screen containing white text plus distinct red, green,
+blue, and yellow attribute samples to tty1, then replace a status line while
+the mirror is running.
+
+Acceptance requires a clear 80x30 console with correct glyph geometry and
+colors, visible cursor blinking, and the changed line appearing without a
+restart. The process must remain alive, SSH and the kernel must remain stable,
+and no page-flip, conversion, or fault error may appear. Send SIGTERM, require
+clean process exit and DRM master release, then stop the ownership service and
+require the accepted clear legacy GX console. This is a display mirror only:
+keyboard input and getty remain owned by tty1 and must continue to work.
