@@ -3288,3 +3288,23 @@ Fix recovery ordering to unbind the DRM platform driver while retaining its
 module, bind gcnfb while the device cannot trigger a competing probe, then
 unload gcn-drm and generic dependencies. Re-run the complete staged service
 transaction after a separately committed implementation and artifact hash.
+
+## 2026-07-31: Stage corrected service stop ordering
+
+- Stop-order implementation: `3f96c69ef`
+- `wii-drm-init` SHA-256:
+  `facbb0471ca8de26149fc5c9d5dd04cc55f69ec02f5b56b0d93e862be2f0a23e`
+
+Replace only `/etc/init.d/wii-drm` and verify its checksum. Startup behavior and
+all module artifacts are unchanged from the preceding test, where service
+startup and the full KMS visual/event gates passed. Run `status`, `start`, and
+`status` again to establish service-managed DRM ownership, but do not open a
+KMS client for this targeted stop-order test.
+
+Run `service wii-drm stop`. The corrected path must unbind the platform device
+from gcn-vi while gcn_drm remains loaded, bind gcnfb, then remove gcn_drm and
+the generic DRM modules after legacy ownership prevents udev reprobe. Require
+final ownership by `gcn-vifb`, only `gcn_gx` among matching modules, final
+status `legacy gcnfb active`, responsive SSH, no kernel fault, and clear legacy
+output. A lingering unbound gcn_drm module is a failure even if the console is
+visible.
