@@ -103,7 +103,8 @@ static int read_console(int fd, struct console_screen *screen)
 
 static void draw_console(void *map, __u32 pitch,
 			 const struct console_screen *screen,
-			 int cursor_visible)
+			 int cursor_visible,
+			 enum test_pixel_format format)
 {
 	unsigned int x_offset =
 		(CONSOLE_COLUMNS - screen->columns) * CONSOLE_CELL_WIDTH / 2;
@@ -134,16 +135,26 @@ static void draw_console(void *map, __u32 pitch,
 
 			for (glyph_y = 0; glyph_y < CONSOLE_CELL_HEIGHT;
 			     glyph_y++) {
-				uint32_t *pixels = (uint32_t *)((uint8_t *)map +
+				uint8_t *pixel_row = (uint8_t *)map +
 					(y_offset + row * CONSOLE_CELL_HEIGHT + glyph_y) *
-					pitch) + x_offset + column * CONSOLE_CELL_WIDTH;
+					pitch;
+				unsigned int pixel_x =
+					x_offset + column * CONSOLE_CELL_WIDTH;
 				unsigned int glyph_x;
 
 				for (glyph_x = 0; glyph_x < CONSOLE_CELL_WIDTH;
-				     glyph_x++)
-					pixels[glyph_x] =
+				     glyph_x++) {
+					uint32_t color =
 						glyph[glyph_y] & BIT(7 - glyph_x) ?
 						foreground : background;
+
+					if (format == TEST_FORMAT_RGB565)
+						((uint16_t *)pixel_row)[pixel_x + glyph_x] =
+							xrgb8888_to_rgb565(color);
+					else
+						((uint32_t *)pixel_row)[pixel_x + glyph_x] =
+							color;
+				}
 			}
 		}
 	}
@@ -175,7 +186,8 @@ static uint64_t monotonic_ms(void)
 
 static void console_usage(const char *program)
 {
-	fprintf(stderr, "Usage: %s [--vcsa DEVICE] [CARD]\n", program);
+	fprintf(stderr, "Usage: %s [--format rgb565|xrgb8888] ", program);
+	fprintf(stderr, "[--vcsa DEVICE] [CARD]\n");
 }
 
 int main(int argc, char **argv)
@@ -198,6 +210,7 @@ int main(int argc, char **argv)
 	unsigned int visible = 0;
 	unsigned int i;
 	__u64 serial = 1;
+	enum test_pixel_format format = TEST_FORMAT_RGB565;
 	int previous_cursor = -1;
 	int card_set = 0;
 	int drm_fd = -1;
@@ -205,6 +218,21 @@ int main(int argc, char **argv)
 	int status = EXIT_FAILURE;
 
 	for (i = 1; i < (unsigned int)argc; i++) {
+		if (!strcmp(argv[i], "--format")) {
+			if (++i >= (unsigned int)argc) {
+				console_usage(argv[0]);
+				return EXIT_FAILURE;
+			}
+			if (!strcmp(argv[i], "rgb565"))
+				format = TEST_FORMAT_RGB565;
+			else if (!strcmp(argv[i], "xrgb8888"))
+				format = TEST_FORMAT_XRGB8888;
+			else {
+				console_usage(argv[0]);
+				return EXIT_FAILURE;
+			}
+			continue;
+		}
 		if (!strcmp(argv[i], "--vcsa")) {
 			if (++i >= (unsigned int)argc) {
 				console_usage(argv[0]);
@@ -256,15 +284,15 @@ int main(int argc, char **argv)
 	}
 
 	for (i = 0; i < ARRAY_SIZE(buffers); i++) {
-		if (create_buffer(drm_fd, &buffers[i], -1,
-				  TEST_FORMAT_XRGB8888) < 0) {
+		if (create_buffer(drm_fd, &buffers[i], -1, format) < 0) {
 			created = i + 1;
 			perror("create dumb framebuffer");
 			goto out;
 		}
 		created = i + 1;
 	}
-	draw_console(buffers[0].map, buffers[0].create.pitch, &current, 1);
+	draw_console(buffers[0].map, buffers[0].create.pitch, &current, 1,
+		     format);
 	previous = current;
 	previous_cursor = 1;
 
@@ -279,8 +307,10 @@ int main(int argc, char **argv)
 		goto out;
 	}
 
-	printf("wii-drm-console: active %ux%u, mirroring %s (%ux%u)\n",
-	       mode.hdisplay, mode.vdisplay, vcsa, current.columns, current.rows);
+	printf("wii-drm-console: active %ux%u %s, mirroring %s (%ux%u)\n",
+	       mode.hdisplay, mode.vdisplay,
+	       format == TEST_FORMAT_RGB565 ? "rgb565" : "xrgb8888",
+	       vcsa, current.columns, current.rows);
 	fflush(stdout);
 	signal(SIGINT, handle_signal);
 	signal(SIGTERM, handle_signal);
@@ -317,7 +347,7 @@ int main(int argc, char **argv)
 		visible ^= 1;
 		draw_console(buffers[visible].map,
 			     buffers[visible].create.pitch, &current,
-			     cursor_visible);
+			     cursor_visible, format);
 		if (page_flip(drm_fd, crtc.crtc_id,
 			      buffers[visible].fb.fb_id, serial++) < 0) {
 			perror("page flip");
