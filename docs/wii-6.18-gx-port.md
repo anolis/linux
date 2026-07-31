@@ -3616,3 +3616,27 @@ left only `gcn_gx` loaded, and logged no new kernel fault. Restore native
 `uint16_t` RGB565 stores while retaining the independently validated VGA/BGR
 attribute palette. Re-run the same explicit label-by-label RGB565 test before
 attempting the missing-client rollback control or boot runlevel enablement.
+
+## 2026-07-31: Stage native-store RGB565 reproducibility control
+
+- Native-store implementation: `822c92656`
+- Static stripped PowerPC binary size: `726988` bytes
+- `wii-drm-console` SHA-256:
+  `66fb1a55e46366bc2313ade57fcde11f401cd44b3e1487ab1de2fa13b3c6ea81`
+- Client-aware service SHA-256:
+  `74229640ab480c2eb5488acb296029af9827eaf5609e63e08d9058060214476b`
+
+The rebuilt artifact is byte-for-byte identical to the earlier native-store
+binary used for the corrected-palette XRGB8888 control and the disputed
+RGB565 result. Deploy this exact artifact as the service-managed default and
+repeat the explicit RGB565 labels without changing any driver or service
+component.
+
+Require the user to report each label separately: displayed red, green, blue,
+and yellow/gold, followed by the expected-line, live-update-line, and cursor
+colors. Also require cursor blink, tty update, stable client/network/kernel,
+automatic service stop, full DRM module removal, and clear legacy recovery.
+Do not infer channel correctness from general console clarity. A correct,
+repeatable labeled result accepts native PowerPC RGB565 storage; another
+red/blue swap requires capturing the exact installed binary hash and source
+VCSA attributes before any further encoding change.
