@@ -3640,3 +3640,33 @@ Do not infer channel correctness from general console clarity. A correct,
 repeatable labeled result accepts native PowerPC RGB565 storage; another
 red/blue swap requires capturing the exact installed binary hash and source
 VCSA attributes before any further encoding change.
+
+## 2026-07-31: Native RGB565 reproduces an exact red/blue swap
+
+The installed console matched the staged SHA-256
+`66fb1a55e46366bc2313ade57fcde11f401cd44b3e1487ab1de2fa13b3c6ea81`,
+reported `640x480 rgb565`, remained alive, updated tty1, and blinked its cursor.
+Direct full-screen observation and a photograph established the complete color
+mapping:
+
+- source red displayed blue;
+- source green displayed green;
+- source blue displayed red;
+- source gold/yellow displayed light blue/cyan;
+- source magenta displayed magenta/purple;
+- source cyan displayed gold/yellow; and
+- source white displayed white.
+
+The screen was otherwise clear. A live `/dev/vcsa1` dump independently showed
+the correct source attributes, including `0x04` for the red line and `0x02` for
+the green line, so terminal attribute decoding and the corrected VGA palette
+are not the source of this transform. The exact installed binary hash also
+rules out a stale deployment.
+
+This is a deterministic red/blue exchange, unlike the rejected explicit-byte
+test's mixed dark colors. Do not make another RGB565 storage change yet. Re-run
+the same installed binary immediately with `--format xrgb8888` and the same
+labeled screen. If XRGB8888 reproduces the swap, fix the shared RGB-to-YUV/XFB
+contract; if XRGB8888 remains correct, inspect RGB565 framebuffer registration
+and driver decoding with an instrumented positive control. Keep boot enablement
+blocked.
