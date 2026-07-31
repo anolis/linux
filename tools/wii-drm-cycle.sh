@@ -75,7 +75,6 @@ drm_driver=/sys/bus/platform/drivers/gcn-vi
 module_paths=(
 	drivers/gpu/drm/drm_panel_orientation_quirks.ko
 	drivers/gpu/drm/drm.ko
-	drivers/gpu/drm/clients/drm_client_lib.ko
 	drivers/gpu/drm/drm_kms_helper.ko
 	drivers/gpu/drm/drm_shmem_helper.ko
 	drivers/gpu/drm/gcn/gcn-drm.ko
@@ -83,7 +82,6 @@ module_paths=(
 remote_modules=(
 	/tmp/drm_panel_orientation_quirks.ko
 	/tmp/drm.ko
-	/tmp/drm_client_lib.ko
 	/tmp/drm_kms_helper.ko
 	/tmp/drm_shmem_helper.ko
 	/tmp/gcn-drm.ko
@@ -146,7 +144,6 @@ restore_legacy()
 		rmmod gcn_drm 2>/dev/null
 		rmmod drm_shmem_helper 2>/dev/null
 		rmmod drm_kms_helper 2>/dev/null
-		rmmod drm_client_lib 2>/dev/null
 		rmmod drm 2>/dev/null
 		rmmod drm_panel_orientation_quirks 2>/dev/null
 		if [ ! -e $legacy_driver/$device ]; then
@@ -217,7 +214,6 @@ done
 remote_status "preflighting generic DRM modules"
 remote_exec "grep -q '^drm_panel_orientation_quirks ' /proc/modules || insmod /tmp/drm_panel_orientation_quirks.ko"
 remote_exec "grep -q '^drm ' /proc/modules || insmod /tmp/drm.ko"
-remote_exec "grep -q '^drm_client_lib ' /proc/modules || insmod /tmp/drm_client_lib.ko"
 remote_exec "grep -q '^drm_kms_helper ' /proc/modules || insmod /tmp/drm_kms_helper.ko"
 remote_exec "grep -q '^drm_shmem_helper ' /proc/modules || insmod /tmp/drm_shmem_helper.ko"
 

@@ -3,7 +3,6 @@
 config DRM_GCN_VI
 	tristate "Nintendo GameCube/Wii Video Interface KMS"
 	depends on DRM && WII
-	select DRM_CLIENT_SELECTION
 	select DRM_GEM_SHMEM_HELPER
 	select DRM_KMS_HELPER
 	help
