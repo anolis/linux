@@ -78,6 +78,7 @@ module_paths=(
 	drivers/gpu/drm/drm_kms_helper.ko
 	drivers/gpu/drm/drm_shmem_helper.ko
 	drivers/gpu/drm/gcn/gcn-drm.ko
+	drivers/video/fbdev/gcn-gx.ko
 )
 remote_modules=(
 	/tmp/drm_panel_orientation_quirks.ko
@@ -85,7 +86,9 @@ remote_modules=(
 	/tmp/drm_kms_helper.ko
 	/tmp/drm_shmem_helper.ko
 	/tmp/gcn-drm.ko
+	/tmp/gcn-gx.ko
 )
+gx_module_index=5
 
 if (( build && ! restore_only )); then
 	CCACHE_DISABLE=1 ARCH=powerpc CROSS_COMPILE=powerpc-linux-gnu- \
@@ -136,6 +139,34 @@ remote_status()
 	remote_exec "printf '<6>drm-cycle: %s\\n' '$1' > /dev/kmsg"
 }
 
+upload_module()
+{
+	local module=$1
+	local remote_module=$2
+	local local_sha
+	local remote_sha
+
+	local_sha=$(sha256sum "$module" | awk '{print $1}')
+	if (( reuse_remote )); then
+		remote_sha=$(remote_exec "sha256sum $remote_module 2>/dev/null | cut -d' ' -f1")
+		if [[ $remote_sha != "$local_sha" ]]; then
+			echo "Remote checksum mismatch for $remote_module" >&2
+			return 1
+		fi
+		return 0
+	fi
+
+	remote_status "receiving $(basename "$remote_module") $local_sha"
+	remote_exec "cat > $remote_module.new" < "$module"
+	remote_sha=$(remote_exec "sha256sum $remote_module.new | cut -d' ' -f1")
+	if [[ $remote_sha != "$local_sha" ]]; then
+		remote_exec "rm -f $remote_module.new"
+		echo "Upload checksum mismatch for $remote_module" >&2
+		return 1
+	fi
+	remote_exec "mv -f $remote_module.new $remote_module"
+}
+
 restore_legacy()
 {
 	remote_status "restoring legacy display" || true
@@ -175,6 +206,12 @@ printf 'Opening persistent SSH connection to %s\n' "$remote"
 ssh "${ssh_options[@]}" -Nf "$remote"
 
 if (( restore_only )); then
+	if [[ ! -f ${module_paths[$gx_module_index]} ]]; then
+		echo "GX module not found: ${module_paths[$gx_module_index]}" >&2
+		exit 1
+	fi
+	upload_module "${module_paths[$gx_module_index]}" \
+		"${remote_modules[$gx_module_index]}"
 	transition_started=1
 	restore_legacy
 	printf 'Legacy gcnfb restored on %s\n' "$remote"
@@ -189,26 +226,7 @@ for module in "${module_paths[@]}"; do
 done
 
 for i in "${!module_paths[@]}"; do
-	module=${module_paths[$i]}
-	remote_module=${remote_modules[$i]}
-	local_sha=$(sha256sum "$module" | awk '{print $1}')
-	if (( reuse_remote )); then
-		remote_sha=$(remote_exec "sha256sum $remote_module 2>/dev/null | cut -d' ' -f1")
-		if [[ $remote_sha != "$local_sha" ]]; then
-			echo "Remote checksum mismatch for $remote_module" >&2
-			exit 1
-		fi
-		continue
-	fi
-	remote_status "receiving $(basename "$remote_module") $local_sha"
-	remote_exec "cat > $remote_module.new" < "$module"
-	remote_sha=$(remote_exec "sha256sum $remote_module.new | cut -d' ' -f1")
-	if [[ $remote_sha != "$local_sha" ]]; then
-		remote_exec "rm -f $remote_module.new"
-		echo "Upload checksum mismatch for $remote_module" >&2
-		exit 1
-	fi
-	remote_exec "mv -f $remote_module.new $remote_module"
+	upload_module "${module_paths[$i]}" "${remote_modules[$i]}"
 done
 
 remote_status "preflighting generic DRM modules"
