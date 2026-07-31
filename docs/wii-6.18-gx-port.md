@@ -3819,3 +3819,27 @@ positions opposite the driver's current `Y0,Cb,Y1,Cr` packing. Change only
 `gcn_drm_pack_yuyv()` to emit `Y0,Cr,Y1,Cb`, retain all coefficients and source
 decoders, and repeat the same paired visual test. Keep the one-shot diagnostics
 for that validation, then remove them after the corrected output is accepted.
+
+## 2026-07-31: Stage corrected XFB chroma-order validation
+
+- Chroma-order implementation: `9aa9dbd8c`
+- `gcn-drm.ko` SHA-256:
+  `7e9b6082bc811ad0c61cbd76e27db2a0349839f10d59f8d50158e25b44b3db7c`
+- `wii-drm-test` SHA-256:
+  `88a1511225805948e56b7d003ab2429325faf90a2cac580f4dd9f0fa15f5166f`
+
+Replace only `gcn-drm.ko` and perform a same-session paired test under one
+module load and VI programming sequence. Run the no-flip RGB565 pattern first,
+record all quadrants and checkerboard colors, terminate it, then run XRGB8888
+without stopping the service or reloading the driver and record the same items.
+
+Both formats must display top-left red, top-right green, bottom-right white,
+bottom-left blue, and a magenta/cyan checkerboard. Their one-shot diagnostics
+must retain the previously validated source words while showing the two chroma
+bytes exchanged in packed output, for example source red changing from
+`725a72ef` to `72ef725a`.
+
+After both visual passes, terminate the test, remove the temporary empty-client
+override, and restore legacy ownership. Require only `gcn_gx` loaded and no
+kernel fault. Passing permits removal of the temporary conversion diagnostics,
+followed by a final service-managed console color and interaction regression.
