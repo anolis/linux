@@ -2600,3 +2600,26 @@ new DRM fbdev console, continuing SSH access, and no kernel fault. Capture the
 HDMI output after binding and open the PNG in GIMP for visual grading; do not
 infer image correctness from registration logs. Finally run the explicit
 restore path and require the accepted clear, responsive `gcnfb`/GX console.
+
+## 2026-07-31: Reject built-in DRM image at boot-wrapper boundary
+
+The checksum-verified zImage
+`9260b832144d3846f9a3a4793b5357d626f61a32ef1b82497d50a9b61da45804`
+did not enter the kernel. Gumboot displayed `loading zImage.ngx` and the screen
+then remained frozen. No kernel console output, SSH, or target log was
+available, so this result says nothing about the `gcn-drm` driver itself.
+
+The corresponding build emitted a new boot-wrapper layout warning: the
+uncompressed kernel size was `0x012c8be0`, overlapping the wrapper at
+`0x00600000`, and Kbuild moved the wrapper link address to `0x01300000`.
+The accepted pre-DRM image did not exhibit this failed runtime behavior. Treat
+crossing this boot-layout boundary as the leading explanation, but as an
+inference rather than a proven root cause because execution produced no serial
+log.
+
+Restore the exact accepted
+`c5b6b8f5b5d731d2958ed06b1e2c26ceddafa77cc62667016138551df76d5d11`
+zImage before further testing. Reconfigure DRM core as a module along with the
+KMS, shmem, client, and Wii VI modules. Build the smaller dependency-support
+kernel first, then build and upload the complete module set. Do not retry the
+built-in DRM image.
