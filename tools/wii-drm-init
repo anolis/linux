@@ -1,0 +1,160 @@
+#!/bin/sh
+### BEGIN INIT INFO
+# Provides:          wii-drm
+# Required-Start:    $local_fs $remote_fs
+# Required-Stop:     $local_fs $remote_fs
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: Transfer Wii VI ownership between gcnfb and DRM
+### END INIT INFO
+
+set -u
+
+device=c002000.video
+legacy_driver=/sys/bus/platform/drivers/gcn-vifb
+drm_driver=/sys/bus/platform/drivers/gcn-vi
+drm_card=/sys/class/drm/card0
+
+log()
+{
+	message="wii-drm: $*"
+	printf '%s\n' "$message"
+	printf '<6>%s\n' "$message" > /dev/kmsg 2>/dev/null || true
+	if [ -w /dev/tty0 ]; then
+		printf '\n%s\n' "$message" > /dev/tty0 2>/dev/null || true
+	fi
+}
+
+module_loaded()
+{
+	grep -q "^$1 " /proc/modules
+}
+
+legacy_bound()
+{
+	[ -e "$legacy_driver/$device" ]
+}
+
+drm_bound()
+{
+	[ -e "$drm_driver/$device" ] && [ -e "$drm_card" ]
+}
+
+load_legacy_gx()
+{
+	if ! module_loaded gcn_gx; then
+		modprobe gcn_gx renderer=generated texel_bias_eighths=-2
+	fi
+}
+
+restore_legacy()
+{
+	if module_loaded gcn_drm && ! rmmod gcn_drm; then
+		log "gcn_drm is busy; leaving DRM ownership unchanged"
+		return 1
+	fi
+	if ! legacy_bound &&
+	   ! printf '%s' "$device" > "$legacy_driver/bind"; then
+		log "failed to bind legacy gcnfb"
+		return 1
+	fi
+	if ! load_legacy_gx; then
+		log "failed to restore legacy gcnfb/GX"
+		return 1
+	fi
+
+	log "legacy gcnfb/GX active"
+}
+
+start_drm()
+{
+	if drm_bound; then
+		log "DRM already active"
+		return 0
+	fi
+
+	log "preflighting modular DRM dependencies"
+	if ! modprobe drm_shmem_helper; then
+		log "DRM dependency preflight failed"
+		return 1
+	fi
+
+	if ! legacy_bound; then
+		log "refusing transition: neither DRM nor legacy gcnfb owns VI"
+		return 1
+	fi
+
+	log "transferring VI ownership to DRM"
+	if module_loaded gcn_gx && ! rmmod gcn_gx; then
+		log "failed to unload gcn_gx; legacy display remains active"
+		return 1
+	fi
+	if ! printf '%s' "$device" > "$legacy_driver/unbind"; then
+		log "failed to unbind legacy gcnfb"
+		load_legacy_gx || true
+		return 1
+	fi
+
+	if ! modprobe gcn_drm || ! drm_bound; then
+		log "DRM startup failed; restoring legacy display"
+		restore_legacy
+		return 1
+	fi
+
+	log "DRM active on card0"
+}
+
+stop_drm()
+{
+	if legacy_bound && ! module_loaded gcn_drm; then
+		if ! load_legacy_gx; then
+			log "legacy gcnfb is active but gcn_gx failed to load"
+			return 1
+		fi
+		log "legacy gcnfb/GX already active"
+		return 0
+	fi
+
+	log "returning VI ownership to legacy gcnfb"
+	if ! restore_legacy; then
+		return 1
+	fi
+
+	rmmod drm_shmem_helper 2>/dev/null || true
+	rmmod drm_kms_helper 2>/dev/null || true
+	rmmod drm 2>/dev/null || true
+	rmmod drm_panel_orientation_quirks 2>/dev/null || true
+}
+
+status_drm()
+{
+	if drm_bound; then
+		printf '%s\n' "wii-drm: DRM active on card0"
+		return 0
+	fi
+	if legacy_bound; then
+		printf '%s\n' "wii-drm: legacy gcnfb active"
+		return 3
+	fi
+	printf '%s\n' "wii-drm: VI has no recognized owner"
+	return 1
+}
+
+case "${1:-}" in
+start)
+	start_drm
+	;;
+stop)
+	stop_drm
+	;;
+restart|force-reload)
+	stop_drm && start_drm
+	;;
+status)
+	status_drm
+	;;
+*)
+	printf 'Usage: %s {start|stop|restart|force-reload|status}\n' "$0" >&2
+	exit 2
+	;;
+esac
