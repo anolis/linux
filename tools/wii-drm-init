@@ -14,6 +14,15 @@ device=c002000.video
 legacy_driver=/sys/bus/platform/drivers/gcn-vifb
 drm_driver=/sys/bus/platform/drivers/gcn-vi
 drm_card=/sys/class/drm/card0
+client=/usr/local/sbin/wii-drm-console
+client_pidfile=/run/wii-drm-client.pid
+client_log=/run/wii-drm-client.log
+
+if [ -r /etc/default/wii-drm ]; then
+	# shellcheck disable=SC1091
+	. /etc/default/wii-drm
+fi
+client=${WII_DRM_CLIENT-$client}
 
 log()
 {
@@ -38,6 +47,69 @@ legacy_bound()
 drm_bound()
 {
 	[ -e "$drm_driver/$device" ] && [ -e "$drm_card" ]
+}
+
+client_running()
+{
+	[ -n "$client" ] || return 1
+	[ -s "$client_pidfile" ] || return 1
+	client_pid=$(cat "$client_pidfile")
+	case "$client_pid" in
+	*[!0-9]*|'') return 1 ;;
+	esac
+	kill -0 "$client_pid" 2>/dev/null || return 1
+	client_path=$(readlink -f "$client") || return 1
+	[ "$(readlink -f "/proc/$client_pid/exe" 2>/dev/null)" = "$client_path" ]
+}
+
+start_client()
+{
+	if [ -z "$client" ]; then
+		return 0
+	fi
+	if client_running; then
+		return 0
+	fi
+	rm -f "$client_pidfile"
+	if [ ! -x "$client" ]; then
+		log "DRM client is not executable: $client"
+		return 1
+	fi
+
+	log "starting DRM client $client"
+	"$client" > "$client_log" 2>&1 &
+	client_pid=$!
+	printf '%s\n' "$client_pid" > "$client_pidfile"
+	sleep 1
+	if ! kill -0 "$client_pid" 2>/dev/null; then
+		log "DRM client failed during startup"
+		cat "$client_log" 2>/dev/null || true
+		rm -f "$client_pidfile"
+		return 1
+	fi
+	log "DRM client active (pid $client_pid)"
+}
+
+stop_client()
+{
+	if ! client_running; then
+		rm -f "$client_pidfile"
+		return 0
+	fi
+
+	log "stopping DRM client (pid $client_pid)"
+	kill -TERM "$client_pid"
+	client_wait=0
+	while kill -0 "$client_pid" 2>/dev/null &&
+	      [ "$client_wait" -lt 50 ]; do
+		sleep 0.1
+		client_wait=$((client_wait + 1))
+	done
+	if kill -0 "$client_pid" 2>/dev/null; then
+		log "DRM client did not exit; leaving DRM ownership unchanged"
+		return 1
+	fi
+	rm -f "$client_pidfile"
 }
 
 load_legacy_gx()
@@ -82,8 +154,11 @@ restore_legacy()
 start_drm()
 {
 	if drm_bound; then
-		log "DRM already active"
-		return 0
+		if start_client; then
+			log "DRM already active"
+			return 0
+		fi
+		return 1
 	fi
 
 	log "preflighting modular DRM dependencies"
@@ -113,12 +188,20 @@ start_drm()
 		restore_legacy
 		return 1
 	fi
+	if ! start_client; then
+		log "DRM client startup failed; restoring legacy display"
+		restore_legacy
+		return 1
+	fi
 
 	log "DRM active on card0"
 }
 
 stop_drm()
 {
+	if ! stop_client; then
+		return 1
+	fi
 	if legacy_bound && ! module_loaded gcn_drm; then
 		if ! load_legacy_gx; then
 			log "legacy gcnfb is active but gcn_gx failed to load"
@@ -142,7 +225,15 @@ stop_drm()
 status_drm()
 {
 	if drm_bound; then
-		printf '%s\n' "wii-drm: DRM active on card0"
+		if [ -n "$client" ] && ! client_running; then
+			printf '%s\n' "wii-drm: DRM active on card0; client is not running"
+			return 1
+		fi
+		if [ -n "$client" ]; then
+			printf '%s\n' "wii-drm: DRM active on card0 (client pid $client_pid)"
+		else
+			printf '%s\n' "wii-drm: DRM active on card0"
+		fi
 		return 0
 	fi
 	if legacy_bound; then
