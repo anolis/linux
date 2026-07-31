@@ -3670,3 +3670,27 @@ labeled screen. If XRGB8888 reproduces the swap, fix the shared RGB-to-YUV/XFB
 contract; if XRGB8888 remains correct, inspect RGB565 framebuffer registration
 and driver decoding with an instrumented positive control. Keep boot enablement
 blocked.
+
+## 2026-07-31: XRGB8888 repeat control passes every color
+
+Without changing the installed console binary, transfer VI ownership through
+the service with automatic client launch temporarily disabled and run the
+console with `--format xrgb8888`. The client reported `640x480 xrgb8888` and
+the user explicitly identified the displayed lines, in order, as red, green,
+blue, gold, white, purple, and teal. Every source label therefore matched its
+displayed color, including the red/blue and yellow/cyan pairs that exchange in
+RGB565.
+
+The manual client exited, the temporary `/etc/default/wii-drm` override was
+removed, and service stop restored `gcn-vifb` with only `gcn_gx` loaded and no
+kernel fault. This repeat control validates the shared RGB-to-YUV coefficients,
+YUYV/XFB packing, scanout, VGA palette, and VCSA decode under the currently
+loaded driver. Constrain the defect to the RGB565 path.
+
+Before editing conversion code, checksum the installed `gcn-drm.ko` against
+the local build and inspect the legacy `DRM_IOCTL_MODE_ADDFB` RGB565 format
+selection on big-endian PowerPC. The checked-in `xrgb8888_to_rgb565()` and
+`gcn_drm_rgb565_pair()` both appear to use standard R5:G6:B5 bit positions, so
+an exact red/blue exchange is not explained by those source expressions alone.
+Use an instrumented positive control if artifacts match; do not infer another
+storage byte order from color output.
