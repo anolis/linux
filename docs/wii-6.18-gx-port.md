@@ -3531,3 +3531,25 @@ Do not change byte packing yet. First run the same accepted console binary with
 the four labels are correct, constrain the fix to little-endian RGB565 storage;
 if XRGB8888 is also swapped, correct the shared big-endian DRM format contract
 in the driver and both raw clients. Boot enablement remains blocked.
+
+## 2026-07-31: Stage corrected-palette XRGB8888 channel control
+
+Reuse exact console SHA-256
+`66fb1a55e46366bc2313ade57fcde11f401cd44b3e1487ab1de2fa13b3c6ea81`.
+Temporarily set `WII_DRM_CLIENT=` in `/etc/default/wii-drm` so the accepted
+service transfers hardware ownership without launching the RGB565 default.
+Then manually run:
+
+```sh
+/usr/local/sbin/wii-drm-console --format xrgb8888
+```
+
+Write the exact labeled red, green, blue, and yellow screen. Require the client
+log to report XRGB8888 and obtain an explicit label-by-label visual result.
+This is a channel-order control, not a quality acceptance run. Preserve the
+usual liveness, cursor, fault, graceful-exit, service-recovery, and full module
+cleanup gates. Remove the temporary `/etc/default/wii-drm` override afterward.
+
+Correct four-color output constrains the implementation fix to RGB565's
+little-endian storage. Any analogous red/blue swap requires a shared format
+contract correction before further console integration.
