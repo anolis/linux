@@ -3017,3 +3017,21 @@ This accepts the driver's pending-page handoff, DI1 vblank handling, DRM vblank
 accounting, page-flip event arming/delivery, repeated CPU conversion, and
 double-buffered XFB scanout. Keep the current module and client artifacts as
 the baseline for a sustained zero-delay flip stress test.
+
+## 2026-07-31: Stage sustained zero-delay page-flip stress
+
+Reuse the accepted `gcn-drm.ko` and page-flip client artifacts without a module
+reload. Terminate the current holding client, confirm `gcn_drm` returns to use
+count zero, then launch:
+
+```sh
+/tmp/wii-drm-test --flips 300 --delay-ms 0
+```
+
+The test still serializes every submission behind its validated completion
+event; zero delay means conversion and vblank are the only pacing mechanisms.
+Acceptance requires exactly 300 flips, a nonzero advancing final vblank
+sequence, a live final frame, continuing SSH/ping, no kernel or conversion
+fault, and no visual blanking, corruption, loss of sync, or persistent tearing.
+Rapid left/right marker alternation may appear as flicker and is not itself a
+failure.
