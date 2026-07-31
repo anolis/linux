@@ -2918,3 +2918,22 @@ the committed cycle harness `--restore --no-build`. Acceptance requires
 CPU/GX console to resume clearly and responsively, and SSH to remain available.
 Record any module-use, teardown, rebind, or visual failure before page-flip
 development.
+
+## 2026-07-31: Accept post-modeset legacy restore
+
+The KMS client terminated cleanly and released DRM master with `gcn_drm` at
+module use count zero. The committed restore path unloaded the complete DRM
+stack and rebound `gcn-vifb` to `c002000.video`; the legacy console returned
+clear. The harness could not initially reload GX because `/tmp/gcn-gx.ko` was
+absent, exposing an automation gap rather than a driver failure.
+
+The exact accepted `gcn-gx.ko` artifact with SHA-256
+`88474048238caad1e992ca961969f6d42b07fece9fa5438937deac94720dffe1`
+was uploaded, verified remotely, and loaded with `renderer=generated` and
+`texel_bias_eighths=-2`. `gcnfb` reported accelerator registration, SSH stayed
+responsive, no kernel fault appeared, and direct observation confirmed that
+the accelerated console remained clear.
+
+This accepts reversible DRM-to-fbdev ownership transfer after a real modeset.
+Fix the cycle harness to upload and verify `gcn-gx.ko` alongside the DRM module
+set so rollback never depends on a pre-existing temporary file.
