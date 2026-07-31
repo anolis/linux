@@ -2937,3 +2937,18 @@ the accelerated console remained clear.
 This accepts reversible DRM-to-fbdev ownership transfer after a real modeset.
 Fix the cycle harness to upload and verify `gcn-gx.ko` alongside the DRM module
 set so rollback never depends on a pre-existing temporary file.
+
+## 2026-07-31: Stage self-contained restore-harness test
+
+- Harness implementation: `5ba5cbf5d`
+- Cycle harness SHA-256:
+  `65914374d9a44b371c14c11a42ec994d7ebf346345452228cfcf5c773bcafbd6`
+- Accepted `gcn-gx.ko` SHA-256:
+  `88474048238caad1e992ca961969f6d42b07fece9fa5438937deac94720dffe1`
+
+Run `--restore --no-build` against the already restored Wii. The harness must
+upload and remotely verify the local GX module before entering restore logic.
+Because `gcn-vifb` and `gcn_gx` are already active, the operation must be
+idempotent: preserve their binding/module state, clear console, SSH access, and
+fault-free kernel. This validates artifact availability for future automatic
+rollback without performing another DRM transition.
