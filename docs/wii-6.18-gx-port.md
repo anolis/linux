@@ -2850,3 +2850,18 @@ the accepted no-fbdev `gcn-drm` instance owns `card0`. Acceptance requires a
 successful client status line, a live process, continuing SSH/ping, no kernel
 fault, and a full-frame HDMI capture matching the described pattern. Any
 kernel-only success remains provisional until the visible frame is graded.
+
+## 2026-07-31: First KMS client exits before modeset on msync
+
+The checksum-verified test binary launched while `gcn-vi` remained bound, but
+exited with `msync dumb buffer: Invalid argument`. The process was no longer
+alive after three seconds. The driver, `card0`, SSH, and the machine remained
+healthy, and no kernel fault appeared. Because the client treats `msync()` as
+fatal before `ADDFB` and `SETCRTC`, this run did not test scanout and the frozen
+legacy frame was expected to remain unchanged.
+
+A DRM dumb-buffer mapping does not require userspace `msync()` before the
+modeset; the driver's GEM CPU-access hooks provide the relevant synchronization
+when it reads the shmem framebuffer. Remove the unnecessary `msync` call and
+repeat with a newly committed and checksum-pinned binary. Do not change the
+pattern, DRM ioctl sequence, or kernel module for that retry.
