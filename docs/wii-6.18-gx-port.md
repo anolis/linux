@@ -3053,3 +3053,26 @@ page flipping and repeated full-frame CPU conversion on the current KMS path.
 Next validate the second advertised primary-plane format, RGB565, with the same
 deterministic static pattern and synchronized page-flip gates before declaring
 the initial userspace format contract complete.
+
+## 2026-07-31: Stage RGB565 scanout and page-flip validation
+
+- RGB565 client implementation: `937321f9f`
+- Static stripped PowerPC binary size: `726988` bytes
+- `wii-drm-test` SHA-256:
+  `d2aa7acc2fc097fb695d06b318543725c01ed39c5c6b53745a07849229430b50`
+
+Reuse the active accepted DRM module without reloading it. Terminate the holding
+XRGB8888 stress client, verify DRM master release, remotely checksum-replace the
+test binary, and run:
+
+```sh
+/tmp/wii-drm-test --format rgb565 --flips 20 --delay-ms 500
+```
+
+The client must report `format=rgb565`, two 16-bpp buffers with 1280-byte pitch,
+20 validated completion events, and a nonzero final vblank sequence. Require a
+live final frame, responsive SSH/ping, and no conversion or kernel fault.
+Direct observation must show the same clear quadrant/grid/checker pattern and
+left/right yellow-marker alternation as the accepted XRGB8888 test, allowing
+only normal RGB565 color quantization and no channel swaps, pitch errors,
+tearing, corruption, or instability.
