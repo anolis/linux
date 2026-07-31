@@ -3770,3 +3770,25 @@ XRGB8888 pattern and log source words plus packed YUYV. If XRGB source red
 produces the same YUYV as RGB565 source red, repeat its visual quadrant test;
 if it produces the blue YUYV word, locate the 32-bit source-channel reversal
 that currently cancels the XFB chroma-order defect.
+
+## 2026-07-31: Stage matched XRGB8888 conversion control
+
+- Matched diagnostic implementation: `840ea5f24`
+- `gcn-drm.ko` SHA-256:
+  `98757aadc09643c73100b356c384c7a22a2d2fda89c328f979081e140276f5d4`
+- `wii-drm-test` SHA-256:
+  `88a1511225805948e56b7d003ab2429325faf90a2cac580f4dd9f0fa15f5166f`
+
+Replace only the diagnostic module and run the unchanged no-flip pattern with
+`--format xrgb8888`. The driver samples the same four coordinates used by the
+RGB565 control. Expected native source words are `00ff2020` red, `0020ff20`
+green, `002040ff` blue, and `00ffffff` white with corresponding big-endian
+memory bytes.
+
+Capture the one-shot XRGB8888 logs, then visually identify the same four
+quadrants and center checkerboard. Compare each XRGB YUYV word directly with
+its RGB565 counterpart from the preceding accepted diagnostic. Identical YUYV
+plus different visual color would indicate that the compared runs did not
+share the same hardware state and must be repeated; swapped XRGB source or
+YUYV would identify the cancellation that made the prior XRGB console appear
+correct. Recover legacy ownership and require no fault afterward.
