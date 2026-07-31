@@ -2457,3 +2457,24 @@ Keep deduplication disabled. Repeat only baseline
 retain at least 27 fps while showing correct colors and geometry without the
 quality failure, then restore a clear responsive console. If baseline-direct
 passes, promote that result rather than either dedup variant.
+
+## 2026-07-30: Baseline-direct passes isolated RGB888 validation
+
+The isolated 30-second baseline-direct run completed 856 frames in 30.016
+seconds, or 28.52 fps, with `source_dedup=0`. It recorded 1,970 PE finish
+interrupts (65.67 per second), 10,839 us average direct draw time, effectively
+zero copy time, and 20,915 us average pan time. Kernel conversion remained
+stable near 11.5 ms through worker frames 256, 512, and 768. No kernel timeout
+or screened fault occurred.
+
+The user confirmed that this candidate looked fine and that the restored
+console was clear and responsive. This passes the isolated throughput, visual,
+and recovery gate and demonstrates that the RGB888 path sustains the 27 fps
+target when applications render directly into the inactive VFB page. The
+deduplication parameter remains disabled.
+
+Promote the identical deployed kernel/module and static workload to a
+120-second baseline-direct acceptance run at 30 requested fps. Require at
+least 27 fps, correct tear-free output throughout, positive PE progress, no
+kernel timeout or fault, automatic `source_dedup=0` restoration, and a clear
+responsive console after completion.
