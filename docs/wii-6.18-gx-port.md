@@ -3102,3 +3102,22 @@ source, binary, module, or parameter changes:
 Require the same 1280-byte pitch, 20 completion events, live final frame, and
 stable network/kernel state. The visual verdict must explicitly cover colors,
 geometry, checker/grid clarity, marker motion, tearing, and corruption.
+
+## 2026-07-31: Accept RGB565 scanout and synchronized flips
+
+The independent confirmation reused the exact binary SHA-256
+`d2aa7acc2fc097fb695d06b318543725c01ed39c5c6b53745a07849229430b50`
+and unchanged parameters. It again reported `format=rgb565`, two 614400-byte
+buffers with 1280-byte pitch, and all 20 completion events, this time through
+vblank sequence 1701. The client remained alive and the final 30-second soak
+passed with three of three ICMP replies, responsive SSH, retained `gcn-vi`
+ownership, and no conversion or kernel fault.
+
+Direct observation explicitly confirmed the repeated RGB565 run looked great:
+colors and geometry were correct, the quadrant/grid/checker pattern remained
+clear, marker motion was correct, and no channel swap, pitch distortion,
+tearing, corruption, or instability was visible.
+
+This accepts RGB565 dumb-buffer modeset, conversion, synchronized page flips,
+and stable scanout. Both formats advertised by the primary plane, XRGB8888 and
+RGB565, now have independent hardware validation.
