@@ -2907,3 +2907,14 @@ conversion, XFB programming, and stable VI scanout. Next milestones are a
 reversible return to legacy `gcnfb`, then repeated page flips with vblank events
 to validate frame updates and synchronization before adding DRM fbdev console
 support.
+
+## 2026-07-31: Stage post-modeset legacy restore
+
+Terminate the active `wii-drm-test` process first so it removes framebuffer 38,
+destroys dumb-buffer handle 1, closes `card0`, and releases DRM master. Then run
+the committed cycle harness `--restore --no-build`. Acceptance requires
+`gcn_drm` and generic DRM modules to unload, `gcn-vifb` to rebind
+`c002000.video`, `gcn_gx` to reload with the accepted generated renderer, the
+CPU/GX console to resume clearly and responsively, and SSH to remain available.
+Record any module-use, teardown, rebind, or visual failure before page-flip
+development.
