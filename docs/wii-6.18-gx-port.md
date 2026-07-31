@@ -2665,3 +2665,23 @@ First acceptance gate is boot only: require normal Gumboot completion, legacy
 console output, and SSH. Do not begin the live handoff until that result is
 recorded and committed. The subsequent handoff retains the previously defined
 card0, binding, HDMI/GIMP visual, SSH, fault, and explicit-restore gates.
+
+## 2026-07-31: Modular DRM kernel passes boot gate
+
+The checksum-verified modular DRM zImage
+`eedd96b4c140ff931848f7e275bef40332ac549a16567c6df527e67bf2cde6c5`
+completed Gumboot and normal kernel startup. It reached the legacy console,
+acquired `10.3.10.12`, and accepted SSH. The target reported
+`6.18.40-wii+ #29`; `gcn-vifb` owned `c002000.video`, `gcn_gx` loaded, and the
+generated GX renderer registered normally.
+
+Early boot emitted the already documented PowerPC alignment warning from
+`memset()` through `dma_alloc_from_dev_coherent()` during `ohci_setup()`. The
+same warning predates this DRM work, and execution continued through USB,
+Wi-Fi, graphics, and SSH. No new panic, machine check, or DRM-related fault
+appeared.
+
+This accepts the boot-only gate and rules out the modular image as having the
+built-in image's boot-wrapper failure. Proceed to the separately committed
+live handoff: upload and preflight all generic DRM modules while legacy output
+remains active, then transition the VI to `gcn-drm`.
