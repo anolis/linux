@@ -3121,3 +3121,41 @@ tearing, corruption, or instability was visible.
 This accepts RGB565 dumb-buffer modeset, conversion, synchronized page flips,
 and stable scanout. Both formats advertised by the primary plane, XRGB8888 and
 RGB565, now have independent hardware validation.
+
+## 2026-07-31: Stage opt-in standalone NTSC 480i programming
+
+- VI programming implementation: `9dfa1d88a`
+- Cycle-harness implementation: `051ff026a`
+- `gcn-drm.ko` SHA-256:
+  `a5c88ed9763dfab30899d4630551860e1928f48dbabca72b0d8c1966033077bd`
+- Cycle harness SHA-256:
+  `6941c264720fd8a3c2560913d37c61fe8921198f591af9f03476df572fe45a74`
+- `wii-drm-test` SHA-256:
+  `d2aa7acc2fc097fb695d06b318543725c01ed39c5c6b53745a07849229430b50`
+- Accepted `gcn-gx.ko` rollback SHA-256:
+  `88474048238caad1e992ca961969f6d42b07fece9fa5438937deac94720dffe1`
+
+Run the reversible cycle harness with `--program-mode --no-build`. This keeps
+the previously accepted inherited-mode path as the module default while asking
+this test load to quiesce VI interrupts, disable VI, program the complete fixed
+640x480 NTSC interlaced timing/filter/stride state derived from `gcnfb`, clear
+both XFB pages to legal YUYV black, install the field addresses and retrace
+coordinates, and re-enable VI. AVE encoder state remains inherited for this
+first isolated test.
+
+Require the kernel readback to report `DCR=0001`, `VTR=0f06`,
+`HTR0=476901ad`, `HTR1=02e850c0`, and `PCR=2850`, followed by normal `card0`
+registration. Then run the accepted XRGB8888 client:
+
+```sh
+/tmp/wii-drm-test --flips 20 --delay-ms 500
+```
+
+Acceptance requires all 20 validated page-flip events, responsive SSH/ping,
+no conversion or kernel fault, and direct observation of the clear established
+quadrant/grid/checker pattern with correct marker movement and no loss of sync,
+tearing, corruption, or instability. Finally run the committed restore path
+and require the clear, responsive legacy GX console to return. This test proves
+that rewriting the VI register set is correct and non-destructive; a separate
+test must explicitly invalidate the inherited VI state before load to prove
+full initialization independence.
