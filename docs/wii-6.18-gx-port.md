@@ -2999,3 +2999,21 @@ client holding the final frame, responsive SSH/ping, and no kernel fault or
 conversion failure. Direct observation must show a clear base pattern with the
 yellow marker alternating left/right at roughly two positions per second and
 must note any tearing, corruption, missed transition, or instability.
+
+## 2026-07-31: Accept vblank-synchronized page flips
+
+The checksum-pinned client created two 640x480 XRGB8888 framebuffers with
+2560-byte pitch and completed all 20 requested page flips. Every submission
+received and validated its matching `DRM_EVENT_FLIP_COMPLETE`; the client
+reported `flips=20 last-vblank=308` and remained alive holding the final frame.
+
+The 30-second soak passed with three of three ICMP replies, responsive SSH,
+continuing uptime, `gcn-vi` ownership, and no conversion failure, BUG, Oops,
+panic, machine check, unhandled access, or watchdog report. Direct observation
+confirmed the base image remained correct and the yellow marker alternated as
+intended, with no visible tearing, corruption, missed movement, or instability.
+
+This accepts the driver's pending-page handoff, DI1 vblank handling, DRM vblank
+accounting, page-flip event arming/delivery, repeated CPU conversion, and
+double-buffered XFB scanout. Keep the current module and client artifacts as
+the baseline for a sustained zero-delay flip stress test.
