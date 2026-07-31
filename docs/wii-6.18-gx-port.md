@@ -3308,3 +3308,25 @@ final ownership by `gcn-vifb`, only `gcn_gx` among matching modules, final
 status `legacy gcnfb active`, responsive SSH, no kernel fault, and clear legacy
 output. A lingering unbound gcn_drm module is a failure even if the console is
 visible.
+
+## 2026-07-31: Accept corrected target-side DRM service transaction
+
+The replacement `/etc/init.d/wii-drm` matched SHA-256
+`facbb0471ca8de26149fc5c9d5dd04cc55f69ec02f5b56b0d93e862be2f0a23e`.
+Initial status identified legacy gcnfb, and the unchanged start path again
+preflighted dependencies, transferred VI ownership, registered `card0`, and
+reported DRM active.
+
+With no KMS client holding references, the corrected stop path unbound gcn-vi,
+bound gcnfb, removed gcn-drm, reloaded GX, and unloaded every generic DRM
+module. Final status identified legacy ownership; `gcn-vifb` owned
+`c002000.video`, and `gcn_gx` was the only matching module in `/proc/modules`.
+SSH remained responsive, no kernel fault appeared, and direct observation
+confirmed the restored console was clear.
+
+This accepts transactional on-device VI ownership management and closes the
+udev auto-load race. The service and checksum-pinned modules are installed on
+the target but have no runlevel links, so boot behavior remains legacy-first.
+Next connect this accepted service to a practical userspace DRM client or
+desktop session before enabling it automatically at boot; starting DRM without
+a client would intentionally leave only the initialized black XFB visible.
