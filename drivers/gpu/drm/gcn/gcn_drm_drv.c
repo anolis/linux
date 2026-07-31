@@ -116,6 +116,7 @@ struct gcn_drm {
 	unsigned int pending_page;
 	bool flip_pending;
 	bool logged_rgb565_samples;
+	bool logged_xrgb8888_samples;
 };
 
 static bool program_mode = true;
@@ -253,6 +254,36 @@ static u32 gcn_drm_xrgb8888_pair(u32 pixel0, u32 pixel1)
 				 RGB2YUV_LUMA_888, RGB2YUV_CHROMA_888);
 }
 
+static void gcn_drm_log_xrgb8888_samples(struct gcn_drm *gcn,
+					 struct drm_framebuffer *fb,
+					 const u8 *src)
+{
+	static const struct {
+		unsigned int x;
+		unsigned int y;
+		const char *name;
+	} samples[] = {
+		{ 100, 100, "red" },
+		{ 500, 100, "green" },
+		{ 100, 400, "blue" },
+		{ 500, 400, "white" },
+	};
+	unsigned int i;
+
+	pr_info("gcn-vi: XRGB8888 diagnostic format=%08x pitch=%u\n",
+		fb->format->format, fb->pitches[0]);
+	for (i = 0; i < ARRAY_SIZE(samples); i++) {
+		const u8 *bytes = src + samples[i].y * fb->pitches[0] +
+				  samples[i].x * 4;
+		u32 pixel = *(const u32 *)bytes;
+
+		pr_info("gcn-vi: XRGB8888 %s word=%08x bytes=%02x,%02x,%02x,%02x yuyv=%08x\n",
+			samples[i].name, pixel, bytes[0], bytes[1], bytes[2],
+			bytes[3], gcn_drm_xrgb8888_pair(pixel, pixel));
+	}
+	gcn->logged_xrgb8888_samples = true;
+}
+
 static int gcn_drm_convert(struct gcn_drm *gcn,
 			   struct drm_plane_state *state,
 			   unsigned int page)
@@ -290,6 +321,9 @@ static int gcn_drm_convert(struct gcn_drm *gcn,
 		case DRM_FORMAT_XRGB8888: {
 			const u32 *pixels = (const u32 *)src;
 
+			if (!gcn->logged_xrgb8888_samples)
+				gcn_drm_log_xrgb8888_samples(gcn, fb,
+					shadow->data[0].vaddr);
 			for (x = 0; x < GCN_DRM_WIDTH; x += 2)
 				*dst++ = gcn_drm_xrgb8888_pair(pixels[x],
 							       pixels[x + 1]);
