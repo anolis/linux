@@ -22,7 +22,6 @@ Options:
   --texcoord-space MODE   normalized or texel (default: normalized)
   --texel-bias-eighths N  signed texture phase in eighths (default: -2)
   --hold-frame N          publish frame N once, then hold (default: 0)
-  --source-dedup BOOL     skip consumed source generations, 0 or 1 (default: 0)
   --no-capture            skip debugfs VFB/XFB retrieval
   --reuse-remote          verify and reuse /tmp/gcn-gx.ko instead of uploading
   --unload                unload GX and leave the CPU console active
@@ -46,7 +45,6 @@ direct_pattern=grid
 texcoord_space=normalized
 texel_bias_eighths=-2
 hold_frame=0
-source_dedup=0
 capture_frames=1
 reuse_remote=0
 unload_only=0
@@ -99,10 +97,6 @@ while (($#)); do
 		hold_frame=$2
 		shift
 		;;
-	--source-dedup)
-		source_dedup=$2
-		shift
-		;;
 	--no-capture)
 		capture_frames=0
 		;;
@@ -146,10 +140,6 @@ if [[ ! $hold_frame =~ ^[0-9]+$ ]]; then
 fi
 if [[ ! $probe_seed =~ ^[0-9]+$ ]]; then
 	echo "Invalid probe-seed value: $probe_seed" >&2
-	exit 2
-fi
-if [[ $source_dedup != 0 && $source_dedup != 1 ]]; then
-	echo "Invalid source-dedup value: $source_dedup" >&2
 	exit 2
 fi
 if [[ $texcoord_source != position && $texcoord_source != direct ]]; then
@@ -339,12 +329,12 @@ module_args+=" texcoord_mapping=$texcoord_mapping"
 module_args+=" direct_primitive=$direct_primitive direct_pattern=$direct_pattern"
 module_args+=" texcoord_space=$texcoord_space"
 module_args+=" texel_bias_eighths=$texel_bias_eighths hold_frame=$hold_frame"
-module_args+=" source_dedup=$source_dedup debug_capture=$capture_frames"
+module_args+=" debug_capture=$capture_frames"
 remote_status "loading $module_args"
 remote_exec "grep -q ' /sys/kernel/debug ' /proc/mounts || mount -t debugfs debugfs /sys/kernel/debug"
 remote_exec "insmod $remote_module $module_args"
 console_status="GX LOADED: $renderer source=$texture_source"
-console_status+=" bias8=$texel_bias_eighths dedup=$source_dedup"
+console_status+=" bias8=$texel_bias_eighths"
 remote_exec "printf '\\n=== $console_status ===\\n' > /dev/tty0"
 
 printf '\nGX live cycle complete\n'
@@ -360,7 +350,6 @@ printf '  direct pattern: %s\n' "$direct_pattern"
 printf '  texcoord space: %s\n' "$texcoord_space"
 printf '  texel bias eighths: %s\n' "$texel_bias_eighths"
 printf '  hold frame: %s\n' "$hold_frame"
-printf '  source dedup: %s\n' "$source_dedup"
 remote_exec "grep '^gcn_gx ' /proc/modules; dmesg | grep -E 'gcn-gx:|gcnfb:' | tail -n 100"
 
 capture=/tmp/wii-gx-${commit}-${renderer}-${texture_source}-s${probe_seed}-t${texcoord_source}-m${texcoord_mapping}-p${direct_primitive}-d${direct_pattern}-c${texcoord_space}-b${texel_bias_eighths}-h${hold_frame}.yuyv

@@ -113,10 +113,6 @@ static bool gx_frame_work_busy;
 static bool gx_frame_boot_deferred;
 static bool gx_frame_publish_xfb;
 static bool gx_frame_hold;
-static const void *gx_frame_last_vfb;
-static enum gx_vfb_format gx_frame_last_format;
-static u32 gx_frame_last_generation;
-static bool gx_frame_last_valid;
 static u64 gx_rgb888_tile_total_ns;
 static u64 gx_rgb888_tile_max_ns;
 static u64 gx_rgb888_flush_total_ns;
@@ -149,11 +145,6 @@ static bool gx_debug_capture;
 module_param_named(debug_capture, gx_debug_capture, bool, 0444);
 MODULE_PARM_DESC(debug_capture,
 		 "Allocate debugfs VFB/XFB capture buffers (default: false)");
-
-static bool gx_source_dedup;
-module_param_named(source_dedup, gx_source_dedup, bool, 0444);
-MODULE_PARM_DESC(source_dedup,
-		 "Skip repeat submissions of a consumed VFB generation (default: false)");
 
 static char *gx_texture_source = "console";
 module_param_named(texture_source, gx_texture_source, charp, 0444);
@@ -2215,7 +2206,6 @@ static void gx_frame_workfn(struct work_struct *work)
 	enum gx_vfb_format format;
 	u32 source_generation;
 	unsigned long flags;
-	bool live_submission;
 	bool submitted;
 
 	(void)work;
@@ -2235,18 +2225,11 @@ static void gx_frame_workfn(struct work_struct *work)
 		return;
 	}
 
-	live_submission = gx_diag_phase == GX_DIAG_DONE;
 	submitted = gx_process_frame(vfb, xfb_phys, width, height, format);
 	/* gx_process_frame() has finished all CPU reads from this VFB page. */
 	gcnfb_accel_source_consumed(&gcn_gx_accel_ops, vfb, source_generation);
 
 	spin_lock_irqsave(&gx_frame_work_lock, flags);
-	if (gx_source_dedup && live_submission && submitted) {
-		gx_frame_last_vfb = vfb;
-		gx_frame_last_format = format;
-		gx_frame_last_generation = source_generation;
-		gx_frame_last_valid = true;
-	}
 	if (submitted && gx_frame_publish_xfb) {
 		gx_frame_ready_xfb = xfb_phys;
 		gx_frame_ready_vfb = vfb;
@@ -2306,13 +2289,6 @@ static void gcn_gx_queue_frame(const void *vfb, u32 xfb_phys,
 
 	spin_lock_irqsave(&gx_frame_work_lock, flags);
 	if (gx_frame_work_busy) {
-		spin_unlock_irqrestore(&gx_frame_work_lock, flags);
-		return;
-	}
-	if (gx_source_dedup && gx_frame_last_valid &&
-	    gx_frame_last_vfb == vfb &&
-	    gx_frame_last_format == format &&
-	    gx_frame_last_generation == source_generation) {
 		spin_unlock_irqrestore(&gx_frame_work_lock, flags);
 		return;
 	}
@@ -2521,10 +2497,6 @@ static int gcn_gx_init(void)
 	gx_frame_boot_deferred = false;
 	gx_frame_publish_xfb = false;
 	gx_frame_hold = false;
-	gx_frame_last_vfb = NULL;
-	gx_frame_last_format = GX_VFB_RGB565;
-	gx_frame_last_generation = 0;
-	gx_frame_last_valid = false;
 	gx_rgb888_tile_total_ns = 0;
 	gx_rgb888_tile_max_ns = 0;
 	gx_rgb888_flush_total_ns = 0;
@@ -2573,10 +2545,10 @@ static int gcn_gx_init(void)
 				   &gx_xfb_snapshot_phys);
 	}
 
-	pr_info("gcn-gx: ready fifo=%08x tex=%08x/%08x irq=%u renderer=%s bias8=%d source_dedup=%u debug_capture=%u\n",
+	pr_info("gcn-gx: ready fifo=%08x tex=%08x/%08x irq=%u renderer=%s bias8=%d debug_capture=%u\n",
 		fifo_phys, GX_TEX_BUF_MEM1_PHYS, GX_TEX_BUF_ALT_MEM1_PHYS,
 		gx_pe_finish_irq, gx_renderer, gx_texel_bias_eighths,
-		gx_source_dedup, gx_debug_capture);
+		gx_debug_capture);
 	gx_accel_ready = true;
 	return 0;
 

@@ -22,9 +22,8 @@ Options:
   --no-build             reuse existing module and stress binary
   --allow-dirty          permit a sweep from an uncommitted tree
 
-The default matrix compares staged and direct RGB888 rendering, then tests
-deduplication with direct rendering. Blank lines and lines beginning with #
-are ignored in matrix files.
+The default matrix compares staged and direct RGB888 rendering. Blank lines
+and lines beginning with # are ignored in matrix files.
 Each candidate is isolated by a module reload. Artifacts are uploaded once and
 then checksum-verified and reused. Numerical ranking never substitutes for
 full-frame visual confirmation.
@@ -131,9 +130,8 @@ results=$(realpath "$results")
 if [[ -z $matrix ]]; then
 	matrix=$results/default.matrix
 	cat > "$matrix" <<'EOF'
-baseline-staged|--renderer generated --source-dedup 0 --texel-bias-eighths -2|
-baseline-direct|--renderer generated --source-dedup 0 --texel-bias-eighths -2|--direct-render
-dedup-direct|--renderer generated --source-dedup 1 --texel-bias-eighths -2|--direct-render
+baseline-staged|--renderer generated --texel-bias-eighths -2|
+baseline-direct|--renderer generated --texel-bias-eighths -2|--direct-render
 EOF
 elif [[ ! -f $matrix ]]; then
 	echo "Matrix not found: $matrix" >&2
@@ -171,7 +169,7 @@ restore_baseline()
 		return
 	fi
 	tools/wii-gx-cycle.sh "${common_cycle[@]}" --reuse-remote \
-		--renderer generated --source-dedup 0 --texel-bias-eighths -2 \
+		--renderer generated --texel-bias-eighths -2 \
 		< /dev/null > "$results/restore.log" 2>&1 || true
 }
 trap restore_baseline EXIT
