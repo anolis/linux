@@ -2744,3 +2744,27 @@ exist, SSH to remain responsive, and no kernel fault. No DRM fbdev client is
 present, so the display is expected to retain or freeze its last legacy frame;
 that is not a scanout verdict. Visible DRM output will be evaluated separately
 with a dedicated dumb-buffer KMS test client and a full-frame HDMI capture.
+
+## 2026-07-31: Reject first no-fbdev handoff due to VI IRQ storm
+
+The checksum-pinned `d4a1a0308` cycle passed generic-module preflight, unloaded
+GX, and unbound legacy `gcnfb`. The last visible status line was
+`drm-cycle: loading gcn-drm d4a1a0308a5c`. The machine then froze completely:
+the displayed frame stopped, SSH disappeared, and the host could no longer
+ping `10.3.10.12`. The harness could not execute its rollback because the
+kernel was no longer scheduling network or userspace work. No `card0` success
+marker appeared.
+
+Static comparison with the established `gcnfb` VI handler identifies a direct
+interrupt-acknowledge bug. VI DI status bit 31 is cleared by writing zero;
+`gcnfb` acknowledges with `vi_dix_clear_irq(value)`. The new DRM handler and
+vblank helpers instead write `value | VI_DI_IRQ`, preserving the asserted
+status bit. Legacy teardown also frees the IRQ without disabling DI0/DI1, so
+the new driver's `request_irq()` can immediately receive the still-enabled
+source and loop forever without clearing it. This exactly fits the observed
+hard freeze, but remains a root-cause hypothesis until a corrected build binds.
+
+Next test: clear bit 31 in every DI acknowledge, and quiesce all four DI sources
+before requesting the IRQ. Keep scanout and userspace modesetting out of this
+test; acceptance is limited to a responsive machine, `gcn-vi` binding, and
+`/sys/class/drm/card0` registration.
