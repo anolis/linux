@@ -2501,3 +2501,30 @@ when userspace renders directly into the inactive VFB page and synchronizes
 with `FBIOPAN_DISPLAY`. Keep source deduplication disabled; it provides no
 throughput gain and was visually unacceptable. The staged-copy result is an
 application memory-traffic limitation, not a GX driver throughput failure.
+
+## 2026-07-30: Stage removal of rejected source deduplication
+
+- Test implementation: `c7bd62a0a`
+- Kernel zImage SHA-256:
+  `c5b6b8f5b5d731d2958ed06b1e2c26ceddafa77cc62667016138551df76d5d11`
+- GX module SHA-256:
+  `88474048238caad1e992ca961969f6d42b07fece9fa5438937deac94720dffe1`
+- Cycle script SHA-256:
+  `9a69fa50b462c900ac7fb2a8ffbdfcab9f9f00028404f28c5a5315060039ad39`
+- Sweep script SHA-256:
+  `937511148f8b9a3e3841a708841d2ef3bcdb8018e06f997115a06861bdd075a4`
+
+Remove the visually rejected `source_dedup` module parameter and its
+last-source tracking from the driver. Remove the corresponding cycle and sweep
+controls so an obsolete experimental path cannot be enabled accidentally.
+Source-generation ownership and consumption callbacks remain unchanged; they
+are required to prevent userspace from reusing a VFB page while GX still reads
+it.
+
+The zImage and module ABI are unchanged, so this test requires only a live
+upload and reload of the checksum-matched module. First run a 30-second RGB565
+direct-render regression, then record and commit its numerical and full-frame
+visual result before testing RGB888. Follow with a separate 30-second RGB888
+direct-render regression. Both formats must complete normally with positive PE
+progress, no source-generation timeout or kernel fault, correct stable output,
+and a clear responsive console after the baseline module is restored.
