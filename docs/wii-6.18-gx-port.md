@@ -3076,3 +3076,16 @@ Direct observation must show the same clear quadrant/grid/checker pattern and
 left/right yellow-marker alternation as the accepted XRGB8888 test, allowing
 only normal RGB565 color quantization and no channel swaps, pitch errors,
 tearing, corruption, or instability.
+
+## 2026-07-31: First RGB565 run passes technically, visual result provisional
+
+The checksum-pinned client reported `format=rgb565`, two 614400-byte buffers
+with the required 1280-byte pitch, and `flips=20 last-vblank=1237`. The client
+remained alive, all three post-test pings succeeded, SSH and `gcn-vi` ownership
+remained stable, and no conversion failure or kernel fault appeared.
+
+The user reported that everything looked good, but requested another run to be
+sure. Accept the allocation, format selection, conversion, event, and stability
+gates. Keep final visual acceptance provisional until an identical independent
+confirmation explicitly verifies colors, geometry, checker/grid clarity,
+marker motion, tearing, and corruption.
