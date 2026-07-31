@@ -2821,3 +2821,32 @@ probe/registration milestone. Keep `gcn-drm` active. Next, run a dedicated
 dumb-buffer KMS client that creates a 640x480 XRGB8888 framebuffer, draws a
 deterministic full-frame pattern, and performs the first userspace modeset.
 Only HDMI capture and direct visual inspection can accept scanout correctness.
+
+## 2026-07-31: Stage first userspace dumb-buffer modeset
+
+- Test-client implementation: `1393a3759`
+- Static stripped PowerPC binary size: `726988` bytes
+- `wii-drm-test` SHA-256:
+  `cfff8537d0cc2ce455296ac2a30160d18f1d3c9f816bdf7a479d90fa1fcdca7a`
+- Active `gcn-drm.ko` SHA-256:
+  `a1b5538d4bdaacb31c7ff6f7ff4326d56d54f5ca7d4ba0a253f972e8ebead2a0`
+
+Build command:
+
+```sh
+powerpc-linux-gnu-gcc -std=gnu11 -O2 -Wall -Wextra -Werror -static -s \
+  -I/usr/include/libdrm -o /tmp/wii-drm-test tools/wii-drm-test.c
+```
+
+The client uses raw DRM UAPI ioctls and links no libdrm runtime dependency. It
+discovers the fixed connector and CRTC, creates a 640x480 32-bpp dumb buffer,
+maps it, fills XRGB8888 pixels, adds a framebuffer, and issues `SETCRTC`. The
+pattern contains red, green, blue, and white quadrants, black 80x60 grid lines,
+an eight-pixel white border, and a cyan/magenta center checkerboard. It remains
+alive after modeset so scanout can be inspected.
+
+Upload to `/tmp/wii-drm-test`, verify the remote checksum, and launch it while
+the accepted no-fbdev `gcn-drm` instance owns `card0`. Acceptance requires a
+successful client status line, a live process, continuing SSH/ping, no kernel
+fault, and a full-frame HDMI capture matching the described pattern. Any
+kernel-only success remains provisional until the visible frame is graded.
