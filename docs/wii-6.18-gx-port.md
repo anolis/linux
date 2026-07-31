@@ -3504,3 +3504,30 @@ modules. Require no stale PID file, final legacy status, clear output, stable
 network/kernel, and only `gcn_gx` remaining. A separate negative control must
 remove or invalidate the configured client and prove automatic startup
 rollback before boot enablement.
+
+## 2026-07-31: Reject combined console service on RGB565 byte order
+
+The persistent service and console matched their staged SHA-256 values and no
+runlevel links existed. `service wii-drm start` successfully transferred VI,
+started `/usr/local/sbin/wii-drm-console`, verified it after one second, and
+reported the exact live client PID. The tty update and cursor continued to
+work, and the service later stopped the client automatically, waited for exit,
+restored gcnfb/GX, removed the DRM stack and PID file, and logged no fault.
+
+The explicit labeled-color gate failed: red displayed blue, blue displayed
+red, yellow displayed light blue/cyan, and green remained green. With the VCSA
+attribute-order palette now independently corrected, this mapping is the
+signature of 16-bit byte reversal: RGB565 red `0xa800` is interpreted as
+`0x00a8`, and red+green yellow is interpreted as blue+green cyan.
+
+Retract the preceding claim that the corrected RGB565 run established valid
+color identity or final RGB565 console quality; the earlier response did not
+explicitly enumerate each displayed hue, while this repeated service-managed
+screen did. Keep the VGA attribute-order correction itself: raw VCSA attributes
+and kernel `color_table[]` still independently prove that mapping.
+
+Do not change byte packing yet. First run the same accepted console binary with
+`--format xrgb8888` and the corrected palette as a channel-order control. If
+the four labels are correct, constrain the fix to little-endian RGB565 storage;
+if XRGB8888 is also swapped, correct the shared big-endian DRM format contract
+in the driver and both raw clients. Boot enablement remains blocked.
