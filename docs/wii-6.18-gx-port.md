@@ -3362,3 +3362,30 @@ and no page-flip, conversion, or fault error may appear. Send SIGTERM, require
 clean process exit and DRM master release, then stop the ownership service and
 require the accepted clear legacy GX console. This is a display mirror only:
 keyboard input and getty remain owned by tty1 and must continue to work.
+
+## 2026-07-31: First DRM console is functional but visually provisional
+
+The uploaded binary matched SHA-256
+`317911dc539f0b8413557d80078fcfb5927be44117cb59c71b614df731d705b6`.
+The accepted service started DRM normally, and the mirror remained alive while
+reporting 640x480 scanout. After gcnfb unbound, tty1 changed from its prior
+80x30 fbcon geometry to the fallback console's 80x25 geometry; the mirror
+handled this valid smaller layout and centered its 640x400 glyph area.
+
+The deterministic screen updated from frame one to `FRAME TWO - UPDATE
+PASSED` without restart, the cursor visibly blinked, and red, green, blue, and
+yellow samples all rendered with the correct identities. The user reported
+that text was clear, but somewhat blurrier than the normal legacy console; the
+dark red sample was substantially blurrier, while the other colors looked
+fine. Treat live VCSA mirroring, glyph/attribute decoding, update detection,
+page flips, and cursor timing as passed, but do not accept final console image
+quality yet.
+
+SIGTERM produced a clean process exit with no logged error. The service then
+restored gcnfb/GX, removed the complete DRM stack, retained SSH, and logged no
+kernel fault. Next isolate source pixel format: change the mirror to RGB565,
+matching the legacy console framebuffer and the driver's independently
+accepted RGB565 conversion path, without changing font geometry, VI state,
+palette values, or update timing. Compare overall text and red-sample clarity
+against this XRGB8888 baseline before attempting font filtering or palette
+adjustment.
