@@ -3478,3 +3478,29 @@ console artifact persistently, have `wii-drm start` launch and verify it after
 `card0`, and have `stop` terminate and wait for it before unbinding DRM. Keep
 boot runlevel enablement separate until the combined service/client transaction
 passes and its failure rollback is validated.
+
+## 2026-07-31: Stage service-managed DRM console transaction
+
+- Client-service implementation: `f64b4f555`
+- `wii-drm-init` SHA-256:
+  `74229640ab480c2eb5488acb296029af9827eaf5609e63e08d9058060214476b`
+- Accepted `wii-drm-console` SHA-256:
+  `66fb1a55e46366bc2313ade57fcde11f401cd44b3e1487ab1de2fa13b3c6ea81`
+
+Install the accepted console as `/usr/local/sbin/wii-drm-console` and replace
+`/etc/init.d/wii-drm` with the checksum-pinned client-aware service. Keep the
+service disabled at runlevels for this manual transaction.
+
+From legacy state, run `service wii-drm start` without launching any client
+separately. Require the service to transfer ownership, register `card0`, start
+the configured console, verify it after one second, and report both DRM and a
+live client PID from `status`. Write a tty1 update and require it to appear on
+the accepted clear RGB565 console with cursor blinking.
+
+Run `service wii-drm stop` without manually signaling the client. Require the
+service to identify the exact executable from the PID file, send SIGTERM, wait
+for process and DRM-master release, then restore gcnfb/GX and unload all DRM
+modules. Require no stale PID file, final legacy status, clear output, stable
+network/kernel, and only `gcn_gx` remaining. A separate negative control must
+remove or invalidate the configured client and prove automatic startup
+rollback before boot enablement.
