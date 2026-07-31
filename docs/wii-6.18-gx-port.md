@@ -3700,7 +3700,8 @@ storage byte order from color output.
 - Diagnostic implementation: `f5e3e7b64`
 - `gcn-drm.ko` SHA-256:
   `92579cf75b311512bcd8ee8b17bad6dca0274b4d9f0aaf6dead101b4ab0738a6`
-- Known-pattern userspace binary: `/usr/local/sbin/wii-drm-test`
+- Known-pattern `wii-drm-test` SHA-256:
+  `88a1511225805948e56b7d003ab2429325faf90a2cac580f4dd9f0fa15f5166f`
 
 Replace only `gcn-drm.ko`, transfer ownership with no automatic console, and
 run the existing test tool once with `--format rgb565` and no flips. Its static
