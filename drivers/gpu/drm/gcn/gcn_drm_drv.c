@@ -243,6 +243,19 @@ static void gcn_drm_set_scanout(struct gcn_drm *gcn, unsigned int page)
 	out_be32(gcn->vi_base + VI_BFBL, VI_FB_POB | bottom >> 5);
 }
 
+static void gcn_drm_quiesce_irqs(struct gcn_drm *gcn)
+{
+	static const u8 di_regs[] = { VI_DI0, VI_DI1, VI_DI2, VI_DI3 };
+	unsigned int i;
+
+	for (i = 0; i < ARRAY_SIZE(di_regs); i++) {
+		u32 value = in_be32(gcn->vi_base + di_regs[i]);
+
+		out_be32(gcn->vi_base + di_regs[i],
+			 value & ~(VI_DI_IRQ | VI_DI_ENABLE));
+	}
+}
+
 static void gcn_drm_arm_event(struct gcn_drm *gcn)
 {
 	struct drm_crtc *crtc = &gcn->pipe.crtc;
@@ -327,7 +340,8 @@ static int gcn_drm_enable_vblank(struct drm_simple_display_pipe *pipe)
 	struct gcn_drm *gcn = to_gcn_drm(pipe->crtc.dev);
 	u32 value = in_be32(gcn->vi_base + VI_DI1);
 
-	out_be32(gcn->vi_base + VI_DI1, value | VI_DI_IRQ | VI_DI_ENABLE);
+	out_be32(gcn->vi_base + VI_DI1,
+		 (value & ~VI_DI_IRQ) | VI_DI_ENABLE);
 	return 0;
 }
 
@@ -337,7 +351,7 @@ static void gcn_drm_disable_vblank(struct drm_simple_display_pipe *pipe)
 	u32 value = in_be32(gcn->vi_base + VI_DI1);
 
 	out_be32(gcn->vi_base + VI_DI1,
-		 (value & ~VI_DI_ENABLE) | VI_DI_IRQ);
+		 value & ~(VI_DI_IRQ | VI_DI_ENABLE));
 }
 
 static const struct drm_simple_display_pipe_funcs gcn_drm_pipe_funcs = {
@@ -399,7 +413,7 @@ static irqreturn_t gcn_drm_irq(int irq, void *data)
 
 	value = in_be32(gcn->vi_base + VI_DI0);
 	if (value & VI_DI_IRQ) {
-		out_be32(gcn->vi_base + VI_DI0, value | VI_DI_IRQ);
+		out_be32(gcn->vi_base + VI_DI0, value & ~VI_DI_IRQ);
 		handled = true;
 	}
 
@@ -412,7 +426,7 @@ static irqreturn_t gcn_drm_irq(int irq, void *data)
 			gcn->flip_pending = false;
 		}
 		spin_unlock_irqrestore(&gcn->scanout_lock, flags);
-		out_be32(gcn->vi_base + VI_DI1, value | VI_DI_IRQ);
+		out_be32(gcn->vi_base + VI_DI1, value & ~VI_DI_IRQ);
 		drm_crtc_handle_vblank(&gcn->pipe.crtc);
 		handled = true;
 	}
@@ -445,6 +459,7 @@ static int gcn_drm_probe(struct platform_device *pdev)
 				 struct gcn_drm, drm);
 	if (IS_ERR(gcn))
 		return PTR_ERR(gcn);
+	dev_info(dev, "probe: DRM device allocated\n");
 
 	gcn->vi_base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(gcn->vi_base))
@@ -466,6 +481,7 @@ static int gcn_drm_probe(struct platform_device *pdev)
 	gcn->xfb_phys = xfb_phys;
 	gcn->xfb_size = xfb_size;
 	spin_lock_init(&gcn->scanout_lock);
+	dev_info(dev, "probe: VI and XFB mapped\n");
 
 	if (!(in_be16(gcn->vi_base + VI_DCR) & VI_DCR_ENABLE))
 		return dev_err_probe(dev, -ENODEV,
@@ -495,17 +511,22 @@ static int gcn_drm_probe(struct platform_device *pdev)
 					   NULL, &gcn->connector);
 	if (ret)
 		return ret;
+	dev_info(dev, "probe: mode objects initialized\n");
 
 	ret = drm_vblank_init(&gcn->drm, 1);
 	if (ret)
 		return ret;
+	dev_info(dev, "probe: vblank state initialized\n");
 
 	irq = platform_get_irq(pdev, 0);
 	if (irq < 0)
 		return irq;
+	gcn_drm_quiesce_irqs(gcn);
+	dev_info(dev, "probe: VI interrupt sources quiesced\n");
 	ret = devm_request_irq(dev, irq, gcn_drm_irq, 0, GCN_DRM_NAME, gcn);
 	if (ret)
 		return dev_err_probe(dev, ret, "failed to request VI IRQ\n");
+	dev_info(dev, "probe: VI IRQ installed\n");
 
 	drm_mode_config_reset(&gcn->drm);
 	platform_set_drvdata(pdev, gcn);
