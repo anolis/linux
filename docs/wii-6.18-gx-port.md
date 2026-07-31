@@ -2623,3 +2623,45 @@ zImage before further testing. Reconfigure DRM core as a module along with the
 KMS, shmem, client, and Wii VI modules. Build the smaller dependency-support
 kernel first, then build and upload the complete module set. Do not retry the
 built-in DRM image.
+
+## 2026-07-31: Stage modular DRM/KMS boot and handoff test
+
+- Modular-stack implementation: `a101ec91c`
+- Modular DRM zImage size: `6297232` bytes
+- Accepted GX zImage size: `6260764` bytes
+- Modular DRM zImage SHA-256:
+  `eedd96b4c140ff931848f7e275bef40332ac549a16567c6df527e67bf2cde6c5`
+- `drm_panel_orientation_quirks.ko` SHA-256:
+  `fa1e9862ec9379b26b572df3b4e93878f21e563264ad6fd8353a4f27dcadd1df`
+- `drm.ko` SHA-256:
+  `038eda5366251f715648d8fea770cdb2f19ec45ccc86104a14824f43ca5e65ce`
+- `drm_client_lib.ko` SHA-256:
+  `cdb90dc4d66ea83c7d28bd31a66b16ad3fdd62bb5fc027387b3ebd2bd933fa39`
+- `drm_kms_helper.ko` SHA-256:
+  `b3bb89745cd925a092d7a8c249a008c0d1f4d5d49cee80ee857c516d95dfea2f`
+- `drm_shmem_helper.ko` SHA-256:
+  `9acfcdf4cb2c9d34e0f42fbc15fad0e6bf08f5793d22fe7be99e478948b03d07`
+- `gcn-drm.ko` SHA-256:
+  `7ea073c9d2c009f494037883b970371003066b40a0fd77c3b567cf4191bef1a2`
+- Cycle harness SHA-256:
+  `e4b7e4933c308786c73894da0a95a41fefc55a4d1a59b087dd48fc3cbd994b91`
+
+The accepted rollback image was restored and booted normally, independently
+confirming that the card and Gumboot path remain sound. This new image keeps
+DRM core and every helper modular; only their selected DMA-buf, fence, HDMI,
+and related support remains built into the kernel. The resulting zImage is
+only 36,468 bytes larger than the accepted image. Its uncompressed kernel is
+`0x00ec7568`, and Kbuild places the wrapper at `0x00f00000`, both materially
+below the rejected built-in layout (`0x012c8be0` and `0x01300000`).
+
+The revised harness uploads and checksum-verifies all six modules. It loads
+the generic orientation, DRM core, client, KMS, and shmem modules while
+`gcnfb` still owns the screen. Only after that non-disruptive preflight passes
+does it unload GX, unbind `gcnfb`, and load `gcn-drm`. A preflight failure must
+leave the accepted display untouched. A transition failure must restore
+`gcnfb` automatically.
+
+First acceptance gate is boot only: require normal Gumboot completion, legacy
+console output, and SSH. Do not begin the live handoff until that result is
+recorded and committed. The subsequent handoff retains the previously defined
+card0, binding, HDMI/GIMP visual, SSH, fault, and explicit-restore gates.
