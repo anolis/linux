@@ -3720,3 +3720,31 @@ conversion values, not subjective screen colors.
 After capture, terminate the test process and stop the service. Require legacy
 `gcn-vifb` ownership, only `gcn_gx` loaded, and no kernel fault. Do not leave
 the diagnostic module installed after its result is recorded and understood.
+
+## 2026-07-31: RGB565 source and decoder positive control passes
+
+The installed module and test utility matched their staged SHA-256 values. The
+unchanged utility registered a 640x480 RGB565 framebuffer with pitch 1280 and
+the driver logged format `0x36314752` (`RG16`). Its one-shot samples were:
+
+```text
+red   word=f904 bytes=f9,04 yuyv=725a72ef
+green word=27e4 bytes=27,e4 yuyv=b336b322
+blue  word=221f bytes=22,1f yuyv=5de45d60
+white word=ffff bytes=ff,ff yuyv=eb80eb80
+```
+
+All four native words exactly match the userspace RGB565 packer at the known
+pattern coordinates. Their memory bytes confirm native big-endian stores, and
+the resulting YUYV words contain the expected red, green, blue, and neutral
+white luma/chroma values. The test process remained live, handled SIGTERM, and
+exited zero. Service stop restored `gcn-vifb`, left only `gcn_gx` loaded, and
+logged no fault.
+
+This validates the known-pattern producer and the driver's native-word RGB565
+decode through YUYV packing, but does not yet explain the console's observed
+red/blue exchange. Repeat this exact no-flip RGB565 pattern and explicitly
+identify the displayed top-left, top-right, bottom-left, and bottom-right
+quadrants. Correct quadrants constrain the defect to console framebuffer
+production or update handling; swapped quadrants contradict the logged YUYV
+values and require a matched XRGB pattern comparison at the XFB boundary.
