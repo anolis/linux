@@ -49,17 +49,30 @@ load_legacy_gx()
 
 restore_legacy()
 {
-	if module_loaded gcn_drm && ! rmmod gcn_drm; then
-		log "gcn_drm is busy; leaving DRM ownership unchanged"
+	unload_failed=0
+
+	if [ -e "$drm_driver/$device" ] &&
+	   ! printf '%s' "$device" > "$drm_driver/unbind"; then
+		log "failed to unbind gcn-drm; leaving DRM ownership unchanged"
 		return 1
 	fi
 	if ! legacy_bound &&
 	   ! printf '%s' "$device" > "$legacy_driver/bind"; then
 		log "failed to bind legacy gcnfb"
+		if module_loaded gcn_drm; then
+			printf '%s' "$device" > "$drm_driver/bind" 2>/dev/null || true
+		fi
 		return 1
+	fi
+	if module_loaded gcn_drm && ! rmmod gcn_drm; then
+		unload_failed=1
 	fi
 	if ! load_legacy_gx; then
 		log "failed to restore legacy gcnfb/GX"
+		return 1
+	fi
+	if [ "$unload_failed" -ne 0 ]; then
+		log "legacy gcnfb/GX active, but unbound gcn_drm is still busy"
 		return 1
 	fi
 
