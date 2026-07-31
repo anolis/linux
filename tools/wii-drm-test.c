@@ -3,6 +3,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -18,6 +19,15 @@
 #define TEST_WIDTH 640
 #define TEST_HEIGHT 480
 #define TEST_DRM_MODE_CONNECTED 1
+#define TEST_FLIP_TIMEOUT_MS 2000
+
+struct test_buffer {
+	struct drm_mode_create_dumb create;
+	struct drm_mode_map_dumb map_req;
+	struct drm_mode_destroy_dumb destroy;
+	struct drm_mode_fb_cmd fb;
+	void *map;
+};
 
 static volatile sig_atomic_t stop;
 
@@ -159,7 +169,7 @@ static int select_output(int fd, const struct drm_mode_card_res *res,
 	return -1;
 }
 
-static void draw_pattern(void *map, __u32 pitch)
+static void draw_pattern(void *map, __u32 pitch, int marker_x)
 {
 	static const uint32_t colors[4] = {
 		0x00ff2020, 0x0020ff20, 0x002040ff, 0x00ffffff,
@@ -184,31 +194,209 @@ static void draw_pattern(void *map, __u32 pitch)
 			if (x >= 240 && x < 400 && y >= 180 && y < 300)
 				pixel = ((x / 10) ^ (y / 10)) & 1 ?
 					0x00ff00ff : 0x0000ffff;
+			if (marker_x >= 0 && x >= (unsigned int)marker_x &&
+			    x < (unsigned int)marker_x + 16 && y >= 32 &&
+			    y < TEST_HEIGHT - 32)
+				pixel = 0x00ffff00;
 			row[x] = pixel;
 		}
 	}
 }
 
+static int create_buffer(int fd, struct test_buffer *buffer, int marker_x)
+{
+	memset(buffer, 0, sizeof(*buffer));
+	buffer->map = MAP_FAILED;
+	buffer->create.width = TEST_WIDTH;
+	buffer->create.height = TEST_HEIGHT;
+	buffer->create.bpp = 32;
+	if (xioctl(fd, DRM_IOCTL_MODE_CREATE_DUMB, &buffer->create) < 0)
+		return -1;
+
+	buffer->destroy.handle = buffer->create.handle;
+	buffer->map_req.handle = buffer->create.handle;
+	if (xioctl(fd, DRM_IOCTL_MODE_MAP_DUMB, &buffer->map_req) < 0)
+		return -1;
+	buffer->map = mmap(NULL, buffer->create.size, PROT_READ | PROT_WRITE,
+			   MAP_SHARED, fd, buffer->map_req.offset);
+	if (buffer->map == MAP_FAILED)
+		return -1;
+	draw_pattern(buffer->map, buffer->create.pitch, marker_x);
+
+	buffer->fb.width = TEST_WIDTH;
+	buffer->fb.height = TEST_HEIGHT;
+	buffer->fb.pitch = buffer->create.pitch;
+	buffer->fb.bpp = 32;
+	buffer->fb.depth = 24;
+	buffer->fb.handle = buffer->create.handle;
+	if (xioctl(fd, DRM_IOCTL_MODE_ADDFB, &buffer->fb) < 0)
+		return -1;
+	return 0;
+}
+
+static void destroy_buffer(int fd, struct test_buffer *buffer)
+{
+	if (buffer->fb.fb_id &&
+	    xioctl(fd, DRM_IOCTL_MODE_RMFB, &buffer->fb.fb_id) < 0)
+		perror("DRM_IOCTL_MODE_RMFB");
+	if (buffer->map != MAP_FAILED)
+		munmap(buffer->map, buffer->create.size);
+	if (buffer->destroy.handle &&
+	    xioctl(fd, DRM_IOCTL_MODE_DESTROY_DUMB, &buffer->destroy) < 0)
+		perror("DRM_IOCTL_MODE_DESTROY_DUMB");
+}
+
+static unsigned int parse_unsigned(const char *value, const char *name,
+				   unsigned int maximum)
+{
+	char *end;
+	unsigned long parsed;
+
+	errno = 0;
+	parsed = strtoul(value, &end, 10);
+	if (errno || !*value || *end || parsed > maximum) {
+		fprintf(stderr, "invalid %s: %s\n", name, value);
+		exit(EXIT_FAILURE);
+	}
+	return parsed;
+}
+
+static int wait_flip_event(int fd, __u64 expected, __u32 *sequence)
+{
+	unsigned char data[256];
+	struct pollfd poll_fd = {
+		.fd = fd,
+		.events = POLLIN,
+	};
+	ssize_t length;
+	size_t offset;
+	int ret;
+
+	do {
+		ret = poll(&poll_fd, 1, TEST_FLIP_TIMEOUT_MS);
+	} while (ret < 0 && errno == EINTR);
+	if (ret <= 0) {
+		if (!ret)
+			errno = ETIMEDOUT;
+		return -1;
+	}
+	length = read(fd, data, sizeof(data));
+	if (length < 0)
+		return -1;
+
+	for (offset = 0; offset + sizeof(struct drm_event) <= (size_t)length;) {
+		const struct drm_event *event = (const void *)(data + offset);
+		const struct drm_event_vblank *vblank;
+
+		if (event->length < sizeof(*event) ||
+		    offset + event->length > (size_t)length) {
+			errno = EPROTO;
+			return -1;
+		}
+		if (event->type == DRM_EVENT_FLIP_COMPLETE) {
+			if (event->length < sizeof(*vblank)) {
+				errno = EPROTO;
+				return -1;
+			}
+			vblank = (const void *)event;
+			if (vblank->user_data != expected) {
+				errno = EPROTO;
+				return -1;
+			}
+			*sequence = vblank->sequence;
+			return 0;
+		}
+		offset += event->length;
+	}
+
+	errno = EPROTO;
+	return -1;
+}
+
+static int run_flips(int fd, __u32 crtc_id, struct test_buffer *buffers,
+		     unsigned int count, unsigned int delay_ms)
+{
+	unsigned int i;
+	__u32 last_sequence = 0;
+
+	for (i = 0; i < count && !stop; i++) {
+		struct drm_mode_crtc_page_flip flip = {
+			.crtc_id = crtc_id,
+			.fb_id = buffers[(i + 1) & 1].fb.fb_id,
+			.flags = DRM_MODE_PAGE_FLIP_EVENT,
+			.user_data = i + 1,
+		};
+
+		if (xioctl(fd, DRM_IOCTL_MODE_PAGE_FLIP, &flip) < 0)
+			return -1;
+		if (wait_flip_event(fd, flip.user_data, &last_sequence) < 0)
+			return -1;
+		if (delay_ms && poll(NULL, 0, delay_ms) < 0 && errno != EINTR)
+			return -1;
+	}
+
+	printf("wii-drm-test: flips=%u last-vblank=%u\n", i, last_sequence);
+	return i == count ? 0 : -1;
+}
+
+static void usage(const char *program)
+{
+	fprintf(stderr,
+		"Usage: %s [--flips COUNT] [--delay-ms MSEC] [CARD]\n",
+		program);
+}
+
 int main(int argc, char **argv)
 {
-	const char *card = argc > 1 ? argv[1] : "/dev/dri/card0";
-	struct drm_mode_create_dumb create = {
-		.width = TEST_WIDTH,
-		.height = TEST_HEIGHT,
-		.bpp = 32,
+	const char *card = "/dev/dri/card0";
+	struct test_buffer buffers[2] = {
+		{ .map = MAP_FAILED },
+		{ .map = MAP_FAILED },
 	};
-	struct drm_mode_map_dumb map_req = { };
-	struct drm_mode_destroy_dumb destroy = { };
 	struct drm_mode_card_res res;
 	struct drm_mode_modeinfo mode;
-	struct drm_mode_fb_cmd fb = { };
 	struct drm_mode_crtc crtc = { };
 	__u32 *connector_ids = NULL;
 	__u32 *crtc_ids = NULL;
 	__u32 connector_id;
-	void *map = MAP_FAILED;
+	unsigned int flip_count = 0;
+	unsigned int delay_ms = 250;
+	unsigned int buffer_count;
+	unsigned int created = 0;
+	unsigned int i;
+	int card_set = 0;
 	int fd = -1;
 	int status = EXIT_FAILURE;
+
+	for (i = 1; i < (unsigned int)argc; i++) {
+		if (!strcmp(argv[i], "--flips")) {
+			if (++i >= (unsigned int)argc) {
+				usage(argv[0]);
+				return EXIT_FAILURE;
+			}
+			flip_count = parse_unsigned(argv[i], "flip count", 10000);
+			continue;
+		}
+		if (!strcmp(argv[i], "--delay-ms")) {
+			if (++i >= (unsigned int)argc) {
+				usage(argv[0]);
+				return EXIT_FAILURE;
+			}
+			delay_ms = parse_unsigned(argv[i], "flip delay", 60000);
+			continue;
+		}
+		if (!strcmp(argv[i], "--help")) {
+			usage(argv[0]);
+			return EXIT_SUCCESS;
+		}
+		if (argv[i][0] == '-' || card_set) {
+			usage(argv[0]);
+			return EXIT_FAILURE;
+		}
+		card = argv[i];
+		card_set = 1;
+	}
+	buffer_count = flip_count ? 2 : 1;
 
 	fd = open(card, O_RDWR | O_CLOEXEC);
 	if (fd < 0) {
@@ -237,39 +425,21 @@ int main(int argc, char **argv)
 		goto out;
 	}
 
-	if (xioctl(fd, DRM_IOCTL_MODE_CREATE_DUMB, &create) < 0) {
-		perror("DRM_IOCTL_MODE_CREATE_DUMB");
-		goto out;
-	}
-	destroy.handle = create.handle;
-	map_req.handle = create.handle;
-	if (xioctl(fd, DRM_IOCTL_MODE_MAP_DUMB, &map_req) < 0) {
-		perror("DRM_IOCTL_MODE_MAP_DUMB");
-		goto out;
-	}
-	map = mmap(NULL, create.size, PROT_READ | PROT_WRITE, MAP_SHARED, fd,
-		   map_req.offset);
-	if (map == MAP_FAILED) {
-		perror("mmap dumb buffer");
-		goto out;
-	}
-	draw_pattern(map, create.pitch);
+	for (i = 0; i < buffer_count; i++) {
+		int marker_x = flip_count ? (i ? 544 : 80) : -1;
 
-	fb.width = TEST_WIDTH;
-	fb.height = TEST_HEIGHT;
-	fb.pitch = create.pitch;
-	fb.bpp = 32;
-	fb.depth = 24;
-	fb.handle = create.handle;
-	if (xioctl(fd, DRM_IOCTL_MODE_ADDFB, &fb) < 0) {
-		perror("DRM_IOCTL_MODE_ADDFB");
-		goto out;
+		if (create_buffer(fd, &buffers[i], marker_x) < 0) {
+			created = i + 1;
+			perror("create dumb framebuffer");
+			goto out;
+		}
+		created = i + 1;
 	}
 
 	crtc.set_connectors_ptr = user_ptr(&connector_id);
 	crtc.count_connectors = 1;
 	crtc.crtc_id = crtc_ids[0];
-	crtc.fb_id = fb.fb_id;
+	crtc.fb_id = buffers[0].fb.fb_id;
 	crtc.mode_valid = 1;
 	crtc.mode = mode;
 	if (xioctl(fd, DRM_IOCTL_MODE_SETCRTC, &crtc) < 0) {
@@ -280,24 +450,29 @@ int main(int argc, char **argv)
 	printf("wii-drm-test: active %ux%u %s crtc=%u connector=%u\n",
 	       mode.hdisplay, mode.vdisplay, mode.name, crtc.crtc_id,
 	       connector_id);
-	printf("wii-drm-test: fb=%u handle=%u pitch=%u size=%llu\n",
-	       fb.fb_id, create.handle, create.pitch,
-	       (unsigned long long)create.size);
+	for (i = 0; i < buffer_count; i++) {
+		printf("wii-drm-test: buffer=%u fb=%u handle=%u pitch=%u",
+		       i, buffers[i].fb.fb_id, buffers[i].create.handle,
+		       buffers[i].create.pitch);
+		printf(" size=%llu\n",
+		       (unsigned long long)buffers[i].create.size);
+	}
 	fflush(stdout);
 	signal(SIGINT, handle_signal);
 	signal(SIGTERM, handle_signal);
+	if (flip_count &&
+	    run_flips(fd, crtc.crtc_id, buffers, flip_count, delay_ms) < 0) {
+		perror("page-flip test");
+		goto out;
+	}
+	fflush(stdout);
 	while (!stop)
 		pause();
 	status = EXIT_SUCCESS;
 
 out:
-	if (fb.fb_id && xioctl(fd, DRM_IOCTL_MODE_RMFB, &fb.fb_id) < 0)
-		perror("DRM_IOCTL_MODE_RMFB");
-	if (map != MAP_FAILED)
-		munmap(map, create.size);
-	if (destroy.handle &&
-	    xioctl(fd, DRM_IOCTL_MODE_DESTROY_DUMB, &destroy) < 0)
-		perror("DRM_IOCTL_MODE_DESTROY_DUMB");
+	while (created)
+		destroy_buffer(fd, &buffers[--created]);
 	free(crtc_ids);
 	free(connector_ids);
 	if (fd >= 0)
