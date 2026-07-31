@@ -2865,3 +2865,16 @@ modeset; the driver's GEM CPU-access hooks provide the relevant synchronization
 when it reads the shmem framebuffer. Remove the unnecessary `msync` call and
 repeat with a newly committed and checksum-pinned binary. Do not change the
 pattern, DRM ioctl sequence, or kernel module for that retry.
+
+## 2026-07-31: Stage msync-free KMS modeset retry
+
+- Client fix: `a8cedcc54`
+- Static stripped PowerPC binary size: `726988` bytes
+- `wii-drm-test` SHA-256:
+  `471e18e9f41997c74590f91a134e59483d1faef5eef43f8dc48c52b798ec1811`
+
+Only the unsupported `msync()` call was removed. Reuse the currently active
+and accepted `gcn-drm` instance; no reboot or module cycle is required. Replace
+the remote client only after checksum verification, then launch it and require
+the `active 640x480` status line plus a live process. Apply the same liveness,
+fault, and full-frame visual gates defined for the first attempt.
