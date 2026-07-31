@@ -3209,3 +3209,22 @@ client for 20 flips at 500 ms. Require all completion events, a clear observed
 pattern, responsive network, fault-free kernel, and successful restoration of
 the legacy GX console. Passing this gate makes standalone programming the
 accepted normal load behavior and unblocks an on-device boot service.
+
+## 2026-07-31: Accept default standalone-mode load
+
+The checksum-pinned module was loaded with no `program_mode` argument. It took
+the standalone initialization path by default and again read back `DCR=0001`,
+`VTR=0f06`, `HTR0=476901ad`, `HTR1=02e850c0`, and `PCR=2850` before normal
+`card0` registration.
+
+The unchanged XRGB8888 client completed all 20 validated page flips through
+vblank sequence 308 and remained alive holding the final frame. No conversion
+or kernel fault was logged. Direct observation confirmed the result looked
+correct. The checksum-verified restore then returned ownership to `gcn-vifb`
+and reloaded the accepted GX module.
+
+This accepts fixed NTSC 480i programming as the normal parameterless gcn-drm
+load behavior. Keep `program_mode=0` only for explicit compatibility tests.
+Proceed with a target-side SysV service that installs and loads the modular DRM
+stack, transfers VI ownership transactionally, exposes start/stop/status, and
+restores the legacy console automatically if startup fails.
