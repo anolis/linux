@@ -2708,3 +2708,39 @@ validate scanout with a dedicated dumb-buffer KMS test client. Revisit fbdev
 console support after basic atomic modesetting and vblank operation are proven;
 do not force the circular module set into the boot image merely to obtain a
 console.
+
+## 2026-07-31: Stage no-fbdev modular DRM/KMS handoff
+
+- No-fbdev implementation: `c0146e5c2`
+- Running modular-support zImage SHA-256:
+  `eedd96b4c140ff931848f7e275bef40332ac549a16567c6df527e67bf2cde6c5`
+- Rebuilt no-fbdev zImage SHA-256 (not deployed for this module-only test):
+  `923f94547fac0cca13b05c02303fc6c8c0d0cf3d11f99598c1d285229c5eac5d`
+- `drm_panel_orientation_quirks.ko` SHA-256:
+  `fa1e9862ec9379b26b572df3b4e93878f21e563264ad6fd8353a4f27dcadd1df`
+- `drm.ko` SHA-256:
+  `8dc6380087638e48c13aef507c983457c511ab7ea1f31fa69c87a9b1ffa3acd7`
+- `drm_kms_helper.ko` SHA-256:
+  `13563e78b9ecba7a907446fe1747f82b1a354c1c4a55a17c8a41198d38e3765b`
+- `drm_shmem_helper.ko` SHA-256:
+  `b7166b9ee61e88651119766f76979ed7891f748aa8b94330455071f3e86d86a8`
+- `gcn-drm.ko` SHA-256:
+  `0a3d86c3ee1d5adf30162560ee49f02a89b470ee3db836fda4b21e6eebe5fca4`
+- Cycle harness SHA-256:
+  `15d9af14725daea89615c04ecf86c616196dea00654d2fcbe9eba17542c85036`
+
+This configuration removes `DRM_CLIENT_SELECTION`, DRM fbdev emulation, and
+the default DRM client from the first KMS milestone. The resulting module
+dependency chain is acyclic: `drm_kms_helper.ko` no longer imports fb-helper or
+client-library symbols, and `gcn-drm.ko` depends only on DRM core, KMS helper,
+and shmem helper. The rebuilt modules have matching `6.18.40-wii+` vermagic, so
+the already booted checksum-accepted modular-support kernel can run this test
+without another card exchange.
+
+The cycle harness must first load all generic dependencies while `gcnfb` owns
+the VI. It may unload GX and unbind `gcnfb` only after that preflight passes.
+Acceptance requires `gcn-vi` to bind `c002000.video`, `/sys/class/drm/card0` to
+exist, SSH to remain responsive, and no kernel fault. No DRM fbdev client is
+present, so the display is expected to retain or freeze its last legacy frame;
+that is not a scanout verdict. Visible DRM output will be evaluated separately
+with a dedicated dumb-buffer KMS test client and a full-frame HDMI capture.
