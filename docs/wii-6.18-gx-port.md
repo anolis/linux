@@ -3187,3 +3187,25 @@ values when `program_mode=1`, but the test began with VI enabled and AVE state
 still inherited. Next explicitly disable VI before probe and require the same
 readback, KMS image, flip completion, and recovery to validate the inactive-VI
 entry path.
+
+## 2026-07-31: Stage default standalone-mode load
+
+- Default-mode implementation: `d8e6c8f46`
+- `gcn-drm.ko` SHA-256:
+  `5aac95f38e60cbe045719bea296065372f53ca1495c1ccea48f485862877ff3e`
+- Cycle harness SHA-256:
+  `6941c264720fd8a3c2560913d37c61fe8921198f591af9f03476df572fe45a74`
+- `wii-drm-test` SHA-256:
+  `d2aa7acc2fc097fb695d06b318543725c01ed39c5c6b53745a07849229430b50`
+
+Promote the accepted standalone VI programming path to the module default and
+retain `program_mode=0` only as an explicit inherited-mode compatibility path.
+Run the reversible cycle harness with `--no-build` and no mode parameter. This
+is specifically a parameterless-load test: do not pass `--program-mode`.
+
+Require the same programmed-register log and exact readback established by the
+preceding test, normal `card0` registration, then run the accepted XRGB8888
+client for 20 flips at 500 ms. Require all completion events, a clear observed
+pattern, responsive network, fault-free kernel, and successful restoration of
+the legacy GX console. Passing this gate makes standalone programming the
+accepted normal load behavior and unblocks an on-device boot service.
