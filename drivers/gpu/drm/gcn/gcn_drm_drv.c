@@ -179,7 +179,7 @@ static u32 gcn_drm_pack_yuyv(unsigned int r0, unsigned int g0,
 		      RGB2YUV_VB * b) >> RGB2YUV_SHIFT) + 128,
 		    (int)chroma_min, 240);
 
-	return y0 << 24 | cb << 16 | y1 << 8 | cr;
+	return y0 << 24 | cr << 16 | y1 << 8 | cb;
 }
 
 static u32 gcn_drm_rgb565_pair(u16 pixel0, u16 pixel1)
