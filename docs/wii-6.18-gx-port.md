@@ -2685,3 +2685,26 @@ This accepts the boot-only gate and rules out the modular image as having the
 built-in image's boot-wrapper failure. Proceed to the separately committed
 live handoff: upload and preflight all generic DRM modules while legacy output
 remains active, then transition the VI to `gcn-drm`.
+
+## 2026-07-31: Modular fbdev-emulation preflight stops safely
+
+The checksum-pinned cycle uploaded all six modules and successfully loaded
+`drm_panel_orientation_quirks.ko` and `drm.ko` while `gcnfb` and GX remained
+active. Loading `drm_client_lib.ko` then failed with unresolved fb-helper
+symbols including `drm_fb_helper_init`, `drm_fb_helper_lastclose`, and
+`drm_helper_disable_unused_functions`. Those symbols are exported by
+`drm_kms_helper.ko`, while that module in this configuration also imports
+client symbols from `drm_client_lib.ko`. The fully modular fbdev-emulation
+configuration therefore has a circular runtime load dependency.
+
+This was a successful safety negative control: the harness had not marked the
+display transition as started, did not unload GX, and did not unbind `gcnfb`.
+The accepted console and SSH remained active. No DRM VI code ran, so this is
+not a KMS rendering result.
+
+Remove fbdev emulation and the default DRM client from the first handoff
+milestone. Keep DRM core, KMS helper, shmem helper, and `gcn-drm` modular, and
+validate scanout with a dedicated dumb-buffer KMS test client. Revisit fbdev
+console support after basic atomic modesetting and vblank operation are proven;
+do not force the circular module set into the boot image merely to obtain a
+console.
