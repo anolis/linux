@@ -3437,3 +3437,21 @@ comparison and the preceding XRGB8888 color-identity claim are invalid.
 Keep RGB565 provisionally, correct only the 16-entry userspace palette into
 direct VGA attribute order, and repeat the labeled screen. Require all four
 labels to match before evaluating red blur or comparing source formats.
+
+## 2026-07-31: Stage corrected VCSA attribute palette
+
+- Palette implementation: `91df5e8b4`
+- Static stripped PowerPC binary size: `726988` bytes
+- `wii-drm-console` SHA-256:
+  `66fb1a55e46366bc2313ade57fcde11f401cd44b3e1487ab1de2fa13b3c6ea81`
+
+Repeat the RGB565 deterministic console screen with no changes except the
+16-entry direct VGA attribute-order palette. Require red, green, blue, and
+yellow labels to display as their named colors; cyan or red/blue reversal is a
+failure. Also recheck live frame-two update, cursor blink, process/kernel
+stability, graceful termination, and service recovery.
+
+Once color identity passes, obtain a fresh visual verdict on general text and
+the now-actually-red sample. This is the first valid RGB565 quality observation
+and must not be compared against the invalid prior color labels as if they were
+the same hue.
