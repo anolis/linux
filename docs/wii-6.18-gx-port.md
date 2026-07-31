@@ -2768,3 +2768,32 @@ Next test: clear bit 31 in every DI acknowledge, and quiesce all four DI sources
 before requesting the IRQ. Keep scanout and userspace modesetting out of this
 test; acceptance is limited to a responsive machine, `gcn-vi` binding, and
 `/sys/class/drm/card0` registration.
+
+## 2026-07-31: Stage corrected VI IRQ handoff test
+
+- Interrupt-fix implementation: `61c4a2498`
+- `gcn-drm.ko` SHA-256:
+  `a1b5538d4bdaacb31c7ff6f7ff4326d56d54f5ca7d4ba0a253f972e8ebead2a0`
+- `drm_panel_orientation_quirks.ko` SHA-256:
+  `fa1e9862ec9379b26b572df3b4e93878f21e563264ad6fd8353a4f27dcadd1df`
+- `drm.ko` SHA-256:
+  `8dc6380087638e48c13aef507c983457c511ab7ea1f31fa69c87a9b1ffa3acd7`
+- `drm_kms_helper.ko` SHA-256:
+  `13563e78b9ecba7a907446fe1747f82b1a354c1c4a55a17c8a41198d38e3765b`
+- `drm_shmem_helper.ko` SHA-256:
+  `b7166b9ee61e88651119766f76979ed7891f748aa8b94330455071f3e86d86a8`
+- Cycle harness SHA-256:
+  `15d9af14725daea89615c04ecf86c616196dea00654d2fcbe9eba17542c85036`
+
+Only `gcn-drm.ko` changed from the rejected test. It now disables every VI DI
+source before requesting the IRQ, preserves the programmed timing coordinates,
+and clears asserted status by writing bit 31 as zero. Probe-stage messages were
+added after allocation, mapping, mode-object setup, vblank setup, interrupt
+quiesce, and IRQ installation.
+
+After a cold reboot restores the accepted modular-support kernel and legacy
+console, rerun the normal cycle with fresh uploads. Acceptance requires the
+cycle to return normally, `gcn-vi` to own `c002000.video`, `card0` to exist,
+SSH and ping to remain responsive for at least 30 seconds, and no kernel fault.
+Do not grade the frozen legacy frame: no framebuffer client or KMS test buffer
+is active in this milestone.
