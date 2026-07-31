@@ -3594,3 +3594,25 @@ stable client/network/kernel, automatic service SIGTERM and wait, complete DRM
 module removal, and clear legacy recovery. Passing this test restores the
 combined service/client milestone and permits a separate missing-client
 rollback control before boot enablement.
+
+## 2026-07-31: Reject explicit little-endian RGB565 storage
+
+The deployed console matched SHA-256
+`f669351dd045377d2f1c65afecc94d21ff95a8bdddaea778918f8790f197283f`
+and reported `640x480 rgb565`. The labeled-color gate failed decisively: red
+was very dark red, green was dark purple, blue was lime green, and yellow/gold
+was purple. The `Expected: RED GREEN BLUE GOLD` line, live-update line, and
+cursor label all appeared green rather than their intended VGA colors.
+
+This mapping rejects explicit low-byte/high-byte RGB565 writes on the Wii's
+big-endian PowerPC path. In particular, green RGB565 `0x0540` becomes `0x4005`
+when its bytes are reversed, which explains the observed purple, while blue
+`0x0015` becomes `0x1500`, which explains the observed lime green. The kernel
+conversion path therefore consumes these dumb-buffer pixels as native 16-bit
+PowerPC values despite the generic DRM format naming convention.
+
+The service stopped its exact client PID, restored VI ownership to `gcn-vifb`,
+left only `gcn_gx` loaded, and logged no new kernel fault. Restore native
+`uint16_t` RGB565 stores while retaining the independently validated VGA/BGR
+attribute palette. Re-run the same explicit label-by-label RGB565 test before
+attempting the missing-client rollback control or boot runlevel enablement.
