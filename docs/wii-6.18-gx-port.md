@@ -2797,3 +2797,27 @@ cycle to return normally, `gcn-vi` to own `c002000.video`, `card0` to exist,
 SSH and ping to remain responsive for at least 30 seconds, and no kernel fault.
 Do not grade the frozen legacy frame: no framebuffer client or KMS test buffer
 is active in this milestone.
+
+## 2026-07-31: Accept corrected VI IRQ handoff and card0 registration
+
+The checksum-pinned `c390a0dca` cycle completed normally with
+`gcn-drm.ko` SHA-256
+`a1b5538d4bdaacb31c7ff6f7ff4326d56d54f5ca7d4ba0a253f972e8ebead2a0`.
+Every probe-stage marker appeared: DRM allocation, VI/XFB mapping, mode-object
+initialization, vblank initialization, VI interrupt quiesce, and IRQ install.
+DRM core then registered `gcn-vi 1.0.0` on minor 0 and reported the fixed
+640x480 handoff mode with XFB reservation `01698000+00168000`.
+
+The display stopped changing after legacy `gcnfb` was unbound, which initially
+looked like another crash. This was the expected no-fbdev result, not a machine
+failure. After a 30-second soak, all three ICMP requests succeeded, SSH remained
+responsive, `c002000.video` was still bound to `gcn-vi`, and `/sys/class/drm`
+contained `card0` and `card0-Composite-1`. Uptime continued advancing and the
+fault scan found no BUG, Oops, panic, machine check, unhandled access, or
+watchdog report.
+
+This validates the VI interrupt correction and accepts the first modular DRM
+probe/registration milestone. Keep `gcn-drm` active. Next, run a dedicated
+dumb-buffer KMS client that creates a 640x480 XRGB8888 framebuffer, draws a
+deterministic full-frame pattern, and performs the first userspace modeset.
+Only HDMI capture and direct visual inspection can accept scanout correctness.
