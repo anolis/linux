@@ -3792,3 +3792,30 @@ plus different visual color would indicate that the compared runs did not
 share the same hardware state and must be repeated; swapped XRGB source or
 YUYV would identify the cancellation that made the prior XRGB console appear
 correct. Recover legacy ownership and require no fault afterward.
+
+## 2026-07-31: Paired rerun retracts prior XRGB color pass
+
+The user warned that one earlier visual answer may have been incorrect, so the
+previous XRGB8888 color acceptance is retracted. A controlled paired rerun used
+one module load, one VI programming sequence, one DRM ownership interval, and
+the exact same static pattern utility. Only the userspace framebuffer format
+changed between tests.
+
+RGB565 displayed top-left blue, top-right green, bottom-right white,
+bottom-left red, and a magenta/gold checkerboard. XRGB8888 then displayed the
+exact same blue, green, white, red quadrants and magenta/gold checkerboard.
+Thus both formats exchange red with blue and cyan with yellow while preserving
+green, white, and magenta.
+
+The matched driver diagnostics independently logged standard source words for
+both formats and effectively identical packed outputs for each color. Source
+red produced `yuyv=725a72ef` in both paths; source blue produced
+`yuyv=5de45d60` for RGB565 and `yuyv=5ce45c60` for XRGB8888. The small luma
+difference is expected from 5:6:5 quantization and cannot explain a hue swap.
+
+This resolves the prior contradiction and localizes the defect to the shared
+XFB word layout. On this DRM scanout path, the VI interprets the two chroma
+positions opposite the driver's current `Y0,Cb,Y1,Cr` packing. Change only
+`gcn_drm_pack_yuyv()` to emit `Y0,Cr,Y1,Cb`, retain all coefficients and source
+decoders, and repeat the same paired visual test. Keep the one-shot diagnostics
+for that validation, then remove them after the corrected output is accepted.
