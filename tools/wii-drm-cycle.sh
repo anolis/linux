@@ -73,12 +73,16 @@ legacy_driver=/sys/bus/platform/drivers/gcn-vifb
 drm_driver=/sys/bus/platform/drivers/gcn-vi
 
 module_paths=(
+	drivers/gpu/drm/drm_panel_orientation_quirks.ko
+	drivers/gpu/drm/drm.ko
 	drivers/gpu/drm/clients/drm_client_lib.ko
 	drivers/gpu/drm/drm_kms_helper.ko
 	drivers/gpu/drm/drm_shmem_helper.ko
 	drivers/gpu/drm/gcn/gcn-drm.ko
 )
 remote_modules=(
+	/tmp/drm_panel_orientation_quirks.ko
+	/tmp/drm.ko
 	/tmp/drm_client_lib.ko
 	/tmp/drm_kms_helper.ko
 	/tmp/drm_shmem_helper.ko
@@ -143,6 +147,8 @@ restore_legacy()
 		rmmod drm_shmem_helper 2>/dev/null
 		rmmod drm_kms_helper 2>/dev/null
 		rmmod drm_client_lib 2>/dev/null
+		rmmod drm 2>/dev/null
+		rmmod drm_panel_orientation_quirks 2>/dev/null
 		if [ ! -e $legacy_driver/$device ]; then
 			printf '%s' '$device' > $legacy_driver/bind
 		fi
@@ -178,11 +184,6 @@ if (( restore_only )); then
 	exit 0
 fi
 
-remote_exec "test -d /sys/module/drm" || {
-	echo "Running Wii kernel has no built-in DRM core; deploy the staged zImage first." >&2
-	exit 1
-}
-
 for module in "${module_paths[@]}"; do
 	if [[ ! -f $module ]]; then
 		echo "DRM module not found: $module" >&2
@@ -213,6 +214,13 @@ for i in "${!module_paths[@]}"; do
 	remote_exec "mv -f $remote_module.new $remote_module"
 done
 
+remote_status "preflighting generic DRM modules"
+remote_exec "grep -q '^drm_panel_orientation_quirks ' /proc/modules || insmod /tmp/drm_panel_orientation_quirks.ko"
+remote_exec "grep -q '^drm ' /proc/modules || insmod /tmp/drm.ko"
+remote_exec "grep -q '^drm_client_lib ' /proc/modules || insmod /tmp/drm_client_lib.ko"
+remote_exec "grep -q '^drm_kms_helper ' /proc/modules || insmod /tmp/drm_kms_helper.ko"
+remote_exec "grep -q '^drm_shmem_helper ' /proc/modules || insmod /tmp/drm_shmem_helper.ko"
+
 remote_exec "test -e $legacy_driver/$device" || {
 	echo "Legacy gcnfb is not bound to $device; refusing ambiguous transition." >&2
 	exit 1
@@ -225,11 +233,6 @@ remote_exec "printf '\\n=== DRM CYCLE: UNBINDING LEGACY GCNFB ===\\n' > /dev/tty
 
 remote_status "unbinding legacy gcnfb"
 remote_exec "printf '%s' '$device' > $legacy_driver/unbind"
-
-remote_status "loading DRM helper modules"
-remote_exec "insmod /tmp/drm_client_lib.ko"
-remote_exec "insmod /tmp/drm_kms_helper.ko"
-remote_exec "insmod /tmp/drm_shmem_helper.ko"
 
 remote_status "loading gcn-drm $commit"
 remote_exec "insmod /tmp/gcn-drm.ko"
