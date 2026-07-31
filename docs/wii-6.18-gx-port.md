@@ -3573,3 +3573,24 @@ through native `uint16_t` stores. Emit the low byte then high byte explicitly,
 leaving driver conversion, format advertisement, palette, font, and XRGB8888
 untouched. Repeat the labeled RGB565 service-managed screen before restoring
 automatic boot-client work.
+
+## 2026-07-31: Stage little-endian RGB565 console storage
+
+- Storage implementation: `ecc7a253d`
+- Static stripped PowerPC binary size: `726988` bytes
+- `wii-drm-console` SHA-256:
+  `f669351dd045377d2f1c65afecc94d21ff95a8bdddaea778918f8790f197283f`
+- Client-aware service SHA-256:
+  `74229640ab480c2eb5488acb296029af9827eaf5609e63e08d9058060214476b`
+
+Install the new console at `/usr/local/sbin/wii-drm-console` and run the normal
+service-managed transaction with no `/etc/default/wii-drm` override. Require
+automatic client startup and an `rgb565` log, then write the same explicit red,
+green, blue, and yellow/gold labels.
+
+All four labels must match their named colors. Require red clarity at least as
+good as the corrected-palette observation, plus live tty update, cursor blink,
+stable client/network/kernel, automatic service SIGTERM and wait, complete DRM
+module removal, and clear legacy recovery. Passing this test restores the
+combined service/client milestone and permits a separate missing-client
+rollback control before boot enablement.
