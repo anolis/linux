@@ -2569,3 +2569,34 @@ gates.
 Together with the preceding RGB565 result, this accepts the source-dedup
 removal as the hardened accelerated-framebuffer baseline. Preserve this point
 on `feature/wii-6.18-gx-port` before starting DRM/KMS work on a separate branch.
+
+## 2026-07-30: Stage initial DRM/KMS handoff test
+
+- Driver implementation: `a3be82c15`
+- Reversible cycle harness: `8ee824b2b`
+- DRM-enabled zImage SHA-256:
+  `9260b832144d3846f9a3a4793b5357d626f61a32ef1b82497d50a9b61da45804`
+- `drm_client_lib.ko` SHA-256:
+  `3ab425eed71096a01e1090a9544debff2a3f7162e2fda35eb1d2e04afad8abc1`
+- `drm_kms_helper.ko` SHA-256:
+  `7a6ffc191f0cd3fb7b4dee94edeedccf9d3a1e51168c1e34b4625d39bb068865`
+- `drm_shmem_helper.ko` SHA-256:
+  `ee436abd8d0fc7f3ae26347917800ada03ffe4bca395878c4751d1f6c03f242a`
+- `gcn-drm.ko` SHA-256:
+  `0729449d311c30af612a42b24cc77aef75b2d738b6656a155e56af886007cf60`
+- Cycle harness SHA-256:
+  `c716251d2f5937ed27d31d1463bb5749033ad68e051ce7bd80d93dc67d3fc87b`
+
+This is the first DRM/KMS hardware test. The kernel contains built-in DRM core
+while retaining built-in `gcnfb`; the KMS, shmem, client, and Wii VI drivers
+remain modules. Boot must first reach the accepted `gcnfb` console and SSH.
+The cycle harness then checksum-verifies every uploaded module, unloads GX,
+unbinds `gcnfb`, loads the DRM dependency set, and binds `gcn-drm` to
+`c002000.video`. Any failed transition automatically unloads DRM in reverse
+order and rebinds `gcnfb`.
+
+Acceptance requires `/sys/class/drm/card0`, the `gcn-vi` platform binding, a
+new DRM fbdev console, continuing SSH access, and no kernel fault. Capture the
+HDMI output after binding and open the PNG in GIMP for visual grading; do not
+infer image correctness from registration logs. Finally run the explicit
+restore path and require the accepted clear, responsive `gcnfb`/GX console.
