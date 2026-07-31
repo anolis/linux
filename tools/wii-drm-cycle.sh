@@ -14,6 +14,7 @@ Options:
   --host HOST      Wii address (default: WII_SSH_HOST or 10.3.10.12)
   --no-build       reuse the current zImage and DRM module artifacts
   --reuse-remote   verify and reuse checksum-matched modules in /tmp
+  --program-mode   have gcn-drm program fixed NTSC 480i VI timing
   --restore        unload DRM and restore legacy gcnfb/GX
   --allow-dirty    permit loading artifacts from an uncommitted tree
 
@@ -27,6 +28,7 @@ build=1
 reuse_remote=0
 restore_only=0
 allow_dirty=0
+program_mode=0
 
 while (($#)); do
 	case "$1" in
@@ -39,6 +41,9 @@ while (($#)); do
 		;;
 	--reuse-remote)
 		reuse_remote=1
+		;;
+	--program-mode)
+		program_mode=1
 		;;
 	--restore)
 		restore_only=1
@@ -249,7 +254,11 @@ remote_status "unbinding legacy gcnfb"
 remote_exec "printf '%s' '$device' > $legacy_driver/unbind"
 
 remote_status "loading gcn-drm $commit"
-remote_exec "insmod /tmp/gcn-drm.ko"
+if (( program_mode )); then
+	remote_exec "insmod /tmp/gcn-drm.ko program_mode=1"
+else
+	remote_exec "insmod /tmp/gcn-drm.ko"
+fi
 remote_exec "test -e $drm_driver/$device"
 remote_exec "test -e /sys/class/drm/card0"
 remote_exec "printf '\\n=== GCN DRM/KMS ACTIVE: $commit ===\\n' > /dev/tty0"
