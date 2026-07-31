@@ -3228,3 +3228,35 @@ load behavior. Keep `program_mode=0` only for explicit compatibility tests.
 Proceed with a target-side SysV service that installs and loads the modular DRM
 stack, transfers VI ownership transactionally, exposes start/stop/status, and
 restores the legacy console automatically if startup fails.
+
+## 2026-07-31: Stage target-side DRM ownership service
+
+- Init-service implementation: `8d9899220`
+- `wii-drm-init` SHA-256:
+  `fbc5a646a54a8afa7eb53d6bb3f98d41920f7cbded329c51a630ed508014d87e`
+- `gcn-drm.ko` SHA-256:
+  `5aac95f38e60cbe045719bea296065372f53ca1495c1ccea48f485862877ff3e`
+- `drm.ko` SHA-256:
+  `8dc6380087638e48c13aef507c983457c511ab7ea1f31fa69c87a9b1ffa3acd7`
+- `drm_kms_helper.ko` SHA-256:
+  `13563e78b9ecba7a907446fe1747f82b1a354c1c4a55a17c8a41198d38e3765b`
+- `drm_shmem_helper.ko` SHA-256:
+  `b7166b9ee61e88651119766f76979ed7891f748aa8b94330455071f3e86d86a8`
+- `drm_panel_orientation_quirks.ko` SHA-256:
+  `fa1e9862ec9379b26b572df3b4e93878f21e563264ad6fd8353a4f27dcadd1df`
+- Accepted `gcn-gx.ko` SHA-256:
+  `88474048238caad1e992ca961969f6d42b07fece9fa5438937deac94720dffe1`
+
+Install the exact modules into `/lib/modules/6.18.40-wii+`, run `depmod -a`,
+and install the service as `/etc/init.d/wii-drm`. Do not create runlevel links
+in this test; boot behavior must remain unchanged.
+
+From the accepted legacy console, require `service wii-drm status` to identify
+legacy ownership, then run `service wii-drm start`. Require dependency
+preflight, GX unload, gcnfb unbind, parameterless gcn-drm load, `card0`, and
+DRM ownership. Run the accepted 20-flip XRGB8888 client and require the known
+correct image, events, network, and fault gates. Terminate the client, run
+`service wii-drm stop`, and require gcn-drm unload, gcnfb rebind, GX reload,
+clear legacy output, and an idempotent final status. Any start failure must
+restore legacy ownership automatically; never enable the service at boot until
+this full manual transaction passes.
