@@ -2478,3 +2478,26 @@ Promote the identical deployed kernel/module and static workload to a
 least 27 fps, correct tear-free output throughout, positive PE progress, no
 kernel timeout or fault, automatic `source_dedup=0` restoration, and a clear
 responsive console after completion.
+
+## 2026-07-30: Baseline-direct passes 120-second RGB888 acceptance
+
+The promoted baseline-direct candidate completed 3,367 frames in 120.047
+seconds, or 28.05 fps, with `source_dedup=0`. It recorded 7,296 PE finish
+interrupts (60.80 per second), 11,173 us average direct draw time, effectively
+zero copy time, and 22,048 us average pan time. Kernel conversion converged to
+11,691 us average by worker frame 3,328; its maximum was 36,963 us. Texture
+flush averaged 267 us with an 8,362 us maximum.
+
+The workload exited normally and the harness reported zero screened fault
+signatures. No source-generation timeout or kernel fault appeared in the test
+log. The user reported that output seemed good and that the restored console
+was clear. A final live-state check showed
+`/sys/module/gcn_gx/parameters/source_dedup` as `N` and the `gcn_gx` module
+loaded normally.
+
+This passes the 120-second RGB888 throughput, PE-progress, visual, fault, and
+recovery criteria. The accelerated framebuffer path can sustain the target
+when userspace renders directly into the inactive VFB page and synchronizes
+with `FBIOPAN_DISPLAY`. Keep source deduplication disabled; it provides no
+throughput gain and was visually unacceptable. The staged-copy result is an
+application memory-traffic limitation, not a GX driver throughput failure.
