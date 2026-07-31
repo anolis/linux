@@ -3089,3 +3089,16 @@ sure. Accept the allocation, format selection, conversion, event, and stability
 gates. Keep final visual acceptance provisional until an identical independent
 confirmation explicitly verifies colors, geometry, checker/grid clarity,
 marker motion, tearing, and corruption.
+
+## 2026-07-31: Stage independent RGB565 confirmation run
+
+Repeat the exact checksum-pinned RGB565 test from commit `51150fead` with no
+source, binary, module, or parameter changes:
+
+```sh
+/tmp/wii-drm-test --format rgb565 --flips 20 --delay-ms 500
+```
+
+Require the same 1280-byte pitch, 20 completion events, live final frame, and
+stable network/kernel state. The visual verdict must explicitly cover colors,
+geometry, checker/grid clarity, marker motion, tearing, and corruption.
