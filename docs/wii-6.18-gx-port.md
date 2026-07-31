@@ -3455,3 +3455,26 @@ Once color identity passes, obtain a fresh visual verdict on general text and
 the now-actually-red sample. This is the first valid RGB565 quality observation
 and must not be compared against the invalid prior color labels as if they were
 the same hue.
+
+## 2026-07-31: Accept RGB565 virtual-console mirror and VGA palette
+
+The uploaded artifact matched SHA-256
+`66fb1a55e46366bc2313ade57fcde11f401cd44b3e1487ab1de2fa13b3c6ea81`
+and reported `640x480 rgb565` with the 80x25 post-unbind VCSA geometry. The
+deterministic screen reached `FRAME TWO - UPDATE PASSED`, the cursor blinked,
+the process remained alive, and no page-flip, conversion, or kernel fault was
+logged.
+
+Direct observation confirmed that red, green, blue, and yellow now matched
+their labels. The user reported that the corrected actual red was clearer and
+everything else looked great. This is the first valid labeled-color result and
+accepts both direct VGA attribute-order palette mapping and RGB565 as the
+console mirror default.
+
+SIGTERM again produced a clean process exit. The accepted service restored
+gcnfb/GX, removed the full DRM stack, retained SSH, and left only `gcn_gx`
+loaded with no fault. Proceed to service integration: install the accepted
+console artifact persistently, have `wii-drm start` launch and verify it after
+`card0`, and have `stop` terminate and wait for it before unbinding DRM. Keep
+boot runlevel enablement separate until the combined service/client transaction
+passes and its failure rollback is validated.
