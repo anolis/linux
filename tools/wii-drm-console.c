@@ -148,17 +148,12 @@ static void draw_console(void *map, __u32 pitch,
 						glyph[glyph_y] & BIT(7 - glyph_x) ?
 						foreground : background;
 
-					if (format == TEST_FORMAT_RGB565) {
-						uint16_t rgb565 = xrgb8888_to_rgb565(color);
-						size_t offset =
-							2 * (pixel_x + glyph_x);
-
-						pixel_row[offset] = rgb565;
-						pixel_row[offset + 1] = rgb565 >> 8;
-					} else {
+					if (format == TEST_FORMAT_RGB565)
+						((uint16_t *)pixel_row)[pixel_x + glyph_x] =
+							xrgb8888_to_rgb565(color);
+					else
 						((uint32_t *)pixel_row)[pixel_x + glyph_x] =
 							color;
-					}
 				}
 			}
 		}
