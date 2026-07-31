@@ -2966,3 +2966,36 @@ confirmed the console remained clear throughout the idempotent restore.
 This accepts the artifact-upload fix and makes both normal rollback and
 restore-only operation independent of prior `/tmp` contents. Proceed to the
 two-buffer vblank/page-flip milestone.
+
+## 2026-07-31: Stage first vblank-synchronized page-flip test
+
+- Page-flip client implementation: `ac1957769`
+- Static stripped PowerPC binary size: `726988` bytes
+- `wii-drm-test` SHA-256:
+  `c4f81f793ca7bdb96909db32da51bafd300d06611289b790eecbbe6693bdefc0`
+- Cycle harness SHA-256:
+  `65914374d9a44b371c14c11a42ec994d7ebf346345452228cfcf5c773bcafbd6`
+- `gcn-drm.ko` SHA-256:
+  `a1b5538d4bdaacb31c7ff6f7ff4326d56d54f5ca7d4ba0a253f972e8ebead2a0`
+- Accepted `gcn-gx.ko` SHA-256:
+  `88474048238caad1e992ca961969f6d42b07fece9fa5438937deac94720dffe1`
+
+Use the self-contained cycle harness to transition from the accepted legacy
+console to `gcn-drm`, then remotely verify and launch:
+
+```sh
+/tmp/wii-drm-test --flips 20 --delay-ms 500
+```
+
+The initial frame and both flip buffers retain the accepted quadrant, grid,
+border, and center-checker pattern. Buffer 0 adds a yellow vertical marker near
+the left; buffer 1 adds one near the right. Each page-flip ioctl requests an
+event and the client refuses to submit the next flip until it receives a valid
+`DRM_EVENT_FLIP_COMPLETE` with the exact expected user-data value. The timeout
+is two seconds per event.
+
+Acceptance requires `flips=20` with a nonzero final vblank sequence, a live
+client holding the final frame, responsive SSH/ping, and no kernel fault or
+conversion failure. Direct observation must show a clear base pattern with the
+yellow marker alternating left/right at roughly two positions per second and
+must note any tearing, corruption, missed transition, or instability.
