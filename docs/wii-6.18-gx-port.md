@@ -3553,3 +3553,23 @@ cleanup gates. Remove the temporary `/etc/default/wii-drm` override afterward.
 Correct four-color output constrains the implementation fix to RGB565's
 little-endian storage. Any analogous red/blue swap requires a shared format
 contract correction before further console integration.
+
+## 2026-07-31: XRGB8888 control constrains bug to RGB565 storage
+
+The exact console binary reported `640x480 xrgb8888` and remained stable. The
+user explicitly confirmed red, green, blue, and yellow/gold each appeared as
+their label. The non-bright ANSI 33 sample looked more gold than pure yellow,
+which is correct for the canonical VGA brown/dark-yellow value `0xaa5500`;
+bright ANSI 93 maps separately to `0xffff55`.
+
+The manual client exited cleanly, the service restored gcnfb/GX and removed all
+DRM modules, and the temporary `WII_DRM_CLIENT=` override was deleted. No fault
+appeared.
+
+This validates the corrected VCSA palette and XRGB8888 channel order. Constrain
+the next implementation to RGB565 client storage: DRM_FORMAT_RGB565 is defined
+as little-endian, but the big-endian PowerPC console writes converted values
+through native `uint16_t` stores. Emit the low byte then high byte explicitly,
+leaving driver conversion, format advertisement, palette, font, and XRGB8888
+untouched. Repeat the labeled RGB565 service-managed screen before restoring
+automatic boot-client work.
