@@ -29,6 +29,11 @@ struct test_buffer {
 	void *map;
 };
 
+enum test_pixel_format {
+	TEST_FORMAT_XRGB8888,
+	TEST_FORMAT_RGB565,
+};
+
 static volatile sig_atomic_t stop;
 
 static void handle_signal(int signo)
@@ -169,47 +174,64 @@ static int select_output(int fd, const struct drm_mode_card_res *res,
 	return -1;
 }
 
-static void draw_pattern(void *map, __u32 pitch, int marker_x)
+static uint32_t pattern_color(unsigned int x, unsigned int y, int marker_x)
 {
 	static const uint32_t colors[4] = {
 		0x00ff2020, 0x0020ff20, 0x002040ff, 0x00ffffff,
 	};
+	unsigned int quadrant = (y >= TEST_HEIGHT / 2) * 2 +
+				  (x >= TEST_WIDTH / 2);
+	uint32_t pixel = colors[quadrant];
+
+	if (x < 8 || x >= TEST_WIDTH - 8 || y < 8 ||
+	    y >= TEST_HEIGHT - 8)
+		pixel = 0x00ffffff;
+	else if ((x % 80) < 3 || (y % 60) < 3)
+		pixel = 0x00000000;
+	if (x >= 240 && x < 400 && y >= 180 && y < 300)
+		pixel = ((x / 10) ^ (y / 10)) & 1 ?
+			0x00ff00ff : 0x0000ffff;
+	if (marker_x >= 0 && x >= (unsigned int)marker_x &&
+	    x < (unsigned int)marker_x + 16 && y >= 32 &&
+	    y < TEST_HEIGHT - 32)
+		pixel = 0x00ffff00;
+	return pixel;
+}
+
+static uint16_t xrgb8888_to_rgb565(uint32_t pixel)
+{
+	return ((pixel >> 19) & 0x1f) << 11 |
+	       ((pixel >> 10) & 0x3f) << 5 |
+	       ((pixel >> 3) & 0x1f);
+}
+
+static void draw_pattern(void *map, __u32 pitch, int marker_x,
+			 enum test_pixel_format format)
+{
 	unsigned int x;
 	unsigned int y;
 
 	for (y = 0; y < TEST_HEIGHT; y++) {
-		uint32_t *row = (uint32_t *)((uint8_t *)map +
-					       (size_t)y * pitch);
+		uint8_t *row = (uint8_t *)map + (size_t)y * pitch;
 
-		for (x = 0; x < TEST_WIDTH; x++) {
-			unsigned int quadrant = (y >= TEST_HEIGHT / 2) * 2 +
-						  (x >= TEST_WIDTH / 2);
-			uint32_t pixel = colors[quadrant];
-
-			if (x < 8 || x >= TEST_WIDTH - 8 || y < 8 ||
-			    y >= TEST_HEIGHT - 8)
-				pixel = 0x00ffffff;
-			else if ((x % 80) < 3 || (y % 60) < 3)
-				pixel = 0x00000000;
-			if (x >= 240 && x < 400 && y >= 180 && y < 300)
-				pixel = ((x / 10) ^ (y / 10)) & 1 ?
-					0x00ff00ff : 0x0000ffff;
-			if (marker_x >= 0 && x >= (unsigned int)marker_x &&
-			    x < (unsigned int)marker_x + 16 && y >= 32 &&
-			    y < TEST_HEIGHT - 32)
-				pixel = 0x00ffff00;
-			row[x] = pixel;
-		}
+		for (x = 0; x < TEST_WIDTH; x++)
+			if (format == TEST_FORMAT_RGB565)
+				((uint16_t *)row)[x] = xrgb8888_to_rgb565(
+					pattern_color(x, y, marker_x));
+			else
+				((uint32_t *)row)[x] = pattern_color(x, y,
+								marker_x);
 	}
 }
 
-static int create_buffer(int fd, struct test_buffer *buffer, int marker_x)
+static int create_buffer(int fd, struct test_buffer *buffer, int marker_x,
+			 enum test_pixel_format format)
 {
 	memset(buffer, 0, sizeof(*buffer));
 	buffer->map = MAP_FAILED;
 	buffer->create.width = TEST_WIDTH;
 	buffer->create.height = TEST_HEIGHT;
-	buffer->create.bpp = 32;
+	buffer->create.bpp = format == TEST_FORMAT_RGB565 ? 16 : 32;
 	if (xioctl(fd, DRM_IOCTL_MODE_CREATE_DUMB, &buffer->create) < 0)
 		return -1;
 
@@ -221,13 +243,13 @@ static int create_buffer(int fd, struct test_buffer *buffer, int marker_x)
 			   MAP_SHARED, fd, buffer->map_req.offset);
 	if (buffer->map == MAP_FAILED)
 		return -1;
-	draw_pattern(buffer->map, buffer->create.pitch, marker_x);
+	draw_pattern(buffer->map, buffer->create.pitch, marker_x, format);
 
 	buffer->fb.width = TEST_WIDTH;
 	buffer->fb.height = TEST_HEIGHT;
 	buffer->fb.pitch = buffer->create.pitch;
-	buffer->fb.bpp = 32;
-	buffer->fb.depth = 24;
+	buffer->fb.bpp = buffer->create.bpp;
+	buffer->fb.depth = format == TEST_FORMAT_RGB565 ? 16 : 24;
 	buffer->fb.handle = buffer->create.handle;
 	if (xioctl(fd, DRM_IOCTL_MODE_ADDFB, &buffer->fb) < 0)
 		return -1;
@@ -341,9 +363,8 @@ static int run_flips(int fd, __u32 crtc_id, struct test_buffer *buffers,
 
 static void usage(const char *program)
 {
-	fprintf(stderr,
-		"Usage: %s [--flips COUNT] [--delay-ms MSEC] [CARD]\n",
-		program);
+	fprintf(stderr, "Usage: %s [--format xrgb8888|rgb565] ", program);
+	fprintf(stderr, "[--flips COUNT] [--delay-ms MSEC] [CARD]\n");
 }
 
 int main(int argc, char **argv)
@@ -364,11 +385,27 @@ int main(int argc, char **argv)
 	unsigned int buffer_count;
 	unsigned int created = 0;
 	unsigned int i;
+	enum test_pixel_format format = TEST_FORMAT_XRGB8888;
 	int card_set = 0;
 	int fd = -1;
 	int status = EXIT_FAILURE;
 
 	for (i = 1; i < (unsigned int)argc; i++) {
+		if (!strcmp(argv[i], "--format")) {
+			if (++i >= (unsigned int)argc) {
+				usage(argv[0]);
+				return EXIT_FAILURE;
+			}
+			if (!strcmp(argv[i], "xrgb8888"))
+				format = TEST_FORMAT_XRGB8888;
+			else if (!strcmp(argv[i], "rgb565"))
+				format = TEST_FORMAT_RGB565;
+			else {
+				usage(argv[0]);
+				return EXIT_FAILURE;
+			}
+			continue;
+		}
 		if (!strcmp(argv[i], "--flips")) {
 			if (++i >= (unsigned int)argc) {
 				usage(argv[0]);
@@ -428,7 +465,7 @@ int main(int argc, char **argv)
 	for (i = 0; i < buffer_count; i++) {
 		int marker_x = flip_count ? (i ? 544 : 80) : -1;
 
-		if (create_buffer(fd, &buffers[i], marker_x) < 0) {
+		if (create_buffer(fd, &buffers[i], marker_x, format) < 0) {
 			created = i + 1;
 			perror("create dumb framebuffer");
 			goto out;
@@ -450,6 +487,8 @@ int main(int argc, char **argv)
 	printf("wii-drm-test: active %ux%u %s crtc=%u connector=%u\n",
 	       mode.hdisplay, mode.vdisplay, mode.name, crtc.crtc_id,
 	       connector_id);
+	printf("wii-drm-test: format=%s\n",
+	       format == TEST_FORMAT_RGB565 ? "rgb565" : "xrgb8888");
 	for (i = 0; i < buffer_count; i++) {
 		printf("wii-drm-test: buffer=%u fb=%u handle=%u pitch=%u",
 		       i, buffers[i].fb.fb_id, buffers[i].create.handle,
