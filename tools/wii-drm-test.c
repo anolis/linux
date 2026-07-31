@@ -254,10 +254,6 @@ int main(int argc, char **argv)
 		goto out;
 	}
 	draw_pattern(map, create.pitch);
-	if (msync(map, create.size, MS_SYNC) < 0) {
-		perror("msync dumb buffer");
-		goto out;
-	}
 
 	fb.width = TEST_WIDTH;
 	fb.height = TEST_HEIGHT;
