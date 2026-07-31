@@ -34,13 +34,39 @@
 #define GCN_DRM_XFB_PITCH	(GCN_DRM_WIDTH * 2)
 #define GCN_DRM_XFB_PAGE_SIZE	(GCN_DRM_XFB_PITCH * GCN_DRM_HEIGHT)
 
+#define VI_VTR			0x00
 #define VI_DCR			0x02
+#define VI_HTR0			0x04
+#define VI_HTR1			0x08
+#define VI_VTO			0x0c
+#define VI_VTE			0x10
+#define VI_BBOI			0x14
+#define VI_BBEI			0x18
 #define VI_TFBL			0x1c
+#define VI_TFBR			0x20
 #define VI_BFBL			0x24
+#define VI_BFBR			0x28
 #define VI_DI0			0x30
 #define VI_DI1			0x34
 #define VI_DI2			0x38
 #define VI_DI3			0x3c
+#define VI_PCR			0x48
+#define VI_HSR			0x4a
+#define VI_FCT0			0x4c
+#define VI_FCT1			0x50
+#define VI_FCT2			0x54
+#define VI_FCT3			0x58
+#define VI_FCT4			0x5c
+#define VI_FCT5			0x60
+#define VI_FCT6			0x64
+#define VI_AA			0x68
+#define VI_CLK			0x6c
+#define VI_HSW			0x70
+#define VI_HBE			0x72
+#define VI_HBS			0x74
+#define VI_UNK1			0x76
+#define VI_UNK2			0x78
+#define VI_UNK3			0x7c
 
 #define VI_DCR_NIN		BIT(2)
 #define VI_DCR_ENABLE		BIT(0)
@@ -48,6 +74,18 @@
 #define VI_DI_ENABLE		BIT(28)
 #define VI_FB_POB		BIT(28)
 #define VI_FB_XOF_SHIFT		24
+
+#define VI_NTSC_VTR		0x0f06
+#define VI_NTSC_HTR0		0x476901ad
+#define VI_NTSC_HTR1		0x02e850c0
+#define VI_NTSC_VTO		0x00030018
+#define VI_NTSC_VTE		0x00020019
+#define VI_NTSC_BBOI		0x410c410c
+#define VI_NTSC_BBEI		0x40ed40ed
+#define VI_NTSC_PCR		0x2850
+#define VI_NTSC_HSR		0x0100
+#define VI_NTSC_DI0		0x00010001
+#define VI_NTSC_DI1		0x00f101ae
 
 #define RGB2YUV_SHIFT		16
 #define RGB2YUV_LUMA_565		16
@@ -77,6 +115,16 @@ struct gcn_drm {
 	unsigned int visible_page;
 	unsigned int pending_page;
 	bool flip_pending;
+};
+
+static bool program_mode;
+module_param(program_mode, bool, 0444);
+MODULE_PARM_DESC(program_mode,
+		 "program a fixed 640x480 NTSC interlaced VI mode");
+
+static const u32 gcn_drm_vi_filter[] = {
+	0x1ae771f0, 0x0db4a574, 0x00c1188e, 0xc4c0cbe2,
+	0xfcecdecf, 0x13130f08, 0x00080c0f,
 };
 
 static inline struct gcn_drm *to_gcn_drm(struct drm_device *drm)
@@ -254,6 +302,59 @@ static void gcn_drm_quiesce_irqs(struct gcn_drm *gcn)
 		out_be32(gcn->vi_base + di_regs[i],
 			 value & ~(VI_DI_IRQ | VI_DI_ENABLE));
 	}
+}
+
+static void gcn_drm_program_ntsc_480i(struct gcn_drm *gcn)
+{
+	void __iomem *vi = gcn->vi_base;
+
+	gcn_drm_quiesce_irqs(gcn);
+	out_be16(vi + VI_DCR, 0);
+
+	out_be16(vi + VI_VTR, VI_NTSC_VTR);
+	out_be32(vi + VI_HTR0, VI_NTSC_HTR0);
+	out_be32(vi + VI_HTR1, VI_NTSC_HTR1);
+	out_be32(vi + VI_VTO, VI_NTSC_VTO);
+	out_be32(vi + VI_VTE, VI_NTSC_VTE);
+	out_be32(vi + VI_BBOI, VI_NTSC_BBOI);
+	out_be32(vi + VI_BBEI, VI_NTSC_BBEI);
+	out_be32(vi + VI_TFBR, 0);
+	out_be32(vi + VI_BFBR, 0);
+	out_be16(vi + VI_PCR, VI_NTSC_PCR);
+	out_be16(vi + VI_HSR, VI_NTSC_HSR);
+	out_be32(vi + VI_FCT0, gcn_drm_vi_filter[0]);
+	out_be32(vi + VI_FCT1, gcn_drm_vi_filter[1]);
+	out_be32(vi + VI_FCT2, gcn_drm_vi_filter[2]);
+	out_be32(vi + VI_FCT3, gcn_drm_vi_filter[3]);
+	out_be32(vi + VI_FCT4, gcn_drm_vi_filter[4]);
+	out_be32(vi + VI_FCT5, gcn_drm_vi_filter[5]);
+	out_be32(vi + VI_FCT6, gcn_drm_vi_filter[6]);
+	out_be32(vi + VI_AA, 0x00ff0000);
+	out_be16(vi + VI_CLK, 0);
+	out_be16(vi + VI_HSW, GCN_DRM_WIDTH);
+	out_be16(vi + VI_HBE, 0);
+	out_be16(vi + VI_HBS, 0);
+	out_be16(vi + VI_UNK1, 0x00ff);
+	out_be32(vi + VI_UNK2, 0x00ff00ff);
+	out_be32(vi + VI_UNK3, 0x00ff00ff);
+
+	memset32(gcn->xfb, 0x10801080,
+		 2 * GCN_DRM_XFB_PAGE_SIZE / sizeof(u32));
+	flush_dcache_range((unsigned long)gcn->xfb,
+			   (unsigned long)gcn->xfb +
+			   2 * GCN_DRM_XFB_PAGE_SIZE);
+	gcn_drm_set_scanout(gcn, 0);
+	out_be32(vi + VI_DI0, VI_NTSC_DI0);
+	out_be32(vi + VI_DI1, VI_NTSC_DI1);
+	out_be32(vi + VI_DI2, 0);
+	out_be32(vi + VI_DI3, 0);
+	out_be16(vi + VI_DCR, VI_DCR_ENABLE);
+
+	drm_info(&gcn->drm,
+		 "programmed NTSC 480i: DCR=%04x VTR=%04x HTR0=%08x HTR1=%08x PCR=%04x\n",
+		 in_be16(vi + VI_DCR), in_be16(vi + VI_VTR),
+		 in_be32(vi + VI_HTR0), in_be32(vi + VI_HTR1),
+		 in_be16(vi + VI_PCR));
 }
 
 static void gcn_drm_arm_event(struct gcn_drm *gcn)
@@ -483,6 +584,9 @@ static int gcn_drm_probe(struct platform_device *pdev)
 	spin_lock_init(&gcn->scanout_lock);
 	dev_info(dev, "probe: VI and XFB mapped\n");
 
+	if (program_mode)
+		gcn_drm_program_ntsc_480i(gcn);
+
 	if (!(in_be16(gcn->vi_base + VI_DCR) & VI_DCR_ENABLE))
 		return dev_err_probe(dev, -ENODEV,
 				     "VI has no active handoff mode\n");
@@ -536,7 +640,8 @@ static int gcn_drm_probe(struct platform_device *pdev)
 		return ret;
 
 	drm_info(&gcn->drm,
-		 "bound fixed 640x480 handoff mode, XFB %08x+%08x\n",
+		 "bound fixed 640x480 %s mode, XFB %08x+%08x\n",
+		 program_mode ? "programmed NTSC 480i" : "handoff",
 		 xfb_phys, xfb_size);
 	return 0;
 }
