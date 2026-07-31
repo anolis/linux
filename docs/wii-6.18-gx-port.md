@@ -3389,3 +3389,27 @@ accepted RGB565 conversion path, without changing font geometry, VI state,
 palette values, or update timing. Compare overall text and red-sample clarity
 against this XRGB8888 baseline before attempting font filtering or palette
 adjustment.
+
+## 2026-07-31: Stage RGB565 DRM-console quality comparison
+
+- Dual-format implementation: `75b7f6464`
+- Static stripped PowerPC binary size: `726988` bytes
+- `wii-drm-console` SHA-256:
+  `2989352d478beac6122a00422c44a5a0dde26f4a4e84a8d2fc169acb71206fb0`
+
+The console now defaults to RGB565 while retaining `--format xrgb8888` as a
+control. No font, palette, layout, VI, cursor, VCSA, or update behavior changes
+in this iteration.
+
+Upload and verify the new artifact, start DRM with the accepted service, launch
+the console with no format option, and require its log to report `rgb565`.
+Write the exact same deterministic color and frame-two update screen used for
+the XRGB8888 baseline. Require the functional startup, live update, cursor,
+stability, graceful-exit, and recovery gates to remain passed.
+
+Visually compare general text sharpness and the dark red sample directly
+against the preceding XRGB8888 run. Accept RGB565 as the console default only
+if text is at least as clear and red is materially improved or no worse. If
+quality is unchanged, retain the lower-memory RGB565 path provisionally and
+test interlace-stable glyph filtering next; if quality regresses, restore
+XRGB8888 before any font experiment.
