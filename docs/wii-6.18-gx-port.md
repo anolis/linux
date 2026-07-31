@@ -3159,3 +3159,31 @@ and require the clear, responsive legacy GX console to return. This test proves
 that rewriting the VI register set is correct and non-destructive; a separate
 test must explicitly invalidate the inherited VI state before load to prove
 full initialization independence.
+
+## 2026-07-31: Accept opt-in standalone NTSC 480i programming
+
+The checksum-pinned cycle loaded `gcn-drm.ko` with `program_mode=1`. Hardware
+readback exactly matched the staged register gate: `DCR=0001`, `VTR=0f06`,
+`HTR0=476901ad`, `HTR1=02e850c0`, and `PCR=2850`. The driver then registered
+`card0` normally and retained ownership of `c002000.video`.
+
+The accepted XRGB8888 client created two 1228800-byte buffers with 2560-byte
+pitch and completed all 20 validated page-flip events through vblank sequence
+307. It remained alive holding the final frame. The post-test soak passed with
+three of three ICMP replies, responsive SSH, stable DRM ownership, and no
+conversion or kernel fault signature. Direct observation confirmed the image
+was clear.
+
+The checksum-verified restore terminated the client, unloaded the DRM stack,
+rebound `gcn-vifb`, and reloaded the accepted generated GX renderer. The legacy
+console resumed with no fault. A slight visible interlaced vibration was noted,
+but the user confirmed the same behavior is present in Gumboot; it is therefore
+an existing output characteristic rather than a regression from VI register
+programming.
+
+This accepts the fixed NTSC 480i register sequence and reversible ownership
+transition. The driver no longer needs to preserve inherited VI register
+values when `program_mode=1`, but the test began with VI enabled and AVE state
+still inherited. Next explicitly disable VI before probe and require the same
+readback, KMS image, flip completion, and recovery to validate the inactive-VI
+entry path.
