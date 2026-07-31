@@ -3694,3 +3694,28 @@ selection on big-endian PowerPC. The checked-in `xrgb8888_to_rgb565()` and
 an exact red/blue exchange is not explained by those source expressions alone.
 Use an instrumented positive control if artifacts match; do not infer another
 storage byte order from color output.
+
+## 2026-07-31: Stage one-shot RGB565 conversion positive control
+
+- Diagnostic implementation: `f5e3e7b64`
+- `gcn-drm.ko` SHA-256:
+  `92579cf75b311512bcd8ee8b17bad6dca0274b4d9f0aaf6dead101b4ab0738a6`
+- Known-pattern userspace binary: `/usr/local/sbin/wii-drm-test`
+
+Replace only `gcn-drm.ko`, transfer ownership with no automatic console, and
+run the existing test tool once with `--format rgb565` and no flips. Its static
+pattern has samples away from all borders, grid lines, checkerboards, and
+markers at `(100,100)` red, `(500,100)` green, `(100,400)` blue, and
+`(500,400)` white.
+
+The driver must emit exactly one diagnostic set containing framebuffer format,
+pitch, each native 16-bit word, its two memory bytes, and the corresponding
+packed YUYV word. Expected native words from the userspace packer are
+approximately `f904` red, `27e4` green, `221f` blue, and `ffff` white. Compare
+the logged RGB565 YUYV values against the same colors through the already
+validated XRGB8888 helper. This test's conclusion comes from logged source and
+conversion values, not subjective screen colors.
+
+After capture, terminate the test process and stop the service. Require legacy
+`gcn-vifb` ownership, only `gcn_gx` loaded, and no kernel fault. Do not leave
+the diagnostic module installed after its result is recorded and understood.
