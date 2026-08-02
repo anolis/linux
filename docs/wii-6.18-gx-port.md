@@ -4298,3 +4298,38 @@ instead have Cr/Cb bytes exchanged, the fault occurs before physical XFB
 visibility despite the clean source formula. Unload the observer, stop DRM,
 restore the saved console loglevel, and require clean legacy recovery with no
 fault.
+
+## 2026-08-02: Clean wrong-color frame reads back corrected XFB words
+
+All installed artifacts matched the staged SHA-256 values. With console printk
+suppressed before service start, the byte-identical clean module reproduced the
+stable wrong-color sequence visually:
+
+```
+blue, green, red, light blue, white, magenta, gold
+```
+
+This is the exact prior Cr/Cb-exchange signature. The unchanged validated
+observer was then loaded after the frame was visibly wrong. TFBL selected page
+0 and the first snapshot was:
+
+```
+TFBL=100b4c00 BFBL=000b4c28 top=01698000
+43d64362 73387347 237123d6 75b27546 bb81bb80 57c857b9 872a879e
+```
+
+All seven words exactly match the corrected `Y0,Cr,Y1,Cb` reference despite
+the visibly exchanged output. This rules out source palette generation and the
+conversion formula for the observed frame.
+
+Important qualification: the observer maps XFB with `MEMREMAP_WB`, so this is
+a CPU cache-view readback, not an independent uncached proof of bytes visible to
+VI. The result narrows the fault to either dirty/stale physical XFB visibility
+or downstream VI/AVE interpretation. Do not yet claim physical RAM is correct.
+
+Preserve this running wrong-color transaction with console loglevel suppressed.
+Extend only the observer with an opt-in full selected-page
+`flush_dcache_range()` after its pre-flush samples. Loading that observer once
+must not reconvert or republish a frame. If the visible colors immediately
+become correct, cache-to-VI visibility is proven. If they remain exchanged,
+capture post-flush words and investigate VI/AVE state next.
