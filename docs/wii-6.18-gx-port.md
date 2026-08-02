@@ -4546,3 +4546,16 @@ Therefore this attempt says nothing about AVE register `0x62` and must not be
 counted as either a positive or negative hardware result. Rebuild the narrow
 utility as a static executable, checksum-stage it separately, and repeat the
 read-only positive control before any write.
+
+## 2026-08-02: Stage static AVE register utility
+
+- Static-link fix: `f45c1d97a`
+- Static `wii-ave-reg` SHA-256:
+  `5eeff399a163848d6957a788e81a9ccbcbac6f1cfb68864bc3ed2d636b816667`
+
+The rebuilt PowerPC executable is statically linked and has no ELF interpreter,
+removing the rootfs glibc dependency that invalidated the first deployment. The
+Wii remains booted on the already validated `b55d13f1...` image with `/dev/i2c-0`
+and client `0-0070` present. Replace only `/usr/local/sbin/wii-ave-reg`, verify
+the installed checksum, and repeat the read-only invocation. Do not pass
+`--clear-swap` until the read transaction succeeds and reports register `0x62`.
