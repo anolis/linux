@@ -3868,3 +3868,31 @@ Remove both temporary one-shot sample loggers and their state flags without
 changing the accepted packer. Rebuild and run the service-managed default
 RGB565 console with explicit labeled colors, live tty update, cursor blink,
 client liveness, automatic stop, module cleanup, and clear legacy recovery.
+
+## 2026-08-02: Stage cleaned-module console regression
+
+- Diagnostic-removal implementation: `18193257d`
+- Clean `gcn-drm.ko` SHA-256:
+  `f4aae461c3fe31fbc38bd6cc7ffedd715bf105d0d0e36a050d55652610c8f78d`
+- Native-store `wii-drm-console` SHA-256:
+  `66fb1a55e46366bc2313ade57fcde11f401cd44b3e1487ab1de2fa13b3c6ea81`
+- Client-aware service SHA-256:
+  `74229640ab480c2eb5488acb296029af9827eaf5609e63e08d9058060214476b`
+
+The Wii booted with `gcn-vifb` owning VI and `gcn_gx` active, but udev also
+autoloaded the matching `gcn_drm` module and its dependencies without binding
+them. Unload that zero-use DRM stack before replacing the module so the next
+service start necessarily loads the checksum-pinned clean artifact from disk.
+Do not alter runlevel links or enable the service in this test.
+
+Run the normal service-managed transaction with the default RGB565 console.
+Write explicit red, green, blue, gold, white, magenta, and cyan/teal labels and
+require every displayed hue to match. Also require a live tty update, blinking
+cursor, exact client PID liveness, no temporary conversion log messages, stable
+network/kernel, automatic client SIGTERM and wait, full DRM module removal,
+and clear legacy `gcn-vifb`/`gcn_gx` recovery.
+
+Passing this cleaned regression permits the separate missing-client rollback
+control. Treat udev autoload suppression as a later memory-footprint cleanup:
+it does not own hardware or affect this transaction while `gcn-vifb` remains
+bound.
