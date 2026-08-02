@@ -4189,3 +4189,27 @@ Unload the observer before stopping the service. Require exact client cleanup,
 legacy recovery, and no mapping warning or kernel fault. A passing positive
 control permits the unchanged observer to inspect a later clean wrong-color
 frame without perturbing conversion or page publication before visibility.
+
+## 2026-08-02: Reject uncached ioremap observer mapping
+
+The observer positive-control frame was visually confirmed as red, green, blue,
+gold, white, magenta, and teal before the observer was loaded. `insmod` then
+failed with `ENOMEM` and produced no sample output. The kernel explained the
+failure explicitly:
+
+```
+__ioremap_caller(): phys addr 0x1698000 is RAM lr ioremap
+```
+
+VI MMIO mapping therefore succeeded, but PowerPC correctly rejected an I/O
+mapping of normal reserved XFB RAM. This is a failed positive control; none of
+the observer's intended measurements were made or validated. Do not treat the
+first observer hash as usable.
+
+Revise only the XFB mapping to `memremap(..., MEMREMAP_WB)` and pair it with
+`memunmap()`, matching both `gcn-drm` and the working legacy `gcnfb` mapping.
+Keep VI MMIO on `ioremap()`. Repeat the known-correct positive control before
+using the observer on a clean wrong-color frame.
+
+The observer never remained loaded. Service stop terminated the exact client
+PID, restored `gcn-vifb` plus `gcn_gx`, and logged no fault.
