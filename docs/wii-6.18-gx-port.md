@@ -3945,3 +3945,34 @@ module, and ownership cleanup. If logged values and bytes are correct, the next
 test must observe what the kernel conversion path reads from this console
 framebuffer; do not compensate the palette or storage without that matched
 downstream measurement.
+
+## 2026-08-02: Palette positive control passes and screen is correct
+
+The installed console, clean corrected module, and service matched all staged
+SHA-256 values. The client logged the expected semantic encodings:
+
+```text
+red     xrgb=00aa0000 rgb565=a800 bytes=a8,00
+green   xrgb=0000aa00 rgb565=0540 bytes=05,40
+blue    xrgb=000000aa rgb565=0015 bytes=00,15
+gold    xrgb=00aa5500 rgb565=aaa0 bytes=aa,a0
+white   xrgb=00aaaaaa rgb565=ad55 bytes=ad,55
+magenta xrgb=00aa00aa rgb565=a815 bytes=a8,15
+teal    xrgb=0000aaaa rgb565=0555 bytes=05,55
+```
+
+The user then confirmed that every displayed color was correct and the cursor
+blinked. Service stop terminated the exact client PID, restored `gcn-vifb` and
+`gcn_gx`, removed the entire DRM stack and PID file, and logged no fault.
+
+The logging implementation does not alter framebuffer production or storage,
+so it cannot be treated as a color fix. This pass conflicts with the immediately
+preceding checksum-verified clean run that displayed an exact channel swap.
+Treat the discrepancy as either intermittent hardware/scanout state or a visual
+reporting error, not as evidence for another encoding change.
+
+Repeat one full service start/stop using these exact installed artifacts without
+rebuilding or redeploying. Require all seven colors and cursor behavior again.
+Two consecutive exact-binary passes permit removing the palette logger and
+running one final clean-binary check; any recurrence requires matched XFB page
+readback rather than further source-side instrumentation.
