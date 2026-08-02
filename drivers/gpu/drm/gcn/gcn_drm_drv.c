@@ -241,6 +241,11 @@ static int gcn_drm_convert(struct gcn_drm *gcn,
 	if (ret)
 		return ret;
 
+	/* Synchronize the userspace mmap with the shmem kernel vmap on Broadway. */
+	flush_dcache_range((unsigned long)shadow->data[0].vaddr,
+			   (unsigned long)shadow->data[0].vaddr +
+			   fb->pitches[0] * GCN_DRM_HEIGHT);
+
 	for (y = 0; y < GCN_DRM_HEIGHT; y++) {
 		const u8 *src = shadow->data[0].vaddr + y * fb->pitches[0];
 
