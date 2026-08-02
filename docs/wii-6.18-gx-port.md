@@ -4589,3 +4589,40 @@ exact line operations, rather than guessing AVE registers or broadening the DRM
 change. Its positive control is an idle-high SCL in debugfs followed by a
 successful read-only `0x62` transaction. Only then repeat `--clear-swap` on a
 visibly wrong frame.
+
+## 2026-08-02: Stage Wii-specific AVE bit-bang adapter
+
+- Wii AVE adapter implementation: `2f1399b6c`
+- `zImage` SHA-256:
+  `b8b0c3f54c4f5616cbf8d32ba099390beb5afdd83bae93652abcbcaebf083af8`
+- `dtbImage.wii` SHA-256:
+  `b8b0c3f54c4f5616cbf8d32ba099390beb5afdd83bae93652abcbcaebf083af8`
+- Static `wii-ave-reg` SHA-256:
+  `5eeff399a163848d6957a788e81a9ccbcbac6f1cfb68864bc3ed2d636b816667`
+
+The dedicated adapter ports the historical Wii line operations onto the modern
+GPIO descriptor and `i2c-algo-bit` APIs. SCL remains an output and is actively
+written high or low. SDA remains an output while sending, changes to input for
+ACK/data reads, and returns to output on the next write. Both lines are forced
+high after adapter registration. The generic open-drain flags and properties
+that left SCL low are no longer present in Wii DTS.
+
+The driver, binding, configuration, DTS, and complete Wii wrapper compile
+cleanly; `git diff --check` and strict `checkpatch.pl` pass. The generated DTB
+contains both `nintendo,wii-ave-i2c` and the AVE child at `0x70`.
+`dt_binding_check` could not run because the host lacks the external `dtschema`
+tool `dt-doc-validate`; record this as a host validation gap, not a schema pass.
+
+Boot the exact image and require these gates in order before starting DRM:
+
+1. `/dev/i2c-0` and client `0-0070` exist, the dedicated adapter logs successful
+   registration, and debugfs reports both AVE_SCL and AVE_SDA `out hi` before
+   any transfer.
+2. The checksum-verified static utility reads register `0x62` without `ENXIO`.
+   Record the value and require AVE_SCL to remain `out hi` after the transfer.
+
+Only after both controls pass should the clean DRM bars be rendered and
+visually classified. On an established exchanged frame, run one
+`--clear-swap` transaction and record the before/after register values plus the
+immediate visual result. Do not run the write when colors are already correct;
+that would not validate the symptom transition.
