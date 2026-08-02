@@ -4069,3 +4069,24 @@ Each stop must restore `gcn-vifb` and `gcn_gx`, remove the client PID and DRM
 stack, and log no fault. Any remaining channel exchange requires actual source
 and XFB page readback. Consecutive clean passes accept the cache synchronization
 as the root fix and unblock rollback and boot-service work.
+
+## 2026-08-02: Reject source-vmap cache flush as color fix
+
+The installed module, clean console, and service matched all staged SHA-256
+values. The client started normally with no diagnostic logger, remained live,
+and displayed a clear blinking-cursor screen. All colors nevertheless repeated
+the exact prior red/blue and cyan/yellow exchange.
+
+Flushing and invalidating the full shmem kernel-vmap source range immediately
+before every conversion therefore does not resolve the clean-client failure.
+Reject the cache-alias hypothesis as the root cause; do not retain this added
+per-frame cache cost without separate evidence that it is required for data
+visibility. Service stop restored `gcn-vifb` and `gcn_gx`, removed the DRM stack
+and PID file, and logged no fault.
+
+The next measurement must correlate one deterministic frame at both sides of
+conversion. Render seven full-width console background bars, then capture the
+RGB565 source word and converted XFB word at each bar's center from the same
+page. Also log the destination page and VI scanout address. This distinguishes
+client/source encoding, RGB-to-XFB conversion, and wrong/stale VI page selection
+without relying on timing or another palette inference.
