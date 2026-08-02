@@ -4090,3 +4090,29 @@ RGB565 source word and converted XFB word at each bar's center from the same
 page. Also log the destination page and VI scanout address. This distinguishes
 client/source encoding, RGB-to-XFB conversion, and wrong/stale VI page selection
 without relying on timing or another palette inference.
+
+## 2026-08-02: Stage matched source/XFB/VI bar capture
+
+- Bar-capture implementation: `35e2f5933`
+- `gcn-drm.ko` SHA-256:
+  `a2c8879237efc62c6fe7cf6ff303c042b0eb201073420f4c3d00f8434d9e89c7`
+- Clean `wii-drm-console` SHA-256:
+  `66fb1a55e46366bc2313ade57fcde11f401cd44b3e1487ab1de2fa13b3c6ea81`
+- Client-aware service SHA-256:
+  `74229640ab480c2eb5488acb296029af9827eaf5609e63e08d9058060214476b`
+
+Replace only the module and start the normal clean console. Clear tty1 and
+write seven 79-column space rows using red, green, blue, gold, white, magenta,
+and teal background attributes in that order. With 80x25 VCSA centered in the
+640x480 buffer, the diagnostic samples x=320 at y=48,64,80,96,112,128,144.
+
+The source detector expects native RGB565 words
+`a800,0540,0015,aaa0,ad55,a815,0555`. It logs at most sixteen attempts. On an
+exact match, require seven converted XFB words from the same page and a later
+scanout log for that page containing physical address plus VI TFBL/BFBL
+readback. Save the complete lines before stopping the service.
+
+Observe and report each displayed bar color as secondary confirmation. The
+source and XFB logs, not the visual report, determine where the exchange enters.
+Require normal exact-PID client termination, DRM cleanup, legacy recovery, and
+no fault afterward.
