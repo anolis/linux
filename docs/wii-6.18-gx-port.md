@@ -3976,3 +3976,23 @@ rebuilding or redeploying. Require all seven colors and cursor behavior again.
 Two consecutive exact-binary passes permit removing the palette logger and
 running one final clean-binary check; any recurrence requires matched XFB page
 readback rather than further source-side instrumentation.
+
+## 2026-08-02: Exact-binary console restart repeats correct colors
+
+Without rebuilding, copying, or changing any target file, a second complete
+service transaction re-verified all three installed SHA-256 values and launched
+the same RGB565 client. The user again confirmed that all seven labeled colors
+were correct and the cursor blinked. The client remained live and repeated the
+same correct palette word and byte diagnostics.
+
+Service stop again terminated the exact PID, restored `gcn-vifb` plus `gcn_gx`,
+removed the DRM stack and PID file, and logged no fault. This provides two
+consecutive correct service starts with identical driver and client artifacts.
+Treat the earlier swapped report as unconfirmed rather than changing the now
+twice-reproduced format contract.
+
+Remove only `log_rgb565_palette()` and its call, rebuild, and require the output
+to return byte-for-byte to the prior clean console SHA-256
+`66fb1a55e46366bc2313ade57fcde11f401cd44b3e1487ab1de2fa13b3c6ea81`.
+Deploy that clean client with the accepted corrected module and perform one
+final explicit color/cursor/service rollback check.
