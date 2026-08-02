@@ -4661,3 +4661,32 @@ not sufficient to explain this modern failure and another AVE register or
 ownership sequence must be isolated. If colors are correct, repeat clean DRM
 transactions while reading `0x62` before each run; do not write zero to an
 already-correct frame.
+
+## 2026-08-02: First clean DRM run is correct with AVE 0x62 zero
+
+The first service start did not reach DRM rendering: udev had preloaded the
+out-of-tree `gcn_drm` module while legacy gcnfb still owned VI, leaving the
+module loaded but unbound. The service unbound legacy and called `modprobe`,
+which could not reprobe an already-loaded module, then restored legacy and
+removed the stale module. No bars were rendered and this operational failure is
+not a color result.
+
+The second start loaded the same checksum-known clean module fresh and bound
+successfully. The deterministic bars settled in the expected semantic order:
+
+```
+red, green, blue, gold, white, magenta, teal
+```
+
+The user visually classified all colors correct. A read-only AVE transaction
+during the stable frame again returned `AVE[0x62] before: 0x00`. No AVE write
+was issued because writing zero to an already-correct frame would not validate
+a transition.
+
+Teardown stopped exact client PID 3933, removed DRM, restored legacy gcnfb plus
+generated GX, restored console loglevel 7, and left both AVE GPIOs `out hi`.
+There was no fault. This single run correlates AVE `0x62=0` with correct output
+but does not yet explain the prior nondeterminism. Repeat complete clean DRM
+transactions without AVE writes and classify each settled frame. Also fix the
+service to remove an unbound preloaded `gcn_drm` before ownership transfer, but
+keep that operational change separate from color-state conclusions.
