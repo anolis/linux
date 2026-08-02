@@ -4155,3 +4155,37 @@ the intended colors.
 
 Service stop terminated the exact client PID, removed the DRM stack, restored
 `gcn-vifb` plus `gcn_gx`, and logged no fault.
+
+## 2026-08-02: Stage external XFB observer positive control
+
+- Observer implementation: `c2718505d`
+- `gcn-xfb-observer.ko` SHA-256:
+  `3c588ba3ac75da2387cc87d74649159b23130249156717e07bfec67bb1b344bc`
+- Known-correct capture `gcn-drm.ko` SHA-256:
+  `a2c8879237efc62c6fe7cf6ff303c042b0eb201073420f4c3d00f8434d9e89c7`
+- Clean `wii-drm-console` SHA-256:
+  `66fb1a55e46366bc2313ade57fcde11f401cd44b3e1487ab1de2fa13b3c6ea81`
+- Client-aware service SHA-256:
+  `74229640ab480c2eb5488acb296029af9827eaf5609e63e08d9058060214476b`
+
+`CONFIG_STRICT_DEVMEM=y` correctly blocks direct userspace access to VI MMIO and
+reserved XFB RAM. The observer is therefore a separate, read-only module. It
+does not bind the VI platform device and must be loaded only after the rendered
+frame is visibly established. It reads TFBL/BFBL, decodes the selected physical
+page, and samples the seven established bar coordinates through an uncached
+mapping.
+
+Validate this measurement tool before drawing any conclusion from it. Install
+the observer beside the already checksum-verified known-correct capture module,
+start the clean console, render the seven bars in semantic order, and confirm
+them visually. Only then load `gcn-xfb-observer.ko`. Require its TFBL/BFBL,
+decoded page, and seven XFB words to equal the in-path capture:
+
+```
+43d64362 73387347 237123d6 75b27546 bb81bb80 57c857b9 872a879e
+```
+
+Unload the observer before stopping the service. Require exact client cleanup,
+legacy recovery, and no mapping warning or kernel fault. A passing positive
+control permits the unchanged observer to inspect a later clean wrong-color
+frame without perturbing conversion or page publication before visibility.
