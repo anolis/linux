@@ -4721,3 +4721,21 @@ out that register as the sole source of the nondeterminism despite the legacy
 driver comment. Keep the validated AVE bus and next capture a controlled set of
 other readable AVE configuration registers for paired correct and wrong runs;
 do not revisit XFB bytes, stable VI state, or write `0x62` again.
+
+## 2026-08-02: Qualify the AVE 0x62 readback conclusion
+
+A follow-up source audit found no evidence that AVE register `0x62` is a
+readable reflection of the encoder's effective swap latch. The legacy driver
+only writes the register and never reads it. Therefore the identical zero
+readbacks definitively reject `0x62` as a useful readable state discriminator,
+but they do not yet prove that writing the register cannot control an internal
+or write-only latch.
+
+Narrow the next test instead of broad-dumping undocumented AVE registers. Extend
+the utility with an explicit `--set-swap` action that writes only `0x02` to
+register `0x62`; retain `--clear-swap` as the mandatory restoration write of
+`0x00`. On one visually correct, frozen DRM frame, write `0x02` and observe
+whether red/blue plus cyan/gold exchange immediately. Then write `0x00`
+regardless of the visual outcome and require the original correct frame to
+return or remain unchanged. This reversible positive control directly tests the
+legacy comment without depending on register readback semantics.
