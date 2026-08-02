@@ -4213,3 +4213,17 @@ using the observer on a clean wrong-color frame.
 
 The observer never remained loaded. Service stop terminated the exact client
 PID, restored `gcn-vifb` plus `gcn_gx`, and logged no fault.
+
+## 2026-08-02: Stage reserved-RAM observer positive control
+
+- Observer mapping correction: `29330b9ec`
+- Revised `gcn-xfb-observer.ko` SHA-256:
+  `689d717e46300d8037f536176b0a5e4a168ea6f67cd444968cb392dcd79b7d0b`
+- Known-correct capture `gcn-drm.ko` SHA-256:
+  `a2c8879237efc62c6fe7cf6ff303c042b0eb201073420f4c3d00f8434d9e89c7`
+
+Repeat the preceding positive-control procedure unchanged. The observer now
+uses `memremap(MEMREMAP_WB)` only for reserved XFB RAM and retains `ioremap()`
+for VI MMIO. Require successful module load and the exact seven known-correct
+XFB words before accepting the observer. Unload it before service stop and
+require clean legacy recovery with no mapping warning or fault.
