@@ -4262,3 +4262,39 @@ bars, and visually classify the frame before loading the unchanged validated
 observer. The first page-1 XFB snapshot will show whether a wrong-color clean
 frame contains exchanged chroma bytes in RAM or whether the exchange occurs
 after physical XFB storage.
+
+## 2026-08-02: Stage clean driver with external XFB observation
+
+- Clean-path restoration: `d2f7ff4d1`
+- Clean `gcn-drm.ko` SHA-256:
+  `f4aae461c3fe31fbc38bd6cc7ffedd715bf105d0d0e36a050d55652610c8f78d`
+- Validated `gcn-xfb-observer.ko` SHA-256:
+  `689d717e46300d8037f536176b0a5e4a168ea6f67cd444968cb392dcd79b7d0b`
+- Clean `wii-drm-console` SHA-256:
+  `66fb1a55e46366bc2313ade57fcde11f401cd44b3e1487ab1de2fa13b3c6ea81`
+- Client-aware service SHA-256:
+  `74229640ab480c2eb5488acb296029af9827eaf5609e63e08d9058060214476b`
+
+The restored driver source is byte-identical to clean baseline `3fa4c38b6`, and
+its module hash exactly reproduces the previously wrong-color artifact. Replace
+only `gcn-drm.ko`; leave the validated observer, client, and service unchanged.
+
+Before service start, save the current console loglevel and set it to 1 so
+driver and observer `pr_info` lines remain in the ring buffer without becoming
+new VCSA content. Start DRM, render the deterministic bars, wait for both cursor
+pages to update, and visually report the seven colors before observer load.
+
+Load the unchanged observer only when TFBL selects page 1; accept only that
+first page-1 snapshot. Compare its seven XFB words against the corrected
+`Y0,Cr,Y1,Cb` reference:
+
+```
+43d64362 73387347 237123d6 75b27546 bb81bb80 57c857b9 872a879e
+```
+
+If a visibly exchanged frame contains these exact words, physical XFB storage
+is correct and the fault is in VI/AVE interpretation or state. If its words
+instead have Cr/Cb bytes exchanged, the fault occurs before physical XFB
+visibility despite the clean source formula. Unload the observer, stop DRM,
+restore the saved console loglevel, and require clean legacy recovery with no
+fault.
