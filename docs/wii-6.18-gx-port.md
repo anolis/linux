@@ -4333,3 +4333,26 @@ Extend only the observer with an opt-in full selected-page
 must not reconvert or republish a frame. If the visible colors immediately
 become correct, cache-to-VI visibility is proven. If they remain exchanged,
 capture post-flush words and investigate VI/AVE state next.
+
+## 2026-08-02: Stage post-visibility selected-page cache flush
+
+- Flush-capable observer: `4e6c6282c`
+- `gcn-xfb-observer.ko` SHA-256:
+  `45fce0e24c5145547f6a9d7fef5564d97b9d4b9b823123e8a4ed1f2650c11cbf`
+- Preserved clean `gcn-drm.ko` SHA-256:
+  `f4aae461c3fe31fbc38bd6cc7ffedd715bf105d0d0e36a050d55652610c8f78d`
+
+The clean wrong-color transaction remains active with client PID 25802 and
+console loglevel held at 1. Replace only the unloaded observer module. Reconfirm
+the frame still shows the exchanged sequence, then send `SIGSTOP` to the exact
+client PID so conversion and cursor page flips cannot race the test.
+
+Load the observer once with `flush_selected=1`. It must log the selected page
+and seven corrected pre-flush words before flushing and synchronizing the entire
+614400-byte page. It does not reconvert source pixels or write VI registers.
+Observe whether the frozen visible frame immediately changes from exchanged to
+correct colors.
+
+After observation, unload the observer, send `SIGCONT` to the exact client PID,
+stop the service normally, and restore saved console loglevel 7. Require exact
+legacy recovery and no fault. Do not leave a stopped client for service teardown.
