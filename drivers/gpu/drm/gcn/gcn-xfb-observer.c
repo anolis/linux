@@ -72,6 +72,10 @@ static int __init gcn_xfb_observer_init(void)
 			i, GCN_XFB_PHYS + offset,
 			READ_ONCE(*(u32 *)(xfb + offset)));
 	}
+	for (i = 0; i < GCN_VI_SIZE; i += 4 * sizeof(u32))
+		pr_info("gcn-xfb-observer: VI+%02x %08x %08x %08x %08x\n",
+			i, in_be32(vi + i), in_be32(vi + i + 4),
+			in_be32(vi + i + 8), in_be32(vi + i + 12));
 	if (flush_selected) {
 		offset = top - GCN_XFB_PHYS;
 		flush_dcache_range((unsigned long)xfb + offset,
