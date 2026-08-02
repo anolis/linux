@@ -4040,3 +4040,32 @@ cache visibility between the userspace dumb-buffer mmap and the driver's shmem
 kernel mapping. In particular, audit `drm_gem_fb_begin_cpu_access()` direction,
 PowerPC cache alias handling, and whether dirty userspace pages are written back
 before `gcn_drm_convert()` reads them. Do not change color encoding again.
+
+## 2026-08-02: Stage Broadway source-cache synchronization test
+
+- Source-cache implementation: `95b1faa0e`
+- `gcn-drm.ko` SHA-256:
+  `a1929dba3ceda121b98e6a23e7b57fa1fa6be96633707c0eecdf066ac88d2e7a`
+- Clean `wii-drm-console` SHA-256:
+  `66fb1a55e46366bc2313ade57fcde11f401cd44b3e1487ab1de2fa13b3c6ea81`
+- Client-aware service SHA-256:
+  `74229640ab480c2eb5488acb296029af9827eaf5609e63e08d9058060214476b`
+
+DRM core inspection established that `drm_gem_fb_begin_cpu_access()` only
+invokes synchronization for imported dma-bufs; it is a no-op for this driver's
+native shmem dumb buffers. The client writes through a userspace mmap while the
+driver reads a separate kernel vmap. The logging-only client's repeatable pass
+is consistent with cache pressure evicting dirty userspace lines before kernel
+conversion.
+
+The implementation flushes and invalidates the complete active source range
+through the kernel vmap immediately before conversion. Replace only the clean
+module and run the clean, no-logger RGB565 console. Require all seven colors,
+live update, and cursor to remain correct. If the first transaction passes,
+repeat complete service stop/start transactions with the exact same artifacts
+to test the previously intermittent boundary; do not redeploy between repeats.
+
+Each stop must restore `gcn-vifb` and `gcn_gx`, remove the client PID and DRM
+stack, and log no fault. Any remaining channel exchange requires actual source
+and XFB page readback. Consecutive clean passes accept the cache synchronization
+as the root fix and unblock rollback and boot-service work.
