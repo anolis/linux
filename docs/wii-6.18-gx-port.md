@@ -4356,3 +4356,37 @@ correct colors.
 After observation, unload the observer, send `SIGCONT` to the exact client PID,
 stop the service normally, and restore saved console loglevel 7. Require exact
 legacy recovery and no fault. Do not leave a stopped client for service teardown.
+
+## 2026-08-02: Reject XFB cache visibility as chroma-exchange cause
+
+Immediately before the test, the user reconfirmed the frozen clean frame still
+displayed blue, green, red, light blue, white, magenta, and gold. Client PID
+25802 entered state `T`, proving it was stopped before the observer ran.
+
+The flush-capable observer selected page 0 and again read the exact corrected
+words:
+
+```
+TFBL=100b4c00 BFBL=000b4c28 top=01698000
+43d64362 73387347 237123d6 75b27546 bb81bb80 57c857b9 872a879e
+```
+
+It then executed and synchronized `flush_dcache_range()` over the complete
+`0x96000`-byte selected page. No source conversion, page flip, or VI register
+write could occur while the client remained stopped. The user observed no
+visual change: the same chroma-exchanged colors remained stable.
+
+This rejects dirty or stale CPU-to-XFB cache visibility as the cause. Combined
+with the exact selected-page words, the exchange is downstream of XFB storage:
+VI register state, field/address interpretation, or AVE encoder state. Do not
+add another XFB flush or change the accepted `Y0,Cr,Y1,Cb` conversion.
+
+The observer was unloaded, PID 25802 was resumed before service stop, and the
+service terminated that exact PID normally. DRM removal, legacy `gcn-vifb` plus
+`gcn_gx` recovery, and restoration of console loglevel 7 all passed without a
+fault.
+
+Next capture complete VI register state for one known-correct diagnostic run and
+one clean wrong-color run with console printk suppressed, then compare every
+register byte-for-byte. If VI state is identical, instrument the AVE I2C state
+and ownership handoff rather than revisiting pixel conversion.
