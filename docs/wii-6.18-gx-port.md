@@ -4116,3 +4116,42 @@ Observe and report each displayed bar color as secondary confirmation. The
 source and XFB logs, not the visual report, determine where the exchange enters.
 Require normal exact-PID client termination, DRM cleanup, legacy recovery, and
 no fault afterward.
+
+## 2026-08-02: Matched bar capture passes and localizes intermittent exchange
+
+The installed artifacts matched all staged SHA-256 values. The deterministic
+bar frame was detected with the exact native RGB565 source sequence
+`a800,0540,0015,aaa0,ad55,a815,0555` on destination page 1. The converted words
+from that same page were:
+
+```
+red      43d64362
+green    73387347
+blue     237123d6
+gold     75b27546
+white    bb81bb80
+magenta  57c857b9
+teal     872a879e
+```
+
+VI then selected physical page `0x0172e000`; readback was
+`TFBL=0x100b9700` and `BFBL=0x000b9728`, which encode that page and its bottom
+field. The user independently reported the visible bars in the intended order:
+red, green, blue, gold, white, magenta, teal.
+
+This run validates source encoding, RGB565-to-XFB conversion, and VI page
+selection together for the observed frame. It also reproduces the central
+perturbation: the immediately preceding clean module displayed the stable
+red/blue and gold/teal exchange, while adding post-conversion capture and printk
+activity made the same clean userspace binary render correctly. Do not change
+the channel formula or client palette based on the clean-build symptom.
+
+The capture reads occur after `flush_dcache_range()` and before VI page publish.
+Their apparent corrective effect makes destination-XFB completion ordering the
+next narrow hypothesis. Test an explicit PowerPC memory barrier between the XFB
+cache flush and `gcn_drm_set_scanout()` without retaining the capture reads.
+Require the clean binary and repeated complete service transactions to preserve
+the intended colors.
+
+Service stop terminated the exact client PID, removed the DRM stack, restored
+`gcn-vifb` plus `gcn_gx`, and logged no fault.
