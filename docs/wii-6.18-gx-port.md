@@ -3996,3 +3996,24 @@ to return byte-for-byte to the prior clean console SHA-256
 `66fb1a55e46366bc2313ade57fcde11f401cd44b3e1487ab1de2fa13b3c6ea81`.
 Deploy that clean client with the accepted corrected module and perform one
 final explicit color/cursor/service rollback check.
+
+## 2026-08-02: Stage final clean console regression
+
+- Palette-log removal: `3fa4c38b6`
+- Clean `wii-drm-console` SHA-256:
+  `66fb1a55e46366bc2313ade57fcde11f401cd44b3e1487ab1de2fa13b3c6ea81`
+- Clean corrected `gcn-drm.ko` SHA-256:
+  `f4aae461c3fe31fbc38bd6cc7ffedd715bf105d0d0e36a050d55652610c8f78d`
+- Client-aware service SHA-256:
+  `74229640ab480c2eb5488acb296029af9827eaf5609e63e08d9058060214476b`
+
+The rebuilt stripped console is byte-for-byte identical to the prior clean
+artifact, proving that only the temporary logger was removed. Replace only the
+target console binary and perform one final complete service transaction with
+the explicit seven-color screen, live update, and blinking cursor.
+
+Require every color to match, no palette or conversion diagnostic output,
+stable client/network/kernel state, automatic exact-PID termination, complete
+DRM module removal, and clear legacy recovery. Passing accepts the clean
+service-managed console milestone and unblocks the missing-client rollback
+control; it does not yet enable boot runlevel links.
