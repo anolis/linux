@@ -5,6 +5,7 @@
  */
 
 #include <linux/interrupt.h>
+#include <linux/i2c.h>
 #include <linux/io.h>
 #include <linux/module.h>
 #include <linux/of.h>
@@ -33,6 +34,8 @@
 #define GCN_DRM_HEIGHT		480
 #define GCN_DRM_XFB_PITCH	(GCN_DRM_WIDTH * 2)
 #define GCN_DRM_XFB_PAGE_SIZE	(GCN_DRM_XFB_PITCH * GCN_DRM_HEIGHT)
+
+#define AVE_CHROMA_SWAP_REG	0x62
 
 #define VI_VTR			0x00
 #define VI_DCR			0x02
@@ -130,6 +133,41 @@ static const u32 gcn_drm_vi_filter[] = {
 static inline struct gcn_drm *to_gcn_drm(struct drm_device *drm)
 {
 	return container_of(drm, struct gcn_drm, drm);
+}
+
+static int gcn_drm_clear_ave_chroma_swap(struct device *dev)
+{
+	struct device_node *ave_node;
+	struct i2c_client *ave;
+	u8 command[] = { AVE_CHROMA_SWAP_REG, 0x00 };
+	int ret;
+
+	ave_node = of_parse_phandle(dev->of_node, "audio-video-encoder", 0);
+	if (!ave_node) {
+		if (of_device_is_compatible(dev->of_node,
+					    "nintendo,hollywood-vi"))
+			return dev_err_probe(dev, -ENODEV,
+					     "missing audio-video-encoder\n");
+		return 0;
+	}
+
+	ave = of_find_i2c_device_by_node(ave_node);
+	of_node_put(ave_node);
+	if (!ave)
+		return dev_err_probe(dev, -EPROBE_DEFER,
+				     "AVE I2C client is not ready\n");
+
+	ret = i2c_master_send(ave, command, sizeof(command));
+	put_device(&ave->dev);
+	if (ret < 0)
+		return dev_err_probe(dev, ret,
+				     "failed to clear AVE chroma swap\n");
+	if (ret != sizeof(command))
+		return dev_err_probe(dev, -EIO,
+				     "short AVE chroma-swap write: %d\n", ret);
+
+	dev_info(dev, "cleared AVE chroma-swap control\n");
+	return 0;
 }
 
 static const struct drm_display_mode gcn_drm_mode = {
@@ -583,6 +621,10 @@ static int gcn_drm_probe(struct platform_device *pdev)
 	gcn->xfb_size = xfb_size;
 	spin_lock_init(&gcn->scanout_lock);
 	dev_info(dev, "probe: VI and XFB mapped\n");
+
+	ret = gcn_drm_clear_ave_chroma_swap(dev);
+	if (ret)
+		return ret;
 
 	if (program_mode)
 		gcn_drm_program_ntsc_480i(gcn);
