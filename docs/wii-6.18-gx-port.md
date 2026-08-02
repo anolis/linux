@@ -4415,3 +4415,48 @@ Compare all stable VI words byte-for-byte. Treat DI IRQ flags and field counters
 as volatile unless a stable bit difference repeats. A stable VI difference is
 the next targeted state test. If all mode, address, clock, filter, and control
 state matches, move downstream to AVE I2C register capture and ownership timing.
+
+## 2026-08-02: Rule out stable VI register state
+
+Two complete service transactions used the exact same clean driver, observer,
+client, and service artifacts with console printk suppressed.
+
+The first transaction was visually classified correct and selected page 1. Its
+stable VI snapshot was:
+
+```
+VI+00 0f060001 476901ad 02e850c0 00030018
+VI+10 00020019 410c410c 40ed40ed 100b9700
+VI+20 00000000 000b9728 00000000 00a101b3
+VI+30 00010001 10f101ae 00000000 00000000
+VI+40 00000000 00000000 28500100 1ae771f0
+VI+50 0db4a574 00c1188e c4c0cbe2 fcecdecf
+VI+60 13130f08 00080c0f 00ff0000 00000001
+VI+70 02800000 000000ff 00ff00ff 00ff00ff
+```
+
+The second transaction was initially reported while the render command was
+still completing, then classified incorrect after the bars were established.
+It selected page 0 and showed the exact chroma exchange. Its snapshot was:
+
+```
+VI+00 0f060001 476901ad 02e850c0 00030018
+VI+10 00020019 410c410c 40ed40ed 100b4c00
+VI+20 00000000 000b4c28 00000000 01dd006b
+VI+30 00010001 10f101ae 00000000 00000000
+VI+40 00000000 00000000 28500100 1ae771f0
+VI+50 0db4a574 00c1188e c4c0cbe2 fcecdecf
+VI+60 13130f08 00080c0f 00ff0000 00000001
+VI+70 02800000 000000ff 00ff00ff 00ff00ff
+```
+
+Both selected pages again contained all seven corrected XFB words. The only VI
+differences are the expected page-0/page-1 TFBL and BFBL addresses and the live
+beam/field counter at `VI+2c`. Every stable mode, filter, clock, control, and
+interrupt-programming word is identical. Stable VI register state is therefore
+ruled out as the chroma-exchange cause.
+
+Both transactions unloaded the observer, terminated the exact client PID,
+removed DRM, restored legacy `gcn-vifb` plus `gcn_gx`, restored console loglevel
+7, and logged no fault. Continue downstream with AVE encoder I2C state and
+ownership timing; do not modify VI timing or XFB conversion based on this result.
