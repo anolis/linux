@@ -160,6 +160,33 @@ static void draw_console(void *map, __u32 pitch,
 	}
 }
 
+static void log_rgb565_palette(void)
+{
+	static const struct {
+		const char *name;
+		unsigned int index;
+	} samples[] = {
+		{ "red", 4 },
+		{ "green", 2 },
+		{ "blue", 1 },
+		{ "gold", 6 },
+		{ "white", 7 },
+		{ "magenta", 5 },
+		{ "teal", 3 },
+	};
+	unsigned int i;
+
+	for (i = 0; i < ARRAY_SIZE(samples); i++) {
+		uint32_t xrgb8888 = console_palette[samples[i].index];
+		uint16_t rgb565 = xrgb8888_to_rgb565(xrgb8888);
+		uint8_t bytes[sizeof(rgb565)];
+
+		memcpy(bytes, &rgb565, sizeof(bytes));
+		printf("wii-drm-console: palette %s xrgb=%08x rgb565=%04x bytes=%02x,%02x\n",
+		       samples[i].name, xrgb8888, rgb565, bytes[0], bytes[1]);
+	}
+}
+
 static int page_flip(int fd, __u32 crtc_id, __u32 fb_id, __u64 serial)
 {
 	struct drm_mode_crtc_page_flip flip = {
@@ -311,6 +338,8 @@ int main(int argc, char **argv)
 	       mode.hdisplay, mode.vdisplay,
 	       format == TEST_FORMAT_RGB565 ? "rgb565" : "xrgb8888",
 	       vcsa, current.columns, current.rows);
+	if (format == TEST_FORMAT_RGB565)
+		log_rgb565_palette();
 	fflush(stdout);
 	signal(SIGINT, handle_signal);
 	signal(SIGTERM, handle_signal);
