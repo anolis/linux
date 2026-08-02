@@ -4227,3 +4227,38 @@ uses `memremap(MEMREMAP_WB)` only for reserved XFB RAM and retains `ioremap()`
 for VI MMIO. Require successful module load and the exact seven known-correct
 XFB words before accepting the observer. Unload it before service stop and
 require clean legacy recovery with no mapping warning or fault.
+
+## 2026-08-02: Validate reserved-RAM observer on page 1
+
+The revised observer and all active artifacts matched their staged SHA-256
+values. Before observer load, the user confirmed the seven visible bars as red,
+green, blue, gold, white, magenta, and teal. The first snapshot landed on page
+0, while the already validated in-path capture was page 1. Repeating unchanged
+load snapshots across the cursor-flip phase produced a page-1 snapshot with
+exact agreement:
+
+```
+TFBL=100b9700 BFBL=000b9728 top=0172e000
+43d64362 73387347 237123d6 75b27546 bb81bb80 57c857b9 872a879e
+```
+
+This is a successful positive control for the observer on the selected page.
+The user also confirmed a newly rendered foreground row labeled red, green,
+blue, gold, white, magenta, and teal displayed every label in its intended
+color.
+
+Later repeated snapshots are not stable test data: every observer load emits
+eight `pr_info` lines, and kernel console output becomes new VCSA content that
+the running client mirrors into subsequent pages. Future use must lower console
+loglevel before rendering the deterministic frame, preserve the old level, and
+accept only the first snapshot for the intended page. Restore loglevel only
+after the service is stopped.
+
+Observer unload, exact client termination, DRM removal, and legacy `gcn-vifb`
+plus `gcn_gx` recovery all passed without a mapping warning or fault.
+
+Next restore the byte-identical clean `gcn-drm` implementation, render the same
+bars, and visually classify the frame before loading the unchanged validated
+observer. The first page-1 XFB snapshot will show whether a wrong-color clean
+frame contains exchanged chroma bytes in RAM or whether the exchange occurs
+after physical XFB storage.
