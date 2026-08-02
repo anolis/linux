@@ -4759,3 +4759,35 @@ and classify the unchanged frozen frame. Regardless of that result, run
 unchanged before resuming the client. If either command fails, attempt the clear
 again before any teardown. Never leave register `0x62` intentionally set to
 `0x02` across service stop or reboot.
+
+## 2026-08-02: Validate AVE 0x62 as the live chroma-swap control
+
+The deployed utility matched staged SHA-256 `aab69bc...`. A fresh clean DRM
+transaction produced a visually correct deterministic frame while register
+`0x62` read `0x00`. Exact client PID 10595 was stopped and confirmed in state
+`T`, preserving one XFB, VI configuration, and DRM frame for the entire test.
+
+Writing only `0x02` produced this immediate visible sequence on that unchanged
+frame:
+
+```
+blue, green, red, light blue, white, magenta, orange
+```
+
+The utility read the register back as `0x02`. Writing only `0x00` then restored
+the original correct red, green, blue, gold, white, magenta, and teal colors
+immediately, and readback returned `0x00`. No rendering, page flip, XFB write,
+or VI write could occur while the client remained stopped.
+
+This is a successful positive and restoration control: AVE register `0x62` bit
+1 directly causes the exact downstream red/blue plus teal/gold exchange. The
+client was resumed before service stop; legacy gcnfb plus generated GX,
+console loglevel 7, and final `AVE[0x62]=0x00` were all restored without fault.
+
+The earlier naturally wrong frozen frame still read `0x00`, so software must
+not treat a zero read as proof that the encoder's effective path is already
+correct. The next production test should unconditionally write `0x00` whenever
+DRM acquires VI/AVE ownership, before exposing the first frame, and verify
+repeatable correct colors across multiple complete transactions. Keep the
+dedicated AVE I2C adapter and remove the experimental `--set-swap` path after
+the production write has passed its repeatability tests.
