@@ -4626,3 +4626,38 @@ visually classified. On an established exchanged frame, run one
 `--clear-swap` transaction and record the before/after register values plus the
 immediate visual result. Do not run the write when colors are already correct;
 that would not validate the symptom transition.
+
+## 2026-08-02: Validate Wii-specific AVE bus and read register 0x62
+
+The deployed boot image matched the staged `b8b0c3f5...` SHA-256. Before any
+userspace I2C transaction, the dedicated adapter registered `/dev/i2c-0` and
+client `0-0070`, then debugfs reported the required idle state:
+
+```
+gpio-14 (AVE_SCL | scl) out hi
+gpio-15 (AVE_SDA | sda) out hi
+```
+
+This is the direct positive control that failed with generic `i2c-gpio`; active
+SCL and historical SDA direction handling are now validated on hardware.
+
+The installed static utility matched SHA-256 `5eeff399...` and its read-only
+combined transaction completed successfully:
+
+```
+AVE[0x62] before: 0x00
+rc=0
+```
+
+Both GPIOs returned to `out hi` afterward. The AVE therefore acknowledges
+address `0x70`, and the full register-pointer/write plus repeated-start/read
+path works. Keep the dedicated adapter.
+
+Register `0x62` was already zero before DRM started, so do not credit that value
+with fixing or causing the earlier nondeterminism yet. Start the checksum-known
+clean DRM path and render the deterministic bars without touching AVE. If the
+frame is visibly exchanged while `0x62` still reads zero, the legacy comment is
+not sufficient to explain this modern failure and another AVE register or
+ownership sequence must be isolated. If colors are correct, repeat clean DRM
+transactions while reading `0x62` before each run; do not write zero to an
+already-correct frame.
