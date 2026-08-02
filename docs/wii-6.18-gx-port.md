@@ -4559,3 +4559,33 @@ Wii remains booted on the already validated `b55d13f1...` image with `/dev/i2c-0
 and client `0-0070` present. Replace only `/usr/local/sbin/wii-ave-reg`, verify
 the installed checksum, and repeat the read-only invocation. Do not pass
 `--clear-swap` until the read transaction succeeds and reports register `0x62`.
+
+## 2026-08-02: AVE register read reaches I2C but bus clock is held low
+
+The installed static utility matched its staged SHA-256 and executed without a
+loader dependency. Its read-only combined transaction reached `/dev/i2c-0` but
+failed with `ENXIO` (`No such device or address`), so the AVE did not acknowledge
+address `0x70`. No register write was attempted and this is not evidence for or
+against the value or effect of register `0x62`.
+
+The GPIO debug positive control found the electrical failure both before and
+after the read attempt:
+
+```
+gpio-14 (AVE_SCL | scl) out lo
+gpio-15 (AVE_SDA | sda) out hi
+```
+
+An idle I2C clock cannot remain low. This explains the NACK and rejects the
+current standard open-drain DTS description as a functional port of the old Wii
+bus behavior.
+
+The historical Wii `i2c-gpio` implementation used behavior not expressible by
+the current standard binding: SCL remained an output and was actively written
+high/low, while SDA used `sda-enforce-dir` to return to output mode for writes
+and switch to input specifically for ACK/data reads. The next isolated change
+should implement a small Wii AVE bit-bang adapter using `i2c-algo-bit` and those
+exact line operations, rather than guessing AVE registers or broadening the DRM
+change. Its positive control is an idle-high SCL in debugfs followed by a
+successful read-only `0x62` transaction. Only then repeat `--clear-swap` on a
+visibly wrong frame.
