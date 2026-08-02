@@ -16,3 +16,13 @@ config DRM_GCN_VI
 	  driver.
 
 	  If M is selected, the module will be called gcn-drm.
+
+config DRM_GCN_XFB_OBSERVER
+	tristate "Nintendo GameCube/Wii XFB debug observer"
+	depends on WII
+	help
+	  Build a read-only diagnostic module that samples the XFB page currently
+	  selected by the Wii Video Interface. This is intended for development
+	  and should normally be left disabled.
+
+	  If M is selected, the module will be called gcn-xfb-observer.
