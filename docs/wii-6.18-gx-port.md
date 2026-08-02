@@ -3921,3 +3921,27 @@ stack and PID file, restored `gcn-vifb` plus `gcn_gx`, and logged no fault.
 Instrument the console client to print each semantic palette entry's XRGB8888
 value, converted RGB565 word, and actual mapped bytes as a positive control.
 Use that evidence before changing palette values or storage again.
+
+## 2026-08-02: Stage console RGB565 palette positive control
+
+- Palette diagnostic implementation: `1b4b456ad`
+- Diagnostic `wii-drm-console` SHA-256:
+  `20a8713cd918578ad494b26e9f416a5ce27a99fbf8df73d5a51c68a6ec92dda5`
+- Clean corrected `gcn-drm.ko` SHA-256:
+  `f4aae461c3fe31fbc38bd6cc7ffedd715bf105d0d0e36a050d55652610c8f78d`
+- Client-aware service SHA-256:
+  `74229640ab480c2eb5488acb296029af9827eaf5609e63e08d9058060214476b`
+
+Replace only the console client and run the normal service transaction. The
+client must print semantic palette values and PowerPC-native RGB565 bytes to
+`/run/wii-drm-client.log` without changing the displayed framebuffer. Expected
+red is XRGB `00aa0000`, RGB565 `a800`, bytes `a8,00`; expected blue is XRGB
+`000000aa`, RGB565 `0015`, bytes `00,15`. Green, gold, white, magenta, and teal
+must similarly match the standard VGA values in source.
+
+Repeat the labeled screen only to correlate the unchanged visual failure with
+the exact diagnostic run. Then stop the service and require normal client,
+module, and ownership cleanup. If logged values and bytes are correct, the next
+test must observe what the kernel conversion path reads from this console
+framebuffer; do not compensate the palette or storage without that matched
+downstream measurement.
