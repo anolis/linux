@@ -7,6 +7,8 @@
 #include <linux/io.h>
 #include <linux/module.h>
 
+#include <asm/cacheflush.h>
+
 #define GCN_VI_PHYS		0x0c002000
 #define GCN_VI_SIZE		0x100
 #define GCN_VI_TFBL		0x1c
@@ -15,6 +17,7 @@
 #define GCN_XFB_PHYS		0x01698000
 #define GCN_XFB_SIZE		0x00168000
 #define GCN_XFB_PITCH		(640 * 2)
+#define GCN_XFB_PAGE_SIZE	(GCN_XFB_PITCH * 480)
 #define GCN_XFB_FBA_MASK	0x00ffffff
 
 #define GCN_BAR_X		320
@@ -24,6 +27,10 @@
 
 static void __iomem *vi;
 static void *xfb;
+static bool flush_selected;
+module_param(flush_selected, bool, 0444);
+MODULE_PARM_DESC(flush_selected,
+		 "flush the selected XFB page after sampling (default: false)");
 
 static int __init gcn_xfb_observer_init(void)
 {
@@ -64,6 +71,14 @@ static int __init gcn_xfb_observer_init(void)
 		pr_info("gcn-xfb-observer: row=%u phys=%08x xfb=%08x\n",
 			i, GCN_XFB_PHYS + offset,
 			READ_ONCE(*(u32 *)(xfb + offset)));
+	}
+	if (flush_selected) {
+		offset = top - GCN_XFB_PHYS;
+		flush_dcache_range((unsigned long)xfb + offset,
+				   (unsigned long)xfb + offset +
+				   GCN_XFB_PAGE_SIZE);
+		pr_info("gcn-xfb-observer: flushed selected page top=%08x size=%08x\n",
+			top, GCN_XFB_PAGE_SIZE);
 	}
 
 	return 0;
