@@ -4390,3 +4390,28 @@ Next capture complete VI register state for one known-correct diagnostic run and
 one clean wrong-color run with console printk suppressed, then compare every
 register byte-for-byte. If VI state is identical, instrument the AVE I2C state
 and ownership handoff rather than revisiting pixel conversion.
+
+## 2026-08-02: Stage paired complete VI register snapshots
+
+- VI-snapshot observer: `0ef6e166f`
+- `gcn-xfb-observer.ko` SHA-256:
+  `ce611ed0dc11b49f8fd1353c8d8689b0d05fb433a00a78a87eb6d2d2f1b6fc35`
+- Clean wrong-color `gcn-drm.ko` SHA-256:
+  `f4aae461c3fe31fbc38bd6cc7ffedd715bf105d0d0e36a050d55652610c8f78d`
+- Known-correct capture `gcn-drm.ko` SHA-256:
+  `a2c8879237efc62c6fe7cf6ff303c042b0eb201073420f4c3d00f8434d9e89c7`
+
+The observer now reads the complete 0x100-byte VI resource in sixteen-byte
+groups after its selected-page samples. Run it with `flush_selected=0`; this is
+a read-only state comparison.
+
+For each driver artifact separately: suppress console printk before service
+start, render the identical deterministic bars, wait for both pages, visually
+classify the output, then load the checksum-verified observer once. Save the
+complete `VI+00` through `VI+f0` snapshot and selected-page words before
+teardown. Restore loglevel and legacy graphics between artifacts.
+
+Compare all stable VI words byte-for-byte. Treat DI IRQ flags and field counters
+as volatile unless a stable bit difference repeats. A stable VI difference is
+the next targeted state test. If all mode, address, clock, filter, and control
+state matches, move downstream to AVE I2C register capture and ownership timing.
