@@ -23,7 +23,7 @@
 #define GCN_BAR_COUNT		7
 
 static void __iomem *vi;
-static void __iomem *xfb;
+static void *xfb;
 
 static int __init gcn_xfb_observer_init(void)
 {
@@ -48,7 +48,7 @@ static int __init gcn_xfb_observer_init(void)
 		return -ERANGE;
 	}
 
-	xfb = ioremap(GCN_XFB_PHYS, GCN_XFB_SIZE);
+	xfb = memremap(GCN_XFB_PHYS, GCN_XFB_SIZE, MEMREMAP_WB);
 	if (!xfb) {
 		iounmap(vi);
 		vi = NULL;
@@ -62,7 +62,8 @@ static int __init gcn_xfb_observer_init(void)
 			 (GCN_BAR_Y0 + i * GCN_BAR_STEP) * GCN_XFB_PITCH +
 			 (GCN_BAR_X / 2) * sizeof(u32);
 		pr_info("gcn-xfb-observer: row=%u phys=%08x xfb=%08x\n",
-			i, GCN_XFB_PHYS + offset, in_be32(xfb + offset));
+			i, GCN_XFB_PHYS + offset,
+			READ_ONCE(*(u32 *)(xfb + offset)));
 	}
 
 	return 0;
@@ -71,7 +72,7 @@ static int __init gcn_xfb_observer_init(void)
 static void __exit gcn_xfb_observer_exit(void)
 {
 	if (xfb)
-		iounmap(xfb);
+		memunmap(xfb);
 	if (vi)
 		iounmap(vi);
 }
