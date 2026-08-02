@@ -114,11 +114,7 @@ struct gcn_drm {
 	spinlock_t scanout_lock;
 	unsigned int visible_page;
 	unsigned int pending_page;
-	unsigned int bar_capture_attempts;
-	unsigned int bar_capture_page;
 	bool flip_pending;
-	bool logged_bar_capture;
-	bool bar_capture_pending;
 };
 
 static bool program_mode = true;
@@ -226,60 +222,6 @@ static u32 gcn_drm_xrgb8888_pair(u32 pixel0, u32 pixel1)
 				 RGB2YUV_LUMA_888, RGB2YUV_CHROMA_888);
 }
 
-#define GCN_DRM_BAR_X		320
-#define GCN_DRM_BAR_Y0		48
-#define GCN_DRM_BAR_STEP	16
-
-static const u16 gcn_drm_bar_rgb565[] = {
-	0xa800, 0x0540, 0x0015, 0xaaa0, 0xad55, 0xa815, 0x0555,
-};
-
-static bool gcn_drm_detect_bar_frame(struct gcn_drm *gcn,
-				     struct drm_framebuffer *fb,
-				     const u8 *src)
-{
-	u16 samples[ARRAY_SIZE(gcn_drm_bar_rgb565)];
-	unsigned int i;
-	bool match = true;
-
-	if (gcn->logged_bar_capture)
-		return false;
-
-	for (i = 0; i < ARRAY_SIZE(samples); i++) {
-		const u16 *row = (const u16 *)(src +
-			(GCN_DRM_BAR_Y0 + i * GCN_DRM_BAR_STEP) * fb->pitches[0]);
-
-		samples[i] = row[GCN_DRM_BAR_X];
-		if (samples[i] != gcn_drm_bar_rgb565[i])
-			match = false;
-	}
-
-	if (gcn->bar_capture_attempts++ < 16)
-		pr_info("gcn-vi: bar source %04x,%04x,%04x,%04x,%04x,%04x,%04x match=%u\n",
-			samples[0], samples[1], samples[2], samples[3],
-			samples[4], samples[5], samples[6], match);
-
-	return match;
-}
-
-static void gcn_drm_log_bar_xfb(struct gcn_drm *gcn, unsigned int page)
-{
-	const u32 *xfb = gcn->xfb + page * GCN_DRM_XFB_PAGE_SIZE;
-	unsigned int i;
-
-	for (i = 0; i < ARRAY_SIZE(gcn_drm_bar_rgb565); i++) {
-		unsigned int y = GCN_DRM_BAR_Y0 + i * GCN_DRM_BAR_STEP;
-
-		pr_info("gcn-vi: bar xfb page=%u row=%u source=%04x xfb=%08x\n",
-			page, i, gcn_drm_bar_rgb565[i],
-			xfb[y * (GCN_DRM_WIDTH / 2) + GCN_DRM_BAR_X / 2]);
-	}
-
-	gcn->logged_bar_capture = true;
-	gcn->bar_capture_page = page;
-	gcn->bar_capture_pending = true;
-}
-
 static int gcn_drm_convert(struct gcn_drm *gcn,
 			   struct drm_plane_state *state,
 			   unsigned int page)
@@ -290,7 +232,6 @@ static int gcn_drm_convert(struct gcn_drm *gcn,
 	u32 *dst = gcn->xfb + page * GCN_DRM_XFB_PAGE_SIZE;
 	unsigned int x;
 	unsigned int y;
-	bool capture_bars = false;
 	int ret;
 
 	if (!fb || !shadow->data[0].vaddr)
@@ -307,9 +248,6 @@ static int gcn_drm_convert(struct gcn_drm *gcn,
 		case DRM_FORMAT_RGB565: {
 			const u16 *pixels = (const u16 *)src;
 
-			if (!y)
-				capture_bars = gcn_drm_detect_bar_frame(gcn, fb,
-					shadow->data[0].vaddr);
 			for (x = 0; x < GCN_DRM_WIDTH; x += 2)
 				*dst++ = gcn_drm_rgb565_pair(pixels[x],
 							     pixels[x + 1]);
@@ -333,8 +271,6 @@ static int gcn_drm_convert(struct gcn_drm *gcn,
 			   page * GCN_DRM_XFB_PAGE_SIZE,
 			   (unsigned long)gcn->xfb +
 			   (page + 1) * GCN_DRM_XFB_PAGE_SIZE);
-	if (capture_bars)
-		gcn_drm_log_bar_xfb(gcn, page);
 out_end_access:
 	drm_gem_fb_end_cpu_access(fb, DMA_FROM_DEVICE);
 	return ret;
@@ -353,12 +289,6 @@ static void gcn_drm_set_scanout(struct gcn_drm *gcn, unsigned int page)
 	out_be32(gcn->vi_base + VI_TFBL,
 		 VI_FB_POB | xof << VI_FB_XOF_SHIFT | top >> 5);
 	out_be32(gcn->vi_base + VI_BFBL, VI_FB_POB | bottom >> 5);
-	if (gcn->bar_capture_pending && page == gcn->bar_capture_page) {
-		pr_info("gcn-vi: bar scanout page=%u phys=%08x TFBL=%08x BFBL=%08x\n",
-			page, top, in_be32(gcn->vi_base + VI_TFBL),
-			in_be32(gcn->vi_base + VI_BFBL));
-		gcn->bar_capture_pending = false;
-	}
 }
 
 static void gcn_drm_quiesce_irqs(struct gcn_drm *gcn)
