@@ -4739,3 +4739,23 @@ whether red/blue plus cyan/gold exchange immediately. Then write `0x00`
 regardless of the visual outcome and require the original correct frame to
 return or remain unchanged. This reversible positive control directly tests the
 legacy comment without depending on register readback semantics.
+
+## 2026-08-02: Stage reversible AVE 0x62 write control
+
+- Reversible utility implementation: `c6bd58d73`
+- Static `wii-ave-reg` SHA-256:
+  `aab69bc762c226d1a6b82b341b1a43cbcc8e1d553b0c9bc1b77323af2fb74932`
+
+The utility retains read-only mode and the existing `--clear-swap` write of
+`0x00`, and adds one explicit `--set-swap` write of `0x02`. It is statically
+linked, compiles with `-Wall -Wextra -Werror`, contains no ELF interpreter, and
+rejects extra arguments. No kernel or DRM artifact changes in this test.
+
+Deploy and verify only this binary. Start clean DRM transactions until one frame
+is visually classified correct, then stop the exact client PID with `SIGSTOP`
+so no conversion or page flip can race the encoder test. Run `--set-swap` once
+and classify the unchanged frozen frame. Regardless of that result, run
+`--clear-swap` once and require the original correct colors to return or remain
+unchanged before resuming the client. If either command fails, attempt the clear
+again before any teardown. Never leave register `0x62` intentionally set to
+`0x02` across service stop or reboot.
