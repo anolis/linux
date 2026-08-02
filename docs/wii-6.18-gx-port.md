@@ -4460,3 +4460,30 @@ Both transactions unloaded the observer, terminated the exact client PID,
 removed DRM, restored legacy `gcn-vifb` plus `gcn_gx`, restored console loglevel
 7, and logged no fault. Continue downstream with AVE encoder I2C state and
 ownership timing; do not modify VI timing or XFB conversion based on this result.
+
+## 2026-08-02: Identify the AVE chroma-exchange control
+
+The next clean-driver run again established the incorrect sequence after the
+bars had settled. A source audit then found an exact match for the symptom in
+the existing Wii framebuffer driver. `vi_ave_setup()` contains this component
+output workaround:
+
+```c
+/* clear bit 1 otherwise red and blue get swapped */
+if (ctl->has_component_cable)
+	vi_ave_out8(client, 0x62, 0);
+```
+
+The paired VI snapshots report `VI_SEL=1`, confirming component output. The
+modern DRM driver programs VI and XFB but never accesses the AVE encoder, so it
+inherits whatever AVE register state firmware or an earlier owner left behind.
+That explains why identical corrected XFB bytes and identical stable VI state
+can produce either correct colors or the exact red/blue and Cb/Cr exchange.
+
+The modern kernel cannot yet test this register: Wii DTS still comments out its
+GPIO-backed AVE I2C bus using an obsolete pre-standard binding, and the running
+system exposes no I2C adapter. Restore that node with the current `i2c-gpio`
+binding first. The positive-control experiment is then to read AVE register
+`0x62` on an established wrong frame and write zero without touching XFB or VI.
+An immediate visible correction would isolate the fault to AVE state and define
+the required DRM ownership fix.
