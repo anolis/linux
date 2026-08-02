@@ -4690,3 +4690,34 @@ but does not yet explain the prior nondeterminism. Repeat complete clean DRM
 transactions without AVE writes and classify each settled frame. Also fix the
 service to remove an unbound preloaded `gcn_drm` before ownership transfer, but
 keep that operational change separate from color-state conclusions.
+
+## 2026-08-02: Rule out AVE register 0x62 as sole color-state cause
+
+A second independent clean DRM transaction started from restored legacy state
+with the same checksum-known kernel, DRM module, client, and service. Read-only
+AVE measurements returned `0x00` both immediately before ownership transfer and
+again after the deterministic bars had settled.
+
+Unlike the preceding correct run, the user classified this frame as the exact
+known exchange signature:
+
+```
+blue, green, red, light blue, white, magenta, gold
+```
+
+The expected semantic order remained red, green, blue, gold, white, magenta,
+and teal. Client PID 4275 was stopped to preserve the exact wrong frame, and a
+third read-only measurement still returned `AVE[0x62] before: 0x00`; both AVE
+GPIOs remained `out hi`. No register write was issued because writing zero over
+zero cannot validate a state transition.
+
+The client was resumed before teardown. Service stop removed DRM, restored
+legacy gcnfb plus generated GX, restored console loglevel 7, and left both AVE
+lines high. Filesystems were synchronized and the Wii powered off cleanly.
+
+Identical AVE register `0x62=0` now correlates with both one correct and one
+wrong frame from consecutive clean DRM transactions. This definitively rules
+out that register as the sole source of the nondeterminism despite the legacy
+driver comment. Keep the validated AVE bus and next capture a controlled set of
+other readable AVE configuration registers for paired correct and wrong runs;
+do not revisit XFB bytes, stable VI state, or write `0x62` again.
