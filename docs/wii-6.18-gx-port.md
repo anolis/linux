@@ -4525,3 +4525,24 @@ frozen or stable wrong-color frame immediately becomes the correct
 red/green/blue/gold sequence, the AVE state is the proven cause. If it does not,
 record both register values and the unchanged visual sequence; do not expand to
 the full legacy AVE initialization sequence without another isolated test.
+
+## 2026-08-02: AVE bus enumerates; reject dynamically linked test utility
+
+The checksum-verified image booted normally. The restored bus produced
+`/dev/i2c-0`, the declared client appeared as `0-0070`, and the kernel logged:
+
+```
+i2c-gpio hollywood:i2c-video: using lines 527 (SDA) and 526 (SCL, no clock stretching)
+```
+
+This validates DTS placement and platform-device population. The accompanying
+warning that SCL cannot be read is expected for the deliberately output-only
+clock line and matches the old `no-clock-stretching` declaration.
+
+The first read-only utility invocation failed in the dynamic loader before
+`main()` because the cross-toolchain binary requires `GLIBC_2.34`, which the Wii
+rootfs does not provide. Return code was 1 and no I2C transaction occurred.
+Therefore this attempt says nothing about AVE register `0x62` and must not be
+counted as either a positive or negative hardware result. Rebuild the narrow
+utility as a static executable, checksum-stage it separately, and repeat the
+read-only positive control before any write.
