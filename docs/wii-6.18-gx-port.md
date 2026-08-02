@@ -4791,3 +4791,28 @@ DRM acquires VI/AVE ownership, before exposing the first frame, and verify
 repeatable correct colors across multiple complete transactions. Keep the
 dedicated AVE I2C adapter and remove the experimental `--set-swap` path after
 the production write has passed its repeatability tests.
+
+## 2026-08-02: Stage unconditional AVE chroma-swap clear on DRM ownership
+
+- Implementation commit: `7ef1ccbec`
+- `zImage` and `dtbImage.wii` SHA-256:
+  `b39cdf270d8c0a960ce9b47f53845137106dadb373e4d2a6ccc61cfec8392505`
+- `gcn-drm.ko` SHA-256:
+  `7fa35c1812d5339d3b4f780b87768d3cffff61439ecb7f3dff612bfcc9aba83f`
+
+The Wii VI node now references the AVE I2C client through an
+`audio-video-encoder` phandle. During each Hollywood DRM probe, after mapping
+VI/XFB resources but before programming the video mode or registering DRM, the
+driver resolves that client and unconditionally writes `0x00` to AVE register
+`0x62`. Probe defers if the adapter/client is not ready and fails on an I2C
+error or short transfer. Flipper remains unaffected because its node has no AVE
+phandle.
+
+Deploy and checksum-verify both the kernel image and module. After reboot,
+perform at least three independent complete DRM ownership transactions. Before
+each start, remove any stale, unbound `gcn_drm` module that udev preloaded while
+legacy gcnfb still owned VI. Require the driver log
+`cleared AVE chroma-swap control` and visually correct red, green, blue, gold,
+white, magenta, and teal output on every transaction. A readback of zero is
+supporting evidence only; the full-frame visual classification is the deciding
+result. Restore the legacy console and console loglevel after every run.
