@@ -4487,3 +4487,41 @@ binding first. The positive-control experiment is then to read AVE register
 `0x62` on an established wrong frame and write zero without touching XFB or VI.
 An immediate visible correction would isolate the fault to AVE state and define
 the required DRM ownership fix.
+
+## 2026-08-02: Stage direct AVE register 0x62 positive control
+
+- AVE GPIO-I2C implementation: `aac7a314b`
+- `zImage` SHA-256:
+  `b55d13f13183faec81ce426632d75737353b46918856cb71068846b4b5780aa8`
+- `dtbImage.wii` SHA-256:
+  `b55d13f13183faec81ce426632d75737353b46918856cb71068846b4b5780aa8`
+- `wii-ave-reg` SHA-256:
+  `e7ca238709431579abc5a2355a04ef38fd801daf2b51576077c8381be68cfad2`
+
+The Wii DTS now places a standard `i2c-gpio` adapter directly below the
+Hollywood platform bus, where `wii_device_probe()` will populate it. GPIO 15 is
+SDA and GPIO 14 is output-only SCL; both use open-drain semantics and a
+two-microsecond delay matching the old 250 kHz target. The AVE remains declared
+at address `0x70` without a bound kernel driver.
+
+Boot this exact image and validate the test apparatus before drawing a hardware
+conclusion. Require `/dev/i2c-0`, the `i2c-gpio` adapter in sysfs, and an AVE
+register read that completes without changing the visible frame. Run the clean
+DRM bars until the exact exchanged sequence is visually established, then run:
+
+```
+wii-ave-reg /dev/i2c-0
+```
+
+Record the pre-write value as the measurement positive control. Without
+rerendering, page flipping, or writing VI/XFB, run:
+
+```
+wii-ave-reg /dev/i2c-0 --clear-swap
+```
+
+The utility reads register `0x62`, writes only `0x00`, and reads it back. If the
+frozen or stable wrong-color frame immediately becomes the correct
+red/green/blue/gold sequence, the AVE state is the proven cause. If it does not,
+record both register values and the unchanged visual sequence; do not expand to
+the full legacy AVE initialization sequence without another isolated test.
