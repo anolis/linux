@@ -704,6 +704,19 @@ config I2C_GPIO_FAULT_INJECTOR
 	  faults to an I2C bus, so another bus master can be stress-tested.
 	  This is for debugging. If unsure, say 'no'.
 
+config I2C_WII_AVE
+	tristate "Nintendo Wii AVE GPIO I2C"
+	depends on WII || COMPILE_TEST
+	depends on GPIOLIB && OF
+	select I2C_ALGOBIT
+	help
+	  Support the GPIO-backed I2C bus between the Nintendo Wii Hollywood
+	  chipset and its audio/video encoder. The hardware requires line
+	  direction handling that cannot be represented by the generic
+	  i2c-gpio binding.
+
+	  If built as a module, it will be called i2c-wii-ave.
+
 config I2C_GXP
 	tristate "GXP I2C Interface"
 	depends on ARCH_HPE_GXP || COMPILE_TEST

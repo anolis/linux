@@ -217,14 +217,10 @@
 		i2c-video {
 			#address-cells = <1>;
 			#size-cells = <0>;
-			compatible = "i2c-gpio";
+			compatible = "nintendo,wii-ave-i2c";
 
-			sda-gpios = <&GPIO 15 (GPIO_ACTIVE_HIGH |
-					       GPIO_OPEN_DRAIN)>;
-			scl-gpios = <&GPIO 14 (GPIO_ACTIVE_HIGH |
-					       GPIO_OPEN_DRAIN)>;
-			i2c-gpio,delay-us = <2>;
-			i2c-gpio,scl-output-only;
+			sda-gpios = <&GPIO 15 GPIO_ACTIVE_HIGH>;
+			scl-gpios = <&GPIO 14 GPIO_ACTIVE_HIGH>;
 
 			AVE: audio-video-encoder@70 {
 				compatible = "nintendo,wii-audio-video-encoder";
