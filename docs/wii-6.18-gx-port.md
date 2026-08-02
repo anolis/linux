@@ -4017,3 +4017,26 @@ stable client/network/kernel state, automatic exact-PID termination, complete
 DRM module removal, and clear legacy recovery. Passing accepts the clean
 service-managed console milestone and unblocks the missing-client rollback
 control; it does not yet enable boot runlevel links.
+
+## 2026-08-02: Reject final clean console; logger perturbs failure
+
+The final clean console, corrected clean module, and service matched every
+staged SHA-256 value, and no diagnostic text appeared. Service start and client
+liveness passed, but the explicit color screen again displayed blue, green,
+red, light blue, white, magenta, and gold instead of red, green, blue, gold,
+white, magenta, and teal.
+
+This creates a reproducible binary correlation: the palette-logging client
+displayed correct colors on two consecutive complete service transactions,
+while the clean byte-identical rendering implementation displayed the exact
+red/blue and cyan/yellow exchange before and after those runs. The logger runs
+after initial modeset and changes no framebuffer value, palette, format, or
+storage operation. Treat its effect as timing, cache pressure, or code-layout
+perturbation, not as functional behavior to retain.
+
+Service stop again terminated the exact client PID, restored `gcn-vifb` and
+`gcn_gx`, removed the DRM stack and PID file, and logged no fault. Investigate
+cache visibility between the userspace dumb-buffer mmap and the driver's shmem
+kernel mapping. In particular, audit `drm_gem_fb_begin_cpu_access()` direction,
+PowerPC cache alias handling, and whether dirty userspace pages are written back
+before `gcn_drm_convert()` reads them. Do not change color encoding again.
