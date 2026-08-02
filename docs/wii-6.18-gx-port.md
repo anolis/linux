@@ -3896,3 +3896,28 @@ Passing this cleaned regression permits the separate missing-client rollback
 control. Treat udev autoload suppression as a later memory-footprint cleanup:
 it does not own hardware or affect this transaction while `gcn-vifb` remains
 bound.
+
+## 2026-08-02: Reject cleaned console color identity; client path remains
+
+All deployed artifacts matched their staged SHA-256 values. The clean module
+contained no temporary conversion logs, service start transferred ownership,
+and the default client reported `640x480 rgb565` with a live verified PID. The
+screen was clear and stable, tty update passed, and the cursor blinked.
+
+The explicit color gate failed: source red displayed blue, green displayed
+green, blue displayed red, gold displayed light blue/cyan, white displayed
+white, magenta displayed magenta, and teal/cyan displayed gold. The purple live
+update remained purple and the cyan cursor appeared gold. This is again an
+exact red/blue and cyan/yellow exchange.
+
+A live VCSA dump independently contained the correct Linux console attributes:
+`0x04` for the red line, `0x02` for green, and `0x01` for blue. The exact same
+clean driver passed the standalone RGB565 pattern in the preceding accepted
+test, so do not revert its XFB chroma-order correction or change KMS state.
+Constrain the remaining defect to the console client's VCSA-to-RGB565 path.
+
+Service stop terminated and waited for the exact client PID, removed the DRM
+stack and PID file, restored `gcn-vifb` plus `gcn_gx`, and logged no fault.
+Instrument the console client to print each semantic palette entry's XRGB8888
+value, converted RGB565 word, and actual mapped bytes as a positive control.
+Use that evidence before changing palette values or storage again.
