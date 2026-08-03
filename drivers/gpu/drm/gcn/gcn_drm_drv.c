@@ -4,6 +4,7 @@
  * Copyright (C) 2026 Bill Carson
  */
 
+#include <linux/delay.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
 #include <linux/module.h>
@@ -69,6 +70,7 @@
 #define VI_UNK3			0x7c
 
 #define VI_DCR_NIN		BIT(2)
+#define VI_DCR_RESET		BIT(1)
 #define VI_DCR_ENABLE		BIT(0)
 #define VI_DI_IRQ		BIT(31)
 #define VI_DI_ENABLE		BIT(28)
@@ -309,7 +311,10 @@ static void gcn_drm_program_ntsc_480i(struct gcn_drm *gcn)
 	void __iomem *vi = gcn->vi_base;
 
 	gcn_drm_quiesce_irqs(gcn);
+	out_be16(vi + VI_DCR, VI_DCR_RESET);
+	udelay(2);
 	out_be16(vi + VI_DCR, 0);
+	drm_info(&gcn->drm, "pulsed VI DCR reset\n");
 
 	out_be16(vi + VI_VTR, VI_NTSC_VTR);
 	out_be32(vi + VI_HTR0, VI_NTSC_HTR0);
