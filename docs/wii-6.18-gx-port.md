@@ -5127,3 +5127,27 @@ actions for `0x65=3` and restoration to `0x65=1`. On one frozen wrong frame,
 write 3 and classify the unchanged output, then restore 1 regardless of result.
 Do not expand to the complete AVE magic sequence unless this single-register
 control is negative.
+
+## 2026-08-03: Stage reversible AVE oversampling control
+
+- Utility implementation: `6ec1d1e32`
+- Static `wii-ave-reg` SHA-256:
+  `2ca24d201ba5a8053bc1f6d85caf00dc2fe50a530ec3cc9b4040136d2a601dd9`
+
+The utility adds two explicit actions for only AVE register `0x65`:
+`--set-oversampling-3` writes current libogc's initialization value, and
+`--set-oversampling-1` restores the inherited historical Linux value. Each
+action reads before the write, performs one byte write, and reads afterward.
+All existing read, dump, and `0x62` controls remain unchanged.
+
+Deploy and checksum-verify only the utility. Start the committed no-write DRM
+build, reproduce and visually classify the persistent swapped bars, then stop
+the exact client PID in state `T`. Confirm `0x65=1` with a read-only dump before
+any write. Write `0x65=3` once and classify the unchanged frozen frame. Then
+write `0x65=1` once regardless of the first visual result and classify it again.
+
+Success requires a reversible, reproducible color transition attributable to
+these writes alone. Readback changes without a visible transition are a valid
+negative result. Resume the client before service stop and leave register
+`0x65=1`; never tear down or reboot with the experimental value 3 intentionally
+active.
