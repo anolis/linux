@@ -4816,3 +4816,37 @@ legacy gcnfb still owned VI. Require the driver log
 white, magenta, and teal output on every transaction. A readback of zero is
 supporting evidence only; the full-frame visual classification is the deciding
 result. Restore the legacy console and console loglevel after every run.
+
+## 2026-08-03: Reject probe-time AVE clear placement
+
+The deployed kernel and module matched their staged SHA-256 values. The AVE
+adapter and client enumerated normally, `/boot` remained read-only, and a
+read-only measurement returned register `0x62=0x00`. After removing the stale,
+unbound udev-loaded `gcn_drm`, the service transferred VI ownership and the new
+driver logged `cleared AVE chroma-swap control` before starting the live RGB565
+console client.
+
+The deterministic seven-bar fixture nevertheless displayed:
+
+```
+blue, green, red, light blue, white, magenta, gold
+```
+
+This is the exact known AVE chroma-swap signature rather than the expected red,
+green, blue, gold, white, magenta, and teal sequence. A successful I2C write
+during probe therefore does not guarantee the effective encoder state by the
+time the first modeset reaches scanout.
+
+The exact client PID was stopped to preserve the wrong frame for a post-modeset
+clear control, but the utility was accidentally invoked as
+`wii-ave-reg --clear-swap`. Its parser treated `--clear-swap` as an I2C device
+path and made no transfer. Do not classify that as a hardware result. The
+required invocation is `wii-ave-reg /dev/i2c-0 --clear-swap`.
+
+Before pausing, the client was resumed, service stop restored legacy gcnfb plus
+generated GX, console loglevel 7 was restored, filesystems were synchronized,
+and the Wii powered off cleanly. Repeat the same frozen wrong-frame control
+with the correct utility invocation before moving the driver write. If a
+post-modeset zero write immediately restores the intended colors, relocate or
+repeat the production clear at a lifecycle point after VI mode programming and
+before the first visible framebuffer update.
