@@ -4850,3 +4850,41 @@ with the correct utility invocation before moving the driver write. If a
 post-modeset zero write immediately restores the intended colors, relocate or
 repeat the production clear at a lifecycle point after VI mode programming and
 before the first visible framebuffer update.
+
+## 2026-08-03: Validate AVE bit as a reversible compensator, not a fixed state
+
+A fresh transaction reused the exact staged kernel, module, console, service,
+and deterministic bars. Probe again logged its unconditional `0x62=0` write,
+but the established frame reproduced the natural wrong sequence:
+
+```
+blue, green, red, light blue, white, magenta, gold
+```
+
+Client PID 2294 was stopped and confirmed in state `T`, preserving the exact
+XFB, page, VI state, and displayed frame. Repeating a zero write with the
+correct installed utility path and argument order completed successfully,
+read back zero, and produced no visible change. This rejects both the original
+probe placement and a simple post-modeset repetition of the same constant.
+
+With the client still stopped, writing only `0x02` to AVE register `0x62`
+immediately changed that same frozen wrong frame to the correct red, green,
+blue, gold, white, magenta, and teal colors. Writing `0x00` again immediately
+returned the unchanged frozen frame to the wrong sequence. Register readback
+tracked each explicit value.
+
+This is a second reversible positive control and, combined with the earlier
+correct-frame control, changes the interpretation. AVE bit 1 deterministically
+exchanges the two chroma channels, but the required setting depends on a
+nondeterministic upstream chroma interpretation: an initially correct frame
+requires zero, while this initially exchanged frame requires two. Therefore no
+unconditional constant written at probe or after modeset can fix both states.
+The AVE register is a diagnostic compensator, not yet the root cause.
+
+The register was restored to zero, the client resumed, and service stop
+restored legacy gcnfb plus generated GX and console loglevel 7 without fault.
+Before modifying production code again, repeat one complete exact-artifact
+transaction and frozen-frame toggle to confirm this inverse behavior. Then
+identify a readable or controllable upstream state that predicts which AVE bit
+setting is required; corrected XFB contents and stable VI MMIO state are
+already ruled out by prior paired captures.
