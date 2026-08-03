@@ -12,12 +12,17 @@
 #define AVE_ADDR 0x70
 #define AVE_SWAP_REG 0x62
 #define AVE_SWAP_ENABLE 0x02
+#define AVE_OVERSAMPLING_REG 0x65
+#define AVE_OVERSAMPLING_LEGACY 0x01
+#define AVE_OVERSAMPLING_LIBOGC 0x03
 
 enum action {
 	ACTION_READ,
 	ACTION_DUMP_STATE,
 	ACTION_CLEAR_SWAP,
 	ACTION_SET_SWAP,
+	ACTION_SET_OVERSAMPLING_LEGACY,
+	ACTION_SET_OVERSAMPLING_LIBOGC,
 };
 
 static const uint8_t state_registers[] = {
@@ -92,15 +97,16 @@ static int dump_state(int fd)
 
 static void print_help(const char *program)
 {
-	fprintf(stderr,
-		"usage: %s [i2c-device] [--dump-state|--clear-swap|--set-swap]\n",
-		program);
+	fprintf(stderr, "usage: %s [i2c-device] [action]\n", program);
+	fprintf(stderr, "actions: --dump-state --clear-swap --set-swap\n");
+	fprintf(stderr, "         --set-oversampling-1 --set-oversampling-3\n");
 }
 
 int main(int argc, char **argv)
 {
 	const char *device = "/dev/i2c-0";
 	enum action action = ACTION_READ;
+	uint8_t reg = AVE_SWAP_REG;
 	uint8_t value;
 	int fd;
 
@@ -116,6 +122,10 @@ int main(int argc, char **argv)
 		action = ACTION_CLEAR_SWAP;
 	} else if (argc > 2 && !strcmp(argv[2], "--set-swap")) {
 		action = ACTION_SET_SWAP;
+	} else if (argc > 2 && !strcmp(argv[2], "--set-oversampling-1")) {
+		action = ACTION_SET_OVERSAMPLING_LEGACY;
+	} else if (argc > 2 && !strcmp(argv[2], "--set-oversampling-3")) {
+		action = ACTION_SET_OVERSAMPLING_LIBOGC;
 	} else if (argc > 2) {
 		print_help(argv[0]);
 		return 2;
@@ -134,18 +144,29 @@ int main(int argc, char **argv)
 		return 0;
 	}
 
-	if (read_reg(fd, AVE_SWAP_REG, &value))
+	if (action == ACTION_SET_OVERSAMPLING_LEGACY ||
+	    action == ACTION_SET_OVERSAMPLING_LIBOGC)
+		reg = AVE_OVERSAMPLING_REG;
+
+	if (read_reg(fd, reg, &value))
 		goto fail;
-	printf("AVE[0x%02x] before: 0x%02x\n", AVE_SWAP_REG, value);
+	printf("AVE[0x%02x] before: 0x%02x\n", reg, value);
 
 	if (action != ACTION_READ) {
-		value = action == ACTION_SET_SWAP ? AVE_SWAP_ENABLE : 0;
-		printf("AVE[0x%02x] write:  0x%02x\n", AVE_SWAP_REG, value);
-		if (write_reg(fd, AVE_SWAP_REG, value))
+		if (action == ACTION_SET_SWAP)
+			value = AVE_SWAP_ENABLE;
+		else if (action == ACTION_SET_OVERSAMPLING_LEGACY)
+			value = AVE_OVERSAMPLING_LEGACY;
+		else if (action == ACTION_SET_OVERSAMPLING_LIBOGC)
+			value = AVE_OVERSAMPLING_LIBOGC;
+		else
+			value = 0;
+		printf("AVE[0x%02x] write:  0x%02x\n", reg, value);
+		if (write_reg(fd, reg, value))
 			goto fail;
-		if (read_reg(fd, AVE_SWAP_REG, &value))
+		if (read_reg(fd, reg, &value))
 			goto fail;
-		printf("AVE[0x%02x] after:  0x%02x\n", AVE_SWAP_REG, value);
+		printf("AVE[0x%02x] after:  0x%02x\n", reg, value);
 	}
 
 	close(fd);
