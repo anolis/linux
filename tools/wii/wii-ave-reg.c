@@ -35,7 +35,6 @@ enum action {
 	ACTION_SET_OVERSAMPLING_LEGACY,
 	ACTION_SET_OVERSAMPLING_LIBOGC,
 	ACTION_APPLY_LIBOGC_NTSC,
-	ACTION_RESTORE_STATE,
 };
 
 static const uint8_t snapshot_magic[8] = {
@@ -73,6 +72,14 @@ static const uint8_t state_registers[] = {
 	0x00, 0x01, 0x02, 0x03, 0x04,
 	0x05, 0x06, 0x08, 0x09, 0x0a,
 	0x62, 0x65, 0x6a, 0x6e,
+	0x71, 0x72, 0x7a, 0x7b, 0x7c, 0x7d,
+};
+
+/* Exclude block data and command/commit registers from readback assertions. */
+static const uint8_t stable_encoder_registers[] = {
+	0x00, 0x01, 0x02, 0x03,
+	0x05, 0x06, 0x08, 0x09, 0x0a,
+	0x65, 0x6a, 0x6e,
 	0x71, 0x72, 0x7a, 0x7b, 0x7c, 0x7d,
 };
 
@@ -140,29 +147,6 @@ static int write_regs(int fd, uint8_t reg, const uint8_t *values, size_t count)
 	bytes[0] = reg;
 	memcpy(&bytes[1], values, count);
 	return transfer(fd, &msg, 1);
-}
-
-static int read_full(int fd, void *buffer, size_t count)
-{
-	uint8_t *bytes = buffer;
-
-	while (count) {
-		ssize_t done = read(fd, bytes, count);
-
-		if (done < 0) {
-			if (errno == EINTR)
-				continue;
-			return -1;
-		}
-		if (!done) {
-			errno = EIO;
-			return -1;
-		}
-		bytes += done;
-		count -= done;
-	}
-
-	return 0;
 }
 
 static int write_full(int fd, const void *buffer, size_t count)
@@ -247,47 +231,6 @@ fail:
 	return -1;
 }
 
-static int load_state(const char *path, struct ave_snapshot *snapshot)
-{
-	uint8_t extra;
-	ssize_t extra_count;
-	int fd = open(path, O_RDONLY);
-	int rc = -1;
-
-	if (fd < 0) {
-		fprintf(stderr, "cannot open snapshot %s: %s\n", path,
-			strerror(errno));
-		return -1;
-	}
-
-	if (read_full(fd, snapshot, sizeof(*snapshot))) {
-		fprintf(stderr, "cannot read snapshot %s: %s\n", path,
-			strerror(errno));
-		goto out;
-	}
-	do {
-		extra_count = read(fd, &extra, 1);
-	} while (extra_count < 0 && errno == EINTR);
-	if (extra_count < 0) {
-		fprintf(stderr, "cannot validate snapshot %s: %s\n", path,
-			strerror(errno));
-		goto out;
-	}
-	if (extra_count) {
-		fprintf(stderr, "snapshot %s has an invalid size\n", path);
-		goto out;
-	}
-	if (memcmp(snapshot->magic, snapshot_magic, sizeof(snapshot_magic))) {
-		fprintf(stderr, "snapshot %s has an invalid header\n", path);
-		goto out;
-	}
-
-	rc = 0;
-out:
-	close(fd);
-	return rc;
-}
-
 static void build_libogc_ntsc_state(struct ave_snapshot *state)
 {
 	static const uint8_t gamma_first = 0x10;
@@ -323,27 +266,22 @@ static int apply_state(int fd, const struct ave_snapshot *state)
 	return 0;
 }
 
-static int verify_state(int fd, const struct ave_snapshot *expected)
+static int verify_stable_state(int fd, const struct ave_snapshot *expected)
 {
 	size_t i;
 
-	for (i = 0; i < ARRAY_SIZE(encoder_ranges); i++) {
-		const struct register_range *range = &encoder_ranges[i];
-		unsigned int offset;
+	for (i = 0; i < ARRAY_SIZE(stable_encoder_registers); i++) {
+		uint8_t reg = stable_encoder_registers[i];
+		uint8_t actual;
 
-		for (offset = 0; offset < range->count; offset++) {
-			uint8_t reg = range->first + offset;
-			uint8_t actual;
-
-			if (read_reg(fd, reg, &actual))
-				return -1;
-			if (actual != expected->values[reg]) {
-				fprintf(stderr,
-					"AVE[0x%02x] verify failed: expected 0x%02x, got 0x%02x\n",
-					reg, expected->values[reg], actual);
-				errno = EIO;
-				return -1;
-			}
+		if (read_reg(fd, reg, &actual))
+			return -1;
+		if (actual != expected->values[reg]) {
+			fprintf(stderr,
+				"AVE[0x%02x] verify failed: expected 0x%02x, got 0x%02x\n",
+				reg, expected->values[reg], actual);
+			errno = EIO;
+			return -1;
 		}
 	}
 
@@ -358,29 +296,16 @@ static int apply_libogc_ntsc(int fd, const char *snapshot_path)
 	if (save_state(fd, snapshot_path, &snapshot))
 		return -1;
 	build_libogc_ntsc_state(&libogc_state);
-	if (apply_state(fd, &libogc_state) || verify_state(fd, &libogc_state)) {
-		fprintf(stderr, "libogc AVE reset failed; restore %s immediately\n",
+	if (apply_state(fd, &libogc_state) ||
+	    verify_stable_state(fd, &libogc_state)) {
+		fprintf(stderr,
+			"libogc AVE reset failed; preserve %s and reboot immediately\n",
 			snapshot_path);
 		return -1;
 	}
 
-	printf("applied and verified libogc AVE NTSC/DTV reset\n");
-	return 0;
-}
-
-static int restore_state(int fd, const char *snapshot_path)
-{
-	struct ave_snapshot snapshot;
-
-	if (load_state(snapshot_path, &snapshot))
-		return -1;
-	if (apply_state(fd, &snapshot) || verify_state(fd, &snapshot)) {
-		fprintf(stderr, "AVE snapshot restoration failed: %s\n",
-			snapshot_path);
-		return -1;
-	}
-
-	printf("restored and verified AVE snapshot: %s\n", snapshot_path);
+	printf("applied libogc AVE NTSC/DTV reset; stable registers verified\n");
+	printf("snapshot is audit-only; reboot after visual classification\n");
 	return 0;
 }
 
@@ -406,7 +331,6 @@ static void print_help(const char *program)
 	fprintf(stderr, "actions: --dump-state --clear-swap --set-swap\n");
 	fprintf(stderr, "         --set-oversampling-1 --set-oversampling-3\n");
 	fprintf(stderr, "         --apply-libogc-ntsc SNAPSHOT\n");
-	fprintf(stderr, "         --restore-state SNAPSHOT\n");
 }
 
 int main(int argc, char **argv)
@@ -436,14 +360,11 @@ int main(int argc, char **argv)
 		action = ACTION_SET_OVERSAMPLING_LIBOGC;
 	} else if (argc > 2 && !strcmp(argv[2], "--apply-libogc-ntsc")) {
 		action = ACTION_APPLY_LIBOGC_NTSC;
-	} else if (argc > 2 && !strcmp(argv[2], "--restore-state")) {
-		action = ACTION_RESTORE_STATE;
 	} else if (argc > 2) {
 		print_help(argv[0]);
 		return 2;
 	}
-	if (action == ACTION_APPLY_LIBOGC_NTSC ||
-	    action == ACTION_RESTORE_STATE) {
+	if (action == ACTION_APPLY_LIBOGC_NTSC) {
 		if (argc != 4) {
 			print_help(argv[0]);
 			return 2;
@@ -472,13 +393,6 @@ int main(int argc, char **argv)
 		close(fd);
 		return rc ? 1 : 0;
 	}
-	if (action == ACTION_RESTORE_STATE) {
-		int rc = restore_state(fd, snapshot_path);
-
-		close(fd);
-		return rc ? 1 : 0;
-	}
-
 	if (action == ACTION_SET_OVERSAMPLING_LEGACY ||
 	    action == ACTION_SET_OVERSAMPLING_LIBOGC)
 		reg = AVE_OVERSAMPLING_REG;
