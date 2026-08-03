@@ -5059,3 +5059,32 @@ After transaction 6, service stop restored legacy graphics and console loglevel
 7, AVE readback was zero, and no fault occurred. The probe-write module was
 restored on disk as required by the staged control; the next deployment must
 replace it with the source-reverted build.
+
+## 2026-08-03: Stage production rollback of harmful AVE probe write
+
+- Rollback implementation: `d8e005571`
+- `zImage` and `dtbImage.wii` SHA-256:
+  `b8b0c3f54c4f5616cbf8d32ba099390beb5afdd83bae93652abcbcaebf083af8`
+- Rebuilt in-tree `gcn-drm.ko` SHA-256:
+  `1a8456d3f475986060beb0f07d666ea5e3cad38901eefa23a915d50de1476bf1`
+- Module `.text` SHA-256:
+  `74a37a5ccc923fcae7f8c944a218a2114c8090ee11cb2b2b018cb0b1ba651f1a`
+
+The rollback removes exactly implementation `7ef1ccbec`: AVE lookup/write code,
+its probe call, the DRM I2C dependency, and the now-unused VI-to-AVE phandle.
+The dedicated Wii AVE adapter, client node, and read-only utility remain.
+
+The image exactly reproduces the previously validated dedicated-adapter image
+hash. The rebuilt module's complete SHA-256 differs from the six-pass rollback
+artifact `f4aae461...` only because the normal in-tree build adds `intree=Y` to
+`.modinfo`; both modules have byte-identical executable `.text` with the hash
+above. The full `-j16` image/module build passed, the scoped strict checkpatch
+reported zero findings, and `git diff --check` passed.
+
+Deploy and checksum-verify both artifacts, preserve the current probe-write
+rollback copies, restore `/boot` read-only, and reboot. After boot, require the
+AVE adapter/client and utility read positive controls, then run at least three
+complete service-managed deterministic bar transactions with full legacy
+restoration between each. All seven colors must remain correct and no
+`cleared AVE chroma-swap control` line may appear. Any swapped start fails the
+production regression despite the six-pass text-identical module control.
