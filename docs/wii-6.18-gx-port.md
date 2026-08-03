@@ -5088,3 +5088,42 @@ complete service-managed deterministic bar transactions with full legacy
 restoration between each. All seven colors must remain correct and no
 `cleared AVE chroma-swap control` line may appear. Any swapped start fails the
 production regression despite the six-pass text-identical module control.
+
+## 2026-08-03: Production rollback fails cold-boot color regression
+
+The deployed image, rebuilt in-tree module, and diagnostic utility matched all
+staged SHA-256 values after reboot. `/boot` remained read-only, the AVE client
+responded with `0x62=0`, legacy gcnfb plus generated GX owned VI, and no
+`cleared AVE chroma-swap control` log appeared.
+
+After removing the expected stale unbound udev preload, three complete
+service-managed DRM transactions each displayed the exact swapped sequence:
+
+```
+blue, green, red, light blue, white, magenta, gold
+```
+
+No AVE userspace write occurred. Full service stop and legacy restoration
+between transactions did not change the result. This fails the production
+acceptance gate.
+
+The contrast is now specific: the same no-write executable module text was
+correct for six consecutive transactions in the preceding warm session, but
+the committed cold boot selected a wrong state that persisted for all three
+ownership cycles. The state is therefore not simply random on every DRM probe;
+it can be selected earlier and survive driver unbind/rebind plus legacy
+restoration. The harmful probe-time zero transfer remains correctly reverted,
+because its direct A/B was independently three swapped versus six correct, but
+that rollback is not the complete fix.
+
+Every failed transaction terminated its exact client, removed DRM, restored
+legacy gcnfb/generated GX and console loglevel 7, and logged no fault. The
+committed rollback artifacts remain installed.
+
+The next isolated reset candidate is AVE oversampling register `0x65`. Current
+libogc writes value 3 during `VIDEO_Init()`, while the inherited legacy state is
+1 in both correct and wrong readable snapshots. Add explicit reversible utility
+actions for `0x65=3` and restoration to `0x65=1`. On one frozen wrong frame,
+write 3 and classify the unchanged output, then restore 1 regardless of result.
+Do not expand to the complete AVE magic sequence unless this single-register
+control is negative.
