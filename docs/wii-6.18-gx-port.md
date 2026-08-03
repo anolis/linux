@@ -4952,3 +4952,43 @@ reasonable run limit establishes that the current build no longer produces one
 state. A candidate register matters only if its value reproducibly predicts the
 visual state; do not write `0x65` or broaden the register list from a single
 correlation.
+
+## 2026-08-03: Readable AVE setup state matches on a swapped frame
+
+The installed utility matched staged SHA-256 `f89d2366...`. In legacy state,
+the standalone `0x62` read returned zero and two consecutive complete dumps
+were byte-identical. The read-only positive control therefore passed. The
+stable legacy snapshot was:
+
+```
+00=00 01=22 02=07 03=01 04=01 05=00 06=00 08=00 09=00 0a=00
+62=00 65=01 6a=01 6e=00 71=8e 72=8e 7a=00 7b=00 7c=00 7d=00
+```
+
+This coherently reflects component/PAL selection and the historical Linux AVE
+setup, including oversampling register `0x65=1`. The reads caused no reported
+display change.
+
+The next DRM transaction naturally displayed the exact swapped sequence.
+Client PID 7097 was stopped and confirmed in state `T` before one dump. Every
+whitelisted byte was identical to both legacy baselines; `diff` produced no
+output. The readable setup state, including candidate register `0x65`, cannot
+discriminate this wrong frame and does not justify a write test.
+
+Two further complete transactions with the same artifacts also started
+swapped, for three consecutive swapped starts. No duplicate dump was taken.
+This run did not capture a naturally correct frame, so it does not prove that
+all readable AVE state is identical across both visual outcomes.
+
+An important artifact correlation now needs a direct control: the earlier
+naturally correct frozen-frame test used clean module SHA-256 `f4aae461...`
+without any AVE write, while all starts in this session used module SHA-256
+`7fa35c18...` with the probe-time zero write and were swapped. Test the preserved
+no-write module under the same current kernel and AVE adapter before adding
+more diagnostics. If correct output returns, the probe-time transfer itself or
+its ordering perturbs hidden AVE state despite writing the value already read
+back. Treat this as a hypothesis until the exact module rollback control runs.
+
+Each transaction stopped its exact client, removed DRM, restored legacy gcnfb
+plus generated GX and console loglevel 7, and ended with `AVE[0x62]=0` and no
+fault.
