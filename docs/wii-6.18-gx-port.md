@@ -5322,3 +5322,40 @@ does not identify which write within the sequence selects the phase. A verified
 sequence with unchanged swapped output is a valid negative. Signal loss or a
 different frame is a real broad-sequence effect but does not establish a color
 fix.
+
+## 2026-08-03: Reject complete libogc AVE reset as color-phase control
+
+The deployed utility matched staged SHA-256
+`0d31ad651f0a6b25bb802704fd7751bb7f091e5ea21819f66d918328a4cad44b`.
+The fresh baseline was `0x04=1`, `0x01=0x22`, `0x62=0`, and `0x65=1`.
+The known stale unbound `gcn_drm` preload was removed while legacy owned VI,
+allowing the first service start to bind normally.
+
+Three complete no-write DRM transactions displayed, in order: correct,
+correct, then naturally swapped. No AVE write occurred during either correct
+transaction. Exact renderer PID 13709 was stopped and verified in state `T` on
+the third transaction. The reboot-bounded action created the 264-byte audit
+snapshot with SHA-256
+`dd0c565326ed89e5b89b5412435162a9c418d01818761a26d2a0676d0f228a8d`,
+completed every grouped libogc transfer, and verified every stable scalar.
+
+The unchanged frozen bars remained swapped. This is a valid negative result:
+the complete current-libogc AVE encoder initialization sequence does not reset
+or compensate the hidden color phase selected by this path. The snapshot and
+dmesg were preserved as `/root/20260803-libogc-reset-negative.snapshot` and
+`/root/20260803-libogc-reset-negative.dmesg.txt`. The renderer was resumed,
+storage synced, and the Wii rebooted without snapshot replay.
+
+Post-reboot validation restored legacy graphics and the exact fresh baseline:
+`0x04=1`, `0x01=0x22`, `0x62=0`, and `0x65=1`; the runtime snapshot was absent.
+The expected stale unbound `gcn_drm` udev preload recurred and remains a service
+packaging issue, not part of the color result.
+
+The investigation now moves from AVE register values to subsystem reset and
+mode-latch architecture. Both independent known implementations perform a VI
+reset-domain pulse before normal operation: current libogc writes DCR `0x0002`,
+delays, then writes zero; legacy Wii Linux sets and clears the DCR reset bit
+before mode detection. The modern DRM programmer only writes DCR zero, programs
+timing, and writes enable bit 0. It never asserts reset bit 1. Since a simple
+enable edge already occurs on every correct and swapped DRM probe, the missing
+reset-bit pulse is the next isolated mode-setting candidate.
