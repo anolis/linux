@@ -5277,3 +5277,48 @@ verify only stable scalar registers, regard successful I2C completion as the
 positive control for the two block writes and command latch, and use a reboot
 as the recovery boundary. A same-session snapshot replay is not proven capable
 of restoring hidden encoder command state.
+
+## 2026-08-03: Stage reboot-bounded current-libogc AVE reset
+
+- Utility implementation: `dc2eeeca6`
+- Audited libogc source: `99929510c8dd5b0dd69aaae26a93105f09d182de`
+- Static `wii-ave-reg` SHA-256:
+  `0d31ad651f0a6b25bb802704fd7751bb7f091e5ea21819f66d918328a4cad44b`
+
+The corrected utility removes the callable snapshot replay action. The
+exclusive fsynced 264-byte pre-write file is retained only as audit evidence.
+`--apply-libogc-ntsc` still emits the complete ordered libogc NTSC/DTV encoder
+sequence, but readback assertions are limited to stable scalar registers:
+`0x00`-`0x03`, `0x05`-`0x06`, `0x08`-`0x0a`, `0x65`, `0x6a`, `0x6e`,
+`0x71`-`0x72`, and `0x7a`-`0x7d`. The Macrovision block, gamma block, and
+command/commit register `0x04` are excluded. Successful I2C completion is the
+positive control for those command-style transfers.
+
+A host emulator now models the observed hardware behavior by returning `0xff`
+for Macrovision reads and self-clearing `0x04`. The complete apply action and
+stable readback verification pass under that model, and a second action refuses
+to overwrite the existing audit snapshot. The stripped static 32-bit
+big-endian PowerPC binary builds with `-Wall -Wextra -Werror`; strict checkpatch
+reports zero errors and warnings.
+
+Deploy and checksum-verify only the utility. Begin from a freshly booted legacy
+baseline with `0x04=1`, `0x01=0x22`, `0x62=0`, and `0x65=1`. Remove the known
+stale unbound `gcn_drm` preload before ownership transfer, remove only an
+obsolete runtime audit snapshot, and start the committed no-write DRM path.
+Render identical bars until a transaction is naturally swapped, then stop the
+exact renderer PID and verify state `T`.
+
+Run the apply action once with `/run/wii-ave-libogc.snapshot`. If no snapshot is
+created, no AVE write occurred and the attempt is not a result. Otherwise,
+classify the frozen frame immediately as correct, swapped, changed another way,
+or signal lost. Do not replay the snapshot or perform any additional AVE write.
+Preserve the audit snapshot and dmesg under `/root`, resume the exact renderer,
+sync, and reboot regardless of apply return code or visual result.
+
+After reboot, require the original four-register baseline and legacy graphics
+before recording the result. A transition from swapped to correct is a positive
+result for the full libogc reset operation, even though this test intentionally
+does not identify which write within the sequence selects the phase. A verified
+sequence with unchanged swapped output is a valid negative. Signal loss or a
+different frame is a real broad-sequence effect but does not establish a color
+fix.
