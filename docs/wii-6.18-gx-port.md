@@ -4919,3 +4919,36 @@ restored, and no fault occurred. Next inspect AVE initialization and readable
 state beyond register `0x62`, comparing one firmware/legacy-owned baseline with
 the state immediately after DRM ownership. Avoid broad register writes: gather
 read-only data first and require a positive control for any candidate bit.
+
+## 2026-08-03: Stage whitelisted read-only AVE state snapshots
+
+- Diagnostic implementation: `2e9402343`
+- Static `wii-ave-reg` SHA-256:
+  `f89d236631c65587cc61a1217c13807ce083fc67790f1c955e5d6111ab5a0451`
+- Current libogc reference commit:
+  `99929510c8dd5b0dd69aaae26a93105f09d182de`
+
+Current upstream libogc `VIDEO_Init()` still performs a complete AVE setup. Of
+particular interest, it writes oversampling register `0x65=3`; the imported
+legacy Linux sequence writes `0x65=1`, while the modern DRM ownership path
+initializes neither. This is a candidate difference, not yet a cause.
+
+The utility adds `--dump-state`, which performs only one-byte reads from an
+explicit whitelist of registers touched by the known initialization sequence:
+`00`, `01`, `02`, `03`, `04`, `05`, `06`, `08`, `09`, `0a`, `62`, `65`, `6a`,
+`6e`, `71`, `72`, and `7a` through `7d`. It makes no register write. Existing
+default, `--clear-swap`, and `--set-swap` behavior is unchanged.
+
+Deploy and checksum-verify only the utility. Before starting DRM, capture two
+consecutive legacy-state dumps. Require `AVE[0x62]` to match the established
+single-register read, require both dumps to be byte-identical, and require no
+visible display change. Those are the positive and non-perturbation controls.
+
+Then capture one dump only after the deterministic DRM bars have settled and
+been visually classified, without writing `0x62`. Compare the complete output
+to the legacy baseline. Repeat fresh exact-artifact transactions until both a
+naturally correct and naturally exchanged frame have been captured, or until a
+reasonable run limit establishes that the current build no longer produces one
+state. A candidate register matters only if its value reproducibly predicts the
+visual state; do not write `0x65` or broaden the register list from a single
+correlation.
