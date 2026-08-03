@@ -5359,3 +5359,36 @@ before mode detection. The modern DRM programmer only writes DCR zero, programs
 timing, and writes enable bit 0. It never asserts reset bit 1. Since a simple
 enable edge already occurs on every correct and swapped DRM probe, the missing
 reset-bit pulse is the next isolated mode-setting candidate.
+
+## 2026-08-03: Stage VI DCR reset-pulse reliability test
+
+- Implementation: `51ff89e12`
+- `gcn-drm.ko` SHA-256:
+  `20df08fec98d625dc4821821e427b8b03d4bda96ccc5ffe30a4f42e1995061f5`
+
+The DRM fixed-mode programmer now writes DCR reset bit 1, holds it for 2 us,
+clears DCR to zero, and only then performs the unchanged timing, XFB, interrupt,
+and enable sequence. It logs `pulsed VI DCR reset` after the edge. This is the
+smallest reset-domain operation common to both current libogc and legacy Wii
+Linux but absent from the modern DRM path. AVE state, color conversion, XFB
+contents, scanout addresses, and ownership logic are unchanged.
+
+The configured PowerPC module set builds successfully with `make -j16 modules`.
+Deploy and checksum-verify only this module from a freshly rebooted legacy
+baseline. Remove the stale unbound udev preload before replacement and preserve
+the prior module for rollback. Confirm the AVE baseline read-only; perform no
+AVE write during this test.
+
+Run eight complete service-managed DRM transactions. On every transaction,
+require a fresh `pulsed VI DCR reset` kernel marker, render the identical seven
+bars, classify the full frame, then stop the service and require legacy
+gcnfb/generated-GX restoration before the next start. Success requires all
+eight transactions to show the semantic red, green, blue, gold, white, magenta,
+and teal order. One swapped frame fails immediately and requires restoring the
+prior installed module after clean teardown.
+
+This test checks repeatability against the earlier six-run warm correct streak;
+one correct frame is not sufficient evidence. Record the complete ordered
+outcomes and final AVE read-only state. Whether positive or negative, commit the
+result and pause development before beginning subsystem diagramming and broader
+architecture reversal.
