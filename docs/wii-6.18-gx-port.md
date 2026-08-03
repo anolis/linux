@@ -4,6 +4,9 @@ This ledger tracks the modern-kernel port of the Wii VI framebuffer and the
 reloadable GX accelerator. Hardware conclusions require a committed source
 state and a checksum-verified deployed image.
 
+For the stable subsystem model, ownership diagrams, memory map, and current
+fault boundary, see [Wii video architecture and ownership model](wii-video-architecture.md).
+
 ## 2026-07-28: CPU framebuffer positive control (invalid build)
 
 - Source implementation: `89a40599d` (`video: fbdev: port the Wii VI
