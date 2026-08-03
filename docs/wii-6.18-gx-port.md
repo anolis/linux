@@ -5236,3 +5236,44 @@ visual transition is a valid negative. After verified restoration, require
 `0x62=0`, `0x65=1`, resume the exact client, stop the service, restore legacy
 graphics and console loglevel 7, and preserve the snapshot with the hardware
 log until the result is committed.
+
+## 2026-08-03: Reject byte-for-byte AVE snapshot verification
+
+The deployed utility matched the staged SHA-256. The first service start hit
+the known stale unbound `gcn_drm` preload and restored legacy without rendering;
+the second start bound normally. Its deterministic bars displayed the natural
+swapped sequence at `0x62=0`, `0x65=1`. Exact renderer PID 10623 was stopped and
+verified in state `T` before the broad AVE operation.
+
+Snapshot creation succeeded and produced a 264-byte file with SHA-256
+`dd0c565326ed89e5b89b5412435162a9c418d01818761a26d2a0676d0f228a8d`.
+The complete grouped libogc write sequence completed, but strict verification
+failed first at register `0x40`: zero was written and `0xff` read back. The
+automatic full snapshot replay then completed, but restoration verification
+failed at register `0x04`: captured value 1 was written and value 0 read back.
+
+A subsequent read-only scalar dump showed every previously tracked register at
+its pre-test value except `0x04=0`; in particular `0x01=0x22`, `0x62=0`, and
+`0x65=1`. The display had blanked before a reliable post-apply visual
+classification, and an attempted identical fixture redraw occurred only after
+the restore replay. This run therefore provides no valid color result for the
+full libogc sequence.
+
+Preserve the real finding: the AVE register file cannot be modeled as ordinary
+byte-addressable storage. At least the Macrovision range beginning at `0x40`
+does not return written data, and `0x04` behaves as a command/commit register or
+otherwise self-clears after use. Reject full byte-for-byte apply and restore
+verification, and do not repeat this utility action unchanged.
+
+The failed snapshot and dmesg were preserved on the Wii as
+`/root/20260803-libogc-reset-failed.snapshot` and
+`/root/20260803-libogc-reset-failed.dmesg.txt`. The renderer was resumed before
+service stop, legacy graphics and console loglevel 7 were restored, and the Wii
+was rebooted rather than claiming same-session restoration. After reboot the
+clean baseline returned with `0x04=1`, `0x01=0x22`, `0x62=0`, and `0x65=1`.
+
+Any next full-sequence test must classify command-style ranges separately:
+verify only stable scalar registers, regard successful I2C completion as the
+positive control for the two block writes and command latch, and use a reboot
+as the recovery boundary. A same-session snapshot replay is not proven capable
+of restoring hidden encoder command state.
