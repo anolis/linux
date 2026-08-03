@@ -5187,3 +5187,52 @@ independent speculative register writes. Audit and encode the sequence from the
 checked-out libogc source, provide a reversible legacy restoration operation,
 and validate both paths on a frozen naturally swapped frame before integrating
 anything into kernel ownership transfer.
+
+## 2026-08-03: Stage reversible current-libogc AVE reset
+
+- Utility implementation: `2b46601d5`
+- Audited libogc source: `99929510c8dd5b0dd69aaae26a93105f09d182de`
+- Static `wii-ave-reg` SHA-256:
+  `60441bb5cac230fed28c1ee07f7a73c1786fefa81bb6f339ec9aa1a17c614046`
+
+The new `--apply-libogc-ntsc SNAPSHOT` action first reads every AVE byte
+touched by libogc's `__VISetupEncoder()`, creates the snapshot with `O_EXCL`,
+writes all 264 bytes, and fsyncs it before changing hardware. It then reproduces
+libogc's ordered grouped transfers and delays for the Wii's current NTSC
+component/DTV test configuration: encoder enable, oversampling 3, YUV selection
+`0x20`, display controls, `0x8e8e` levels, zeroed 26-byte Macrovision block,
+33-byte gamma table, and final EURGB60 filter disable. It reads and verifies
+every touched byte. AVE chroma control `0x62` is not part of this sequence and
+is not written.
+
+`--restore-state SNAPSHOT` validates the snapshot header and exact size, replays
+the same grouped register layout using the captured pre-test bytes, and verifies
+every restored byte. A host emulated AVE register file validated exclusive
+snapshot creation, exact apply readback, and byte-for-byte restoration. The
+binary is a stripped static 32-bit big-endian PowerPC executable with no ELF
+interpreter; strict checkpatch reports zero errors and warnings.
+
+Deploy and checksum-verify only this utility. Confirm legacy graphics and
+`0x62=0`, `0x65=1`, remove any obsolete `/run/wii-ave-libogc.snapshot` only
+before the experiment, and start the committed no-write DRM path. Render the
+identical seven bars until one transaction naturally displays the established
+swapped order. Stop that exact renderer PID and verify state `T`, then run:
+
+```
+/usr/local/sbin/wii-ave-reg /dev/i2c-0 \
+  --apply-libogc-ntsc /run/wii-ave-libogc.snapshot
+```
+
+Classify the unchanged frozen frame as correct, swapped, changed another way,
+or signal lost. Whether the action succeeds, fails verification, or loses
+signal, immediately run the restore action against the created snapshot and
+classify the frozen frame again. Do not resume the client or tear down DRM until
+restoration reports full readback success. If no snapshot was created, the
+utility made no AVE writes and the test must stop without claiming a result.
+
+A correct transition after apply, followed by return to swapped after restore,
+is the required reversible positive result. Successful apply readback with no
+visual transition is a valid negative. After verified restoration, require
+`0x62=0`, `0x65=1`, resume the exact client, stop the service, restore legacy
+graphics and console loglevel 7, and preserve the snapshot with the hardware
+log until the result is committed.
