@@ -84,7 +84,6 @@
 			interrupts = <8>;
 			xfb-start = <0x01698000>;
 			xfb-size = <0x00168000>;
-			audio-video-encoder = <&AVE>;
 		};
 
 		processor-interface@c003000 {
