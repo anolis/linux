@@ -5021,3 +5021,41 @@ support the hypothesis that the early I2C transfer itself or its ordering
 selects the wrong hidden encoder phase. Mixed or still-wrong no-write starts
 reject that simple causal claim. Restore the probe-write module on disk after
 the control regardless of outcome; do not reboot or modify the kernel image.
+
+## 2026-08-03: Probe-time zero transfer causes the swapped state
+
+Both remote modules and the current kernel matched their staged SHA-256 values.
+Only `gcn-drm.ko` changed during this control; the kernel, DTB, AVE adapter,
+console client, service, XFB contents, and deterministic fixture remained the
+same.
+
+The probe-write module had produced three consecutive naturally swapped starts
+immediately before the rollback. Replacing it with the preserved no-AVE-write
+module produced six consecutive complete transactions in which the user
+classified all seven colors correct. Every transaction passed through a full
+DRM stop, legacy gcnfb/generated-GX restoration, and fresh DRM acquisition.
+
+On the first correct no-write transaction, client PID 8759 was stopped and one
+read-only AVE snapshot was captured. It was byte-identical to the prior frozen
+wrong probe-write snapshot and both legacy baselines. Thus the correct and wrong
+frames have the same corrected XFB words, stable VI MMIO state, and all 20
+whitelisted readable AVE bytes, including `0x62=0` and `0x65=1`.
+
+This A/B result establishes that the early `0x62=0` I2C transfer or its exact
+probe ordering selects the wrong hidden encoder phase under the current kernel,
+even though it writes the value already returned by readback. The transfer must
+be removed; moving or repeating the same constant is already ruled out by the
+frozen post-modeset control. Do not infer ordinary register idempotence for this
+undocumented AVE interface.
+
+Important scope: older clean-module runs before this exact kernel/adapter state
+reported both visual outcomes, so six current passes do not by themselves
+close every historical nondeterminism report. They do provide a strict
+production regression gate: revert implementation `7ef1ccbec`, rebuild the
+kernel/module, and require repeated correct cold ownership transactions before
+acceptance.
+
+After transaction 6, service stop restored legacy graphics and console loglevel
+7, AVE readback was zero, and no fault occurred. The probe-write module was
+restored on disk as required by the staged control; the next deployment must
+replace it with the source-reverted build.
