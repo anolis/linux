@@ -4992,3 +4992,32 @@ back. Treat this as a hypothesis until the exact module rollback control runs.
 Each transaction stopped its exact client, removed DRM, restored legacy gcnfb
 plus generated GX and console loglevel 7, and ended with `AVE[0x62]=0` and no
 fault.
+
+## 2026-08-03: Stage no-AVE-write module rollback control
+
+- Current kernel image SHA-256:
+  `b39cdf270d8c0a960ce9b47f53845137106dadb373e4d2a6ccc61cfec8392505`
+- No-AVE-write `gcn-drm.ko` SHA-256:
+  `f4aae461c3fe31fbc38bd6cc7ffedd715bf105d0d0e36a050d55652610c8f78d`
+- Probe-write `gcn-drm.ko` SHA-256 being replaced:
+  `7fa35c1812d5339d3b4f780b87768d3cffff61439ecb7f3dff612bfcc9aba83f`
+
+Source comparison confirms that implementation `7ef1ccbec` adds only the AVE
+phandle lookup, the two-byte `0x62=0` I2C transfer, and its probe call to the DRM
+module. Rendering, XFB conversion, VI programming, KMS, and client behavior are
+unchanged. The current kernel may retain its AVE phandle and dedicated adapter;
+the older module simply ignores them.
+
+Checksum-verify both preserved modules on the Wii, preserve the currently
+installed probe-write module, and install the no-write module. Perform three
+complete service start/bar-classification/stop transactions without any AVE
+userspace write. Keep printk suppressed while each fixture is active and
+restore legacy ownership between runs.
+
+If the no-write module produces correct output after three consecutive wrong
+starts from the probe-write module, freeze the first correct frame and capture
+one read-only whitelisted AVE dump. Multiple correct no-write starts would
+support the hypothesis that the early I2C transfer itself or its ordering
+selects the wrong hidden encoder phase. Mixed or still-wrong no-write starts
+reject that simple causal claim. Restore the probe-write module on disk after
+the control regardless of outcome; do not reboot or modify the kernel image.
