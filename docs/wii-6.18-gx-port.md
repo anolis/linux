@@ -4888,3 +4888,34 @@ transaction and frozen-frame toggle to confirm this inverse behavior. Then
 identify a readable or controllable upstream state that predicts which AVE bit
 setting is required; corrected XFB contents and stable VI MMIO state are
 already ruled out by prior paired captures.
+
+## 2026-08-03: Reproduce inverse AVE compensation on an independent transaction
+
+An independent complete service transaction reused every installed artifact
+without rebuilding or redeploying. Probe again cleared AVE register `0x62`, and
+the deterministic bars again settled in the exact natural wrong order:
+
+```
+blue, green, red, light blue, white, magenta, gold
+```
+
+Client PID 3518 was stopped and confirmed in state `T`. With that frame frozen,
+writing `0x02` immediately corrected all seven colors. Writing `0x00` again
+immediately returned all seven colors to the same wrong sequence. The utility
+read back the requested value after each transfer. This independently
+reproduces the complete wrong-to-correct-to-wrong reversal without a page flip,
+XFB write, VI update, or client execution.
+
+The result confirms that AVE bit 1 is a reliable chroma-exchange control but a
+fixed zero is not a production solution. The natural upstream state selected
+the opposite relationship on two consecutive fresh transactions, both despite
+the probe-time clear. Remove the unconditional probe clear before merging any
+production code unless a later deterministic initialization sequence makes its
+required value invariant.
+
+The register ended at zero. The client resumed before service stop; DRM was
+removed, legacy gcnfb plus generated GX returned, console loglevel 7 was
+restored, and no fault occurred. Next inspect AVE initialization and readable
+state beyond register `0x62`, comparing one firmware/legacy-owned baseline with
+the state immediately after DRM ownership. Avoid broad register writes: gather
+read-only data first and require a positive control for any candidate bit.
