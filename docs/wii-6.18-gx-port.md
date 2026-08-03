@@ -5151,3 +5151,39 @@ these writes alone. Readback changes without a visible transition are a valid
 negative result. Resume the client before service stop and leave register
 `0x65=1`; never tear down or reboot with the experimental value 3 intentionally
 active.
+
+## 2026-08-03: Reject AVE oversampling as the hidden color-phase control
+
+The deployed utility matched the staged SHA-256
+`2ca24d201ba5a8053bc1f6d85caf00dc2fe50a530ec3cc9b4040136d2a601dd9`.
+Its read-only baseline again reported `0x62=0` and `0x65=1`.
+
+The first complete no-write DRM transaction displayed the correct seven-color
+sequence with `0x65=1`; no AVE write was performed on that correct frame. After
+a clean service stop and legacy restoration, the second transaction naturally
+displayed the established swapped sequence with the same readable state:
+
+```
+blue, green, red, light blue, white, magenta, gold
+```
+
+The exact renderer PID 7535 was stopped and verified in state `T`, freezing the
+source framebuffer and all client updates. A read-only dump immediately before
+the experiment confirmed `0x62=0` and `0x65=1`. Writing only AVE register
+`0x65=3` succeeded and read back as 3, but the frozen bars remained swapped.
+Writing only `0x65=1` succeeded and read back as 1, and the same frozen bars
+again remained swapped. This is a valid reversible register-write positive
+control and a visual negative result.
+
+AVE oversampling register `0x65` therefore does not select or compensate the
+hidden chroma phase by itself. Keep the inherited value 1 and reject repeated
+single-register oversampling tests. The renderer was resumed before teardown;
+the service restored legacy `gcnfb`/generated GX, removed DRM, restored console
+loglevel 7, and left `0x62=0`, `0x65=1`.
+
+The next controlled reset candidate is the complete current-libogc AVE
+initialization sequence, treated as one known reference operation rather than
+independent speculative register writes. Audit and encode the sequence from the
+checked-out libogc source, provide a reversible legacy restoration operation,
+and validate both paths on a frozen naturally swapped frame before integrating
+anything into kernel ownership transfer.
