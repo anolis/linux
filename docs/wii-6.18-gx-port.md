@@ -5395,3 +5395,51 @@ one correct frame is not sufficient evidence. Record the complete ordered
 outcomes and final AVE read-only state. Whether positive or negative, commit the
 result and pause development before beginning subsystem diagramming and broader
 architecture reversal.
+
+## 2026-08-03: Reject isolated VI DCR reset pulse as sufficient phase fix
+
+The local and uploaded test module both matched staged SHA-256
+`20df08fec98d625dc4821821e427b8b03d4bda96ccc5ffe30a4f42e1995061f5`.
+The Wii began from a fresh boot with legacy `gcn-vifb` plus `gcn_gx` active,
+and read-only AVE access reported `0x62=0`. The known stale, unbound
+`gcn_drm` preload was removed before the installed module was replaced. The
+prior installed module was preserved under its exact SHA-256
+`1a8456d3f475986060beb0f07d666ea5e3cad38901eefa23a915d50de1476bf1`.
+
+The first service-managed ownership transaction bound the staged module and
+started the unchanged RGB565 console client. The live kernel log contained the
+required marker before timing setup:
+
+```text
+gcn-vi c002000.video: [drm] pulsed VI DCR reset
+gcn-vi c002000.video: [drm] programmed NTSC 480i: DCR=0001 ...
+```
+
+The canonical seven-color fixture displayed the established swapped sequence:
+
+```text
+blue, green, red, light blue, white, magenta, gold
+```
+
+Expected output was red, green, blue, gold, white, magenta, and teal. This
+failed the staged acceptance gate on transaction 1, so the remaining seven
+transactions were intentionally not run. No AVE write occurred.
+
+The isolated DCR reset pulse is therefore not sufficient to establish the
+correct downstream color phase. This does not prove that reset bit 1 has no
+hardware effect or that it cannot be one part of a larger initialization
+transaction. It does reject adding this pulse alone as the production fix.
+
+Service teardown stopped exact client PID 2443, removed DRM ownership, and
+restored legacy `gcn-vifb` plus `gcn_gx`. The prior module was restored on
+disk with its original checksum, console printk was restored, and final
+read-only AVE access still returned `0x62=0`. The complete failed-run log is
+preserved on the Wii as
+`/root/20260803-vi-dcr-reset-negative.dmesg.txt`, SHA-256
+`2430eccec7d26b5ffa5039231c3db383ce143d7293aeb14af67c46b11b50aef5`.
+
+Move to ordered reset and clock-domain architecture rather than another scalar
+register guess. Compare the complete VI/AVE acquisition order used by libogc,
+legacy `gcn-vifb`, and DRM, classify register operations as stored state versus
+edges or commands, and isolate which reset or clock boundary can persist across
+driver ownership transitions and a full AVE initialization.
