@@ -7,9 +7,9 @@ the chronological [GX/DRM test ledger](wii-6.18-gx-port.md).
 
 The immediate unresolved issue is a nondeterministic downstream color phase:
 the same correct XFB bytes can be displayed either correctly or with red/blue
-and Cr/Cb interpretation exchanged. A VI DCR reset-pulse test is staged in
-commit `51ff89e12`, with procedure commit `8dde5b203`, but has not been run on
-hardware. Nothing in this document treats that candidate as a result.
+and Cr/Cb interpretation exchanged. The isolated VI DCR reset-pulse test from
+commit `51ff89e12` ran on hardware and produced the swapped state on its first
+transaction. The pulse alone is therefore not a sufficient phase fix.
 
 ## Evidence labels
 
@@ -308,12 +308,13 @@ Three initialization sequences are relevant:
 | Current libogc reference | Write reset bit (`0x0002`), delay, write zero, then program and enable | Audited source contract |
 | Legacy `gcn-vifb` | Set and clear DCR reset bit before detection/setup | Current source contract; long-used path |
 | DRM before `51ff89e12` | Quiesce interrupts, program timing from DCR zero, write enable bit | Proven to produce both color outcomes |
-| Staged DRM test | Quiesce interrupts, write reset bit, hold 2 us, clear, program timing, enable | Built and checksum-staged; not hardware-tested |
+| Tested DRM pulse | Quiesce interrupts, write reset bit, hold 2 us, clear, program timing, enable | Hardware-tested; first transaction swapped |
 
 A plain DCR enable edge already occurred on both correct and swapped DRM runs,
-so enable toggling alone does not explain the phase. The staged test isolates
-the missing reset-bit pulse without changing XFB bytes, AVE state, conversion,
-or ownership logic.
+so enable toggling alone does not explain the phase. The isolated reset-bit
+pulse also executed before unchanged timing setup and still produced the
+swapped state. It may remain part of a correct initialization sequence, but it
+does not independently reset the hidden phase.
 
 ## Downstream color-phase investigation
 
@@ -379,37 +380,30 @@ without modifying those bytes.
 
 ## Architecture-guided next steps
 
-### Immediate test
+### Completed reset control
 
-Run the already staged DCR reset-pulse reliability test exactly as recorded in
-the ledger:
+Module SHA-256
+`20df08fec98d625dc4821821e427b8b03d4bda96ccc5ffe30a4f42e1995061f5`
+emitted the required `pulsed VI DCR reset` marker before unchanged NTSC timing
+setup. Transaction 1 displayed the full swapped sequence, terminating the
+eight-run acceptance test by design. Teardown restored legacy ownership, the
+prior module, printk, and AVE `0x62=0`. The complete result is ledger commit
+`f629cd93c`.
 
-- deploy only module SHA-256
-  `20df08fec98d625dc4821821e427b8b03d4bda96ccc5ffe30a4f42e1995061f5`;
-- require the `pulsed VI DCR reset` marker on every acquisition;
-- perform eight complete DRM/legacy ownership transactions;
-- fail on the first swapped frame;
-- record the ordered outcomes and final read-only AVE state.
+### Next investigation
 
-### If the reset pulse passes
-
-1. Treat reset assertion as part of the DRM mode-setting contract.
-2. Retest cold boots, not only repeated warm owner transitions.
-3. Remove diagnostic-only color fixtures from the production path only after
-   the cold/warm regression matrix is stable.
-4. Fix the stale unbound `gcn_drm` preload separately.
-
-### If the reset pulse fails
-
-1. Preserve the negative result before changing source.
-2. Compare ordered writes and delays across libogc, legacy `gcn-vifb`, and DRM,
+1. Compare ordered writes and delays across libogc, legacy `gcn-vifb`, and DRM,
    emphasizing reset and clock domains rather than final scalar values.
-3. Classify VI and AVE registers by behavior: storage, strobe, self-clearing,
+2. Classify VI and AVE registers by behavior: storage, strobe, self-clearing,
    write-one-to-clear, read-only, or unknown.
-4. Identify whether VI reset also resets the downstream serializer/encoder
-   handoff, or whether a separate clock/selection edge exists.
-5. Add a positive control for any new diagnostic before using its negative
-   result to eliminate a pipeline stage.
+3. Identify which owner establishes VI clock, output selection, and AVE handoff
+   state before DCR reset and timing programming.
+4. Determine which reset boundaries affect VI alone and which can affect the
+   downstream serializer or encoder phase.
+5. Build the next diagnostic around an independently validated positive
+   control before using an unchanged result to eliminate another stage.
+6. Keep the stale unbound `gcn_drm` preload as a separate packaging fix; it is
+   not a color-phase result.
 
 ## Implications for future DRM and OpenGL work
 
