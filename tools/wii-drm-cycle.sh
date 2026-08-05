@@ -240,6 +240,14 @@ remote_exec "grep -q '^drm ' /proc/modules || insmod /tmp/drm.ko"
 remote_exec "grep -q '^drm_kms_helper ' /proc/modules || insmod /tmp/drm_kms_helper.ko"
 remote_exec "grep -q '^drm_shmem_helper ' /proc/modules || insmod /tmp/drm_shmem_helper.ko"
 
+# udev may have loaded gcn_drm while legacy still owned the platform device.
+# Remove that unbound instance so the requested parameter is applied at probe.
+if remote_exec "grep -q '^gcn_drm ' /proc/modules" &&
+   ! remote_exec "test -e $drm_driver/$device"; then
+	remote_status "removing stale unbound gcn-drm"
+	remote_exec "rmmod gcn_drm"
+fi
+
 remote_exec "test -e $legacy_driver/$device" || {
 	echo "Legacy gcnfb is not bound to $device; refusing ambiguous transition." >&2
 	exit 1
@@ -257,7 +265,7 @@ remote_status "loading gcn-drm $commit"
 if (( program_mode )); then
 	remote_exec "insmod /tmp/gcn-drm.ko program_mode=1"
 else
-	remote_exec "insmod /tmp/gcn-drm.ko"
+	remote_exec "insmod /tmp/gcn-drm.ko program_mode=0"
 fi
 remote_exec "test -e $drm_driver/$device"
 remote_exec "test -e /sys/class/drm/card0"
