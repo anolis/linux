@@ -301,12 +301,15 @@ That is an operational defect, not evidence about rendering or color state.
 
 ## Reset and mode-setting architecture
 
-Three initialization sequences are relevant:
+Three initialization sequences are relevant. The libogc behavior has two
+branches and must not be summarized as an unconditional reset:
 
 | Owner | DCR sequence before timing setup | Status |
 | --- | --- | --- |
-| Current libogc reference | Write reset bit (`0x0002`), delay, write zero, then program and enable | Audited source contract |
-| Legacy `gcn-vifb` | Set and clear DCR reset bit before detection/setup | Current source contract; long-used path |
+| Current libogc, VI disabled on entry | Write reset bit (`0x0002`), delay, write zero, then program and enable a default NTSC mode | Audited source contract |
+| Current libogc, VI enabled on entry | Import the live DCR mode and leave VI enabled; later mode changes are shadowed and committed from the retrace handler | Audited source contract |
+| Legacy `gcn-vifb` probe | Set and clear DCR reset before detection/setup, then enable DCR before writing the remaining timing state | Current source contract; long-used path |
+| Legacy `gcn-vifb` unbind | Release the owner without resetting or disabling VI | Current source contract |
 | DRM before `51ff89e12` | Quiesce interrupts, program timing from DCR zero, write enable bit | Proven to produce both color outcomes |
 | Tested DRM pulse | Quiesce interrupts, write reset bit, hold 2 us, clear, program timing, enable | Hardware-tested; first transaction swapped |
 
@@ -315,6 +318,11 @@ so enable toggling alone does not explain the phase. The isolated reset-bit
 pulse also executed before unchanged timing setup and still produced the
 swapped state. It may remain part of a correct initialization sequence, but it
 does not independently reset the hidden phase.
+
+The pinned libogc and Linux source comparison is developed in
+[the libogc hardware concordance](libogc-hardware-concordance.md). In
+particular, the reset pulse corresponds only to libogc's disabled-VI branch;
+it does not reproduce libogc's normal enabled-VI handoff and retrace commit.
 
 ## Downstream color-phase investigation
 
@@ -463,3 +471,5 @@ The following rules are architectural, not merely procedural:
 - `tools/wii/wii-ave-reg.c`: AVE read and controlled diagnostic operations.
 - `docs/wii-6.18-gx-port.md`: chronological source, checksum, procedure, and
   hardware-result ledger.
+- `docs/libogc-hardware-concordance.md`: pinned libogc subsystem audit and
+  direct contract comparison with the Linux video drivers.
