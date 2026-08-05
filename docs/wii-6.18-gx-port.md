@@ -5440,3 +5440,47 @@ register guess. Compare the complete VI/AVE acquisition order used by libogc,
 legacy `gcn-vifb`, and DRM, classify register operations as stored state versus
 edges or commands, and isolate which reset or clock boundary can persist across
 driver ownership transitions and a full AVE initialization.
+
+## 2026-08-05: Stage enabled-VI inherited-mode control
+
+- Architecture audit: `54becc6e7` on `docs/wii-video-architecture`
+- Cycle-harness fix: `a6879e145`
+- `wii-drm-cycle.sh` SHA-256:
+  `bf6ca68627513e566a16ad5533946c6d25cb31b1e41f1fcf9ec00cc1220fe7a6`
+- Reused `gcn-drm.ko` SHA-256:
+  `20df08fec98d625dc4821821e427b8b03d4bda96ccc5ffe30a4f42e1995061f5`
+- Target `wii-drm-console` SHA-256:
+  `66fb1a55e46366bc2313ade57fcde11f401cd44b3e1487ab1de2fa13b3c6ea81`
+
+The pinned libogc audit corrected an important premise: `VIDEO_Init()` pulses
+VI reset only when DCR reports VI disabled. When VI is already enabled, libogc
+imports the live mode and later commits shadowed mode/address changes from the
+retrace handler without a disable/reset cycle. Legacy `gcn-vifb` likewise
+leaves VI enabled when it is unbound. The standalone DRM path instead
+quiesces, resets, programs with DCR zero, and enables last.
+
+Run a no-build compatibility control with the existing module explicitly
+loaded as `program_mode=0`. This skips `gcn_drm_program_ntsc_480i()` entirely:
+there must be no fresh `pulsed VI DCR reset` or `programmed NTSC 480i` marker.
+The driver must report a `handoff` mode and `/sys/module/gcn_drm/parameters/
+program_mode` must read `N`. VI must remain enabled from the legacy owner.
+
+The cycle harness now removes a stale unbound udev-preloaded `gcn_drm` before
+legacy unbind and passes `program_mode=0` explicitly. This repairs a control
+bug introduced when standalone programming became the module default: the
+previous no-argument branch silently selected `program_mode=1` and could not
+perform an inherited-mode test.
+
+Perform six complete warm ownership transactions from the same boot. For each
+transaction, start the checksum-pinned RGB565 console, classify the canonical
+seven colors as correct (`red, green, blue, gold, white, magenta, teal`) or
+swapped (`blue, green, red, light blue, white, magenta, gold`), then restore
+legacy `gcn-vifb` plus `gcn_gx` before the next transaction. Record any other
+output exactly rather than forcing it into either category.
+
+Consistently correct handoff would localize the selector to standalone
+disable/program/enable behavior. Consistently swapped handoff would show that
+the selected phase predates standalone DRM mode programming or survives its
+absence. Mixed handoff would reject that simple deterministic boundary. This
+is a localization control, not a production fix; keep cold and warm histories
+separate and perform no AVE write.
