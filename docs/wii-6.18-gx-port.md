@@ -5484,3 +5484,64 @@ the selected phase predates standalone DRM mode programming or survives its
 absence. Mixed handoff would reject that simple deterministic boundary. This
 is a localization control, not a production fix; keep cold and warm histories
 separate and perform no AVE write.
+
+## 2026-08-06: Inherited enabled-VI handoff remains swapped 6/6
+
+The corrected cycle harness and all reused artifacts matched their staged
+checksums. The Wii started from a fresh boot with legacy `gcn-vifb` and
+`gcn_gx` active. A stale unbound udev-preloaded `gcn_drm` instance was present;
+the harness removed it before releasing legacy ownership so that the explicit
+module parameter applied to the real platform probe.
+
+All six DRM probes reported:
+
+```text
+gcn-vi c002000.video: [drm] bound fixed 640x480 handoff mode, ...
+```
+
+For every transaction, `/sys/module/gcn_drm/parameters/program_mode` read
+`N`. The complete log contains exactly six handoff markers and zero `pulsed VI
+DCR reset` or `programmed NTSC 480i` markers. Thus none of the six transactions
+entered `gcn_drm_program_ntsc_480i()`.
+
+The first client initially mirrored an unseeded tty, so no colors were visible;
+this was not counted as a visual result. After writing the same labeled ANSI
+fixture to tty1, the checksum-pinned RGB565 console remained alive and exposed
+the canonical seven samples. The complete visual sequence was:
+
+```text
+transaction 1: swapped
+transaction 2: swapped
+transaction 3: swapped
+transaction 4: swapped
+transaction 5: swapped
+transaction 6: swapped
+```
+
+Each transaction displayed blue, green, red, light blue, white, magenta, and
+gold where red, green, blue, gold, white, magenta, and teal were expected. No
+AVE write occurred. Between transactions the exact console PID exited, DRM
+unloaded, legacy `gcn-vifb` rebound and ran its probe-time VI reset and mode
+setup, and `gcn_gx` reloaded before the next inherited-mode handoff.
+
+This is a decisive negative for `program_mode=0` as a color correction and
+rejects standalone DRM reset/timing programming as a necessary cause of the
+swap. The swapped outcome either survived or was deterministically reselected
+across five complete legacy probe/reset/setup round trips. It does not prove
+that the hidden phase was selected before the first DRM handoff, because the
+handoff path still quiesces VI display interrupts and later programs XFB field
+addresses when the DRM client enables its plane.
+
+After transaction 6, teardown restored legacy ownership and generated GX.
+Read-only AVE access reported `0x62=0`. Udev subsequently reloaded an unbound
+`gcn_drm`, reproducing the known packaging issue without changing VI ownership.
+The complete log is preserved on the Wii as
+`/root/20260806-drm-inherited-mode-swapped-6of6.dmesg.txt`, SHA-256
+`ef35afe48c45607a2a96380cf66f94a04a3e1d2b6958f76149f8b9a2b506471b`.
+
+Next obtain the complementary control from a positively classified correct
+state before changing source: establish a correct frame, restore legacy, then
+run explicit `program_mode=0` handoffs and determine whether they preserve or
+destroy that state. In parallel, enumerate the remaining writes common to
+standalone and handoff paths, especially DI quiesce/acknowledgment and the
+client-enable XFB address transaction. Do not return to scalar AVE guesses.
