@@ -5641,3 +5641,33 @@ the Wii was powered off.
 The complete log is preserved as
 `/root/20260806-correct-phase-acquire-2-swapped.dmesg.txt`, SHA-256
 `7840d433c3343b0a897f68e4989c192b4ab0d023037615041012c3ea05e5bcf1`.
+
+## 2026-08-06: Correct-phase acquisition attempt 3 is swapped
+
+A third real power-on reached a fresh legacy baseline with `gcn-vifb` owning
+the video platform. At approximately 267 seconds uptime, read-only AVE access
+again reported `0x62=0`. The persistent console binary retained its expected
+checksum; the harness re-uploaded and checksum-verified the pinned module set
+after the power cycle cleared `/tmp`.
+
+Explicit standalone mode completed with the required VI DCR reset, NTSC 480i
+programming, and programmed-mode bind markers. The canonical RGB565 console
+client remained alive as PID 2179, and the live module parameter read
+`program_mode=Y` at classification time.
+
+The full-frame fixture again displayed blue, green, red, light blue, white,
+magenta, and gold instead of the expected red, green, blue, gold, white,
+magenta, and teal. This is cold acquisition attempt 3 of 3 with the established
+swapped mapping. It increases confidence that swapped is the dominant cold
+outcome for this unchanged transaction, but it does not reveal which hidden
+state selects the intermittent correct mapping and does not replace the
+planned positive-state transition control.
+
+No warm retry was run. Exact client PID 2179 exited, the harness restored
+legacy `gcn-vifb` and `gcn_gx`, and the bound legacy platform device confirmed
+final ownership. Read-only AVE access remained `0x62=0`. Storage was synced and
+the Wii was powered off.
+
+The complete log is preserved as
+`/root/20260806-correct-phase-acquire-3-swapped.dmesg.txt`, SHA-256
+`be63e547594d0b04f9b3b6534ed399e9e3d71042fbaf6ba23dc9b56c69ffb419`.
