@@ -5610,3 +5610,34 @@ synced, and the Wii was powered off for another independent cold attempt.
 The log is preserved as
 `/root/20260806-correct-phase-acquire-1-swapped.dmesg.txt`, SHA-256
 `a6fd6ffd30523ca744a3f5e86905df494e6cc8bb0f361bb644b0dee88bda3260`.
+
+## 2026-08-06: Correct-phase acquisition attempt 2 is swapped
+
+After another real power cycle, the Wii reached a fresh legacy baseline at
+approximately 52 seconds uptime. Legacy `gcn-vifb` owned the video platform,
+and read-only AVE access reported `0x62=0`. The checksum-pinned modules were
+uploaded again because the power cycle had cleared the remote `/tmp` staging
+area.
+
+The explicit `--program-mode` path completed normally. Kernel markers again
+confirmed a VI DCR reset, complete NTSC 480i programming, and a programmed-mode
+DRM bind. The console client remained alive as PID 2595 and
+`/sys/module/gcn_drm/parameters/program_mode` read `Y` when the canonical
+labeled RGB565 fixture was classified.
+
+The displayed sequence was again swapped: blue, green, red, light blue,
+white, magenta, and gold instead of red, green, blue, gold, white, magenta,
+and teal. This is the second independent cold swapped acquisition. It does not
+establish that a cold boot can never produce the previously observed correct
+phase, so the staged procedure remains unchanged: do not run a warm retry;
+restore, power-cycle, and continue independent acquisitions until a correct
+standalone state can seed the transition control.
+
+The exact client PID stopped cleanly, legacy `gcn-vifb` and `gcn_gx` were
+restored, and final ownership was verified through the bound legacy platform
+device. Read-only AVE access still returned `0x62=0`. Storage was synced and
+the Wii was powered off.
+
+The complete log is preserved as
+`/root/20260806-correct-phase-acquire-2-swapped.dmesg.txt`, SHA-256
+`7840d433c3343b0a897f68e4989c192b4ab0d023037615041012c3ea05e5bcf1`.
