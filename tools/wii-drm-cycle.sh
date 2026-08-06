@@ -15,6 +15,7 @@ Options:
   --no-build       reuse the current zImage and DRM module artifacts
   --reuse-remote   verify and reuse checksum-matched modules in /tmp
   --program-mode   have gcn-drm program fixed NTSC 480i VI timing
+  --ave-swap       set AVE chroma exchange after DRM bind; clear on restore
   --restore        unload DRM and restore legacy gcnfb/GX
   --allow-dirty    permit loading artifacts from an uncommitted tree
 
@@ -29,6 +30,7 @@ reuse_remote=0
 restore_only=0
 allow_dirty=0
 program_mode=0
+ave_swap=0
 
 while (($#)); do
 	case "$1" in
@@ -44,6 +46,9 @@ while (($#)); do
 		;;
 	--program-mode)
 		program_mode=1
+		;;
+	--ave-swap)
+		ave_swap=1
 		;;
 	--restore)
 		restore_only=1
@@ -64,6 +69,11 @@ while (($#)); do
 	shift
 done
 
+if (( ave_swap && ! program_mode && ! restore_only )); then
+	echo "--ave-swap currently requires --program-mode" >&2
+	exit 2
+fi
+
 repo=$(git rev-parse --show-toplevel)
 cd "$repo"
 if (( ! allow_dirty )) &&
@@ -76,6 +86,8 @@ commit=$(git rev-parse --short=12 HEAD)
 device=c002000.video
 legacy_driver=/sys/bus/platform/drivers/gcn-vifb
 drm_driver=/sys/bus/platform/drivers/gcn-vi
+ave_swap_marker=/run/wii-drm-ave-swap-active
+ave_utility=/usr/local/sbin/wii-ave-reg
 
 module_paths=(
 	drivers/gpu/drm/drm_panel_orientation_quirks.ko
@@ -176,6 +188,11 @@ restore_legacy()
 {
 	remote_status "restoring legacy display" || true
 	remote_exec "
+		if [ -e $ave_swap_marker ]; then
+			printf '<6>drm-cycle: clearing AVE chroma compensation\n' > /dev/kmsg
+			$ave_utility /dev/i2c-0 --clear-swap || exit 1
+			rm -f $ave_swap_marker
+		fi
 		set +e
 		rmmod gcn_drm 2>/dev/null
 		rmmod drm_shmem_helper 2>/dev/null
@@ -269,6 +286,21 @@ else
 fi
 remote_exec "test -e $drm_driver/$device"
 remote_exec "test -e /sys/class/drm/card0"
+
+if (( ave_swap )); then
+	remote_status "setting AVE chroma compensation"
+	remote_exec "
+		test -x $ave_utility
+		test -e /dev/i2c-0
+		: > $ave_swap_marker
+		if ! $ave_utility /dev/i2c-0 --set-swap; then
+			$ave_utility /dev/i2c-0 --clear-swap || true
+			rm -f $ave_swap_marker
+			exit 1
+		fi
+	"
+fi
+
 remote_exec "printf '\\n=== GCN DRM/KMS ACTIVE: $commit ===\\n' > /dev/tty0"
 
 leave_drm_active=1

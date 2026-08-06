@@ -5787,3 +5787,25 @@ client presentation, with a mandatory `0x62=0` restoration on teardown. Keep
 the mechanism opt-in until repeated cold starts and warm module reloads define
 its safe lifecycle; it remains compensation for, not a reset of, the hidden
 upstream phase.
+
+## 2026-08-06: Stage transactional AVE compensation harness
+
+The cycle harness adds an opt-in `--ave-swap` mode, currently restricted to
+explicit `--program-mode` transactions. After DRM binds and its card appears,
+the harness verifies the AVE utility and I2C device, creates a remote lifecycle
+marker, and writes `0x62=2`. A failed write attempts an immediate clear and
+removes the marker before returning failure.
+
+Every normal restore and transition-error restore checks the marker before
+unloading DRM. When present, restoration must successfully write `0x62=0`
+before removing the marker and proceeding to legacy rebind. This also protects
+a later standalone `--restore` invocation that does not repeat `--ave-swap`.
+The marker is created before the set operation so a partially failed command
+cannot silently bypass cleanup.
+
+`shellcheck`, `git diff --check`, and argument validation pass. This is staged
+but not hardware-validated. On resume, use the already installed checksum-
+verified AVE utility and run one `--program-mode --ave-swap` cycle. Require
+correct colors on the first client frame, marker presence and `0x62=2` while
+active, then invoke ordinary `--restore` without `--ave-swap` and require
+marker removal, `0x62=0`, and legacy ownership before accepting the lifecycle.
