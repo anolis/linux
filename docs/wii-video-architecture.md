@@ -350,7 +350,12 @@ it does not reproduce libogc's normal enabled-VI handoff and retrace commit.
 11. AVE register space is not ordinary storage: at least the Macrovision range
     and command register `0x04` have non-storage behavior.
 12. Warm ownership cycles have produced six correct runs in succession, while
-    a cold boot selected a swapped state that survived three ownership cycles.
+    other cold boots selected a swapped state that survived repeated ownership
+    cycles.
+13. Six explicit `program_mode=0` handoffs all remained swapped. Their log
+    contains six handoff probes and no DRM reset or standalone timing marker.
+    Each intervening legacy restore ran `gcn-vifb` probe-time VI reset and mode
+    setup without changing the next handoff result.
 
 ### Current fault boundary
 
@@ -398,17 +403,31 @@ eight-run acceptance test by design. Teardown restored legacy ownership, the
 prior module, printk, and AVE `0x62=0`. The complete result is ledger commit
 `f629cd93c`.
 
+### Completed inherited-mode control
+
+The checksum-pinned `program_mode=0` control completed six full warm ownership
+transactions from one fresh boot. All six displayed the canonical swapped
+sequence. No transaction called the DRM fixed-mode programmer, and complete
+legacy probe/reset/setup ran between transactions. This proves standalone DRM
+reset/timing programming is not necessary for the swap and rejects inherited
+mode as a correction. The complete result is ledger commit `452d2f3f6`.
+
+It does not prove the hidden phase predates the first DRM handoff: the handoff
+path still quiesces VI display interrupts, and client enable still changes XFB
+field addresses. Those common operations remain candidates.
+
 ### Next investigation
 
-1. Compare ordered writes and delays across libogc, legacy `gcn-vifb`, and DRM,
-   emphasizing reset and clock domains rather than final scalar values.
-2. Classify VI and AVE registers by behavior: storage, strobe, self-clearing,
+1. Establish a positively classified correct frame, restore legacy, then run
+   explicit inherited-mode handoffs to determine whether they preserve or
+   destroy that known-correct phase.
+2. Enumerate writes common to standalone and inherited paths, especially DI
+   quiesce/acknowledgment and client-enable XFB field-address programming.
+3. Compare ordered writes and delays across libogc, legacy `gcn-vifb`, and DRM,
+   emphasizing transaction boundaries rather than final scalar values.
+4. Classify VI and AVE registers by behavior: storage, strobe, self-clearing,
    write-one-to-clear, read-only, or unknown.
-3. Identify which owner establishes VI clock, output selection, and AVE handoff
-   state before DCR reset and timing programming.
-4. Determine which reset boundaries affect VI alone and which can affect the
-   downstream serializer or encoder phase.
-5. Build the next diagnostic around an independently validated positive
+5. Build every next diagnostic around an independently validated positive
    control before using an unchanged result to eliminate another stage.
 6. Keep the stale unbound `gcn_drm` preload as a separate packaging fix; it is
    not a color-phase result.

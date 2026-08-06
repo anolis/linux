@@ -212,7 +212,11 @@ downstream of correct XFB bytes. This audit adds three constraints:
    standalone probe performs a synchronous disable/program/enable transaction.
 
 These are differences worth controlling. They do not prove that one is the
-color-phase cause.
+color-phase cause. The completed inherited-mode control subsequently produced
+six swapped results without entering the standalone mode programmer. Each
+intervening legacy restore ran its own probe-time VI reset and mode setup. This
+rejects standalone DRM programming as a necessary cause but leaves operations
+common to both DRM paths unresolved.
 
 ## GX, CP, PI, and PE concordance
 
@@ -385,7 +389,7 @@ For Linux this suggests explicit lifecycle phases:
 | Render/source buffer ownership | Source-generation and completed-XFB handshakes | GEM shadow and double XFB | Implemented in current paths |
 | Complete GX state ownership | Large explicit setup, but still hand-maintained | Future work | Needs systematic state audit |
 | Bounded GX abort/unload | Worker teardown and fallback exist | Future work | Needs libogc-guided hardware validation |
-| VI warm handoff behavior | Unbind leaves VI active | `program_mode=0` compatibility path exists | Available control, not current default |
+| VI warm handoff behavior | Unbind leaves VI active | `program_mode=0` compatibility path tested | Six inherited handoffs remained swapped |
 | Field-aware mode commit | Direct legacy setup; flips at retrace | Probe programs synchronously; flips at retrace | Mode-set transaction needs improvement |
 | AVE connector ownership | Legacy I2C child setup | External service/diagnostic tooling | Architectural gap |
 | Cable/mode detection | Legacy uses VI_SEL and AVE | Fixed always-connected NTSC mode | Deliberate prototype limitation |
@@ -394,22 +398,21 @@ For Linux this suggests explicit lifecycle phases:
 
 These are ordered to maximize information while minimizing new variables.
 
-### 1. Revalidate enabled-VI handoff under the current color fault
+### 1. Run the complementary handoff from a known-correct phase
 
-Use the existing `program_mode=0` DRM compatibility path without rebuilding.
-Start from a recorded cold state, transfer ownership from legacy fbdev, and run
-multiple complete DRM transactions while recording whether color remains
-correct or swapped.
+The first enabled-VI control is complete: six explicit `program_mode=0`
+transactions remained swapped, including full legacy restoration between
+cycles. Repeat the same control only after obtaining a positively classified
+correct frame, without rebooting between classification, restore, and handoff.
 
-- Consistently correct handoff would localize the selector to standalone
-  disable/program/enable behavior.
-- Swapped handoff would show that the selected phase predates standalone DRM
-  mode programming or survives its absence.
-- Mixed handoff would reject a simple deterministic distinction and require a
-  finer timing/edge control.
+- Preserved correct output would support phase inheritance across ownership.
+- A transition to swapped would identify a common handoff operation as a
+  selector rather than passive inheritance.
+- Mixed output would require a finer timing/field control.
 
-This is a control, not a fix. Cold and warm histories must be logged
-separately.
+The remaining common operations include VI display-interrupt quiesce and the
+client-enable XFB address transaction. Standalone reset and timing programming
+are no longer necessary conditions for the observed swap.
 
 ### 2. Compare complete ordered VI traces
 
