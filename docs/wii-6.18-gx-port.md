@@ -5671,3 +5671,37 @@ the Wii was powered off.
 The complete log is preserved as
 `/root/20260806-correct-phase-acquire-3-swapped.dmesg.txt`, SHA-256
 `be63e547594d0b04f9b3b6534ed399e9e3d71042fbaf6ba23dc9b56c69ffb419`.
+
+## 2026-08-06: Attempt 4 is swapped; retire cold correct-phase search
+
+A fourth real power cycle reached legacy ownership with read-only AVE register
+`0x62=0`. The persistent console binary matched its pinned checksum, and the
+harness uploaded and verified the unchanged module set before explicit
+standalone acquisition. The kernel again logged the required VI DCR reset,
+NTSC 480i programming, and programmed-mode bind. Client PID 2722 remained
+alive and the module parameter read `program_mode=Y` during classification.
+
+The canonical full-frame fixture displayed the same swapped sequence for the
+fourth independent cold acquisition: blue, green, red, light blue, white,
+magenta, and gold rather than red, green, blue, gold, white, magenta, and teal.
+All four acquisitions in this controlled cold series are therefore swapped.
+The earlier production-rollback cold boot also began swapped and remained so
+across three warm ownership transactions, while the documented correct streaks
+occurred during warm sessions. This evidence supports cold-swapped as the
+reproducible baseline; it does not justify calling every future cold boot
+mathematically guaranteed to be swapped.
+
+Stop spending hardware cycles waiting for a naturally correct cold acquisition.
+The planned correct-phase inherited-handoff control cannot currently obtain its
+required natural positive state and is retired rather than reported as a
+negative result. Redesign the next experiment around the reproducible
+cold-swapped baseline and the already validated AVE `0x62` bit-1 compensator.
+Keep the distinction explicit: writing `0x02` can correct a frozen swapped
+frame, but it does not reset the unknown upstream phase and therefore cannot by
+itself answer whether DRM handoff preserves that phase.
+
+Exact client PID 2722 exited, legacy `gcn-vifb` and `gcn_gx` were restored,
+final legacy ownership was verified, read-only AVE access remained `0x62=0`,
+storage was synced, and the Wii was powered off. The complete log is preserved
+as `/root/20260806-correct-phase-acquire-4-swapped.dmesg.txt`, SHA-256
+`49f1fa52325b10baffd492e7cc60c2594ab2c63bbb56cf5a5622e2bad538d84d`.
