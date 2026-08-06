@@ -5545,3 +5545,42 @@ run explicit `program_mode=0` handoffs and determine whether they preserve or
 destroy that state. In parallel, enumerate the remaining writes common to
 standalone and handoff paths, especially DI quiesce/acknowledgment and the
 client-enable XFB address transaction. Do not return to scalar AVE guesses.
+
+## 2026-08-06: Stage correct-phase inherited-handoff control
+
+- Cycle harness: `a6879e145`
+- `wii-drm-cycle.sh` SHA-256:
+  `bf6ca68627513e566a16ad5533946c6d25cb31b1e41f1fcf9ec00cc1220fe7a6`
+- Reused `gcn-drm.ko` SHA-256:
+  `20df08fec98d625dc4821821e427b8b03d4bda96ccc5ffe30a4f42e1995061f5`
+- Target `wii-drm-console` SHA-256:
+  `66fb1a55e46366bc2313ade57fcde11f401cd44b3e1487ab1de2fa13b3c6ea81`
+
+The swapped 6/6 inherited-mode result establishes a stable negative state but
+cannot determine whether inherited handoff preserves the incoming phase or
+selects swapped itself. Run the complementary transition from a positively
+classified correct state without changing any artifact or AVE register.
+
+Begin after a real power cycle, not merely a warm ownership transition. Use
+the explicit `--program-mode` harness path and the canonical labeled RGB565
+fixture to classify standalone DRM. If it is swapped, restore legacy cleanly,
+record that cold attempt, and power-cycle before trying again. Do not chain warm
+standalone retries while searching for the positive state.
+
+When a standalone transaction is visibly correct:
+
+1. Stop the exact DRM console PID and restore legacy `gcn-vifb` plus `gcn_gx`.
+2. Re-seed and classify the same tty fixture on the visible legacy console
+   before another ownership change.
+3. Load the same DRM module explicitly with `program_mode=0`, require parameter
+   `N`, a handoff marker, and no new reset/program marker.
+4. Start the same RGB565 client and classify the same fixture again.
+5. Restore legacy and preserve the complete ordered log.
+
+If standalone, restored legacy, and inherited DRM all remain correct, the
+handoff path preserves a known-correct phase and the earlier 6/6 swapped run
+demonstrates phase inheritance. If legacy is already swapped, localize the
+transition to legacy restore/probe/setup. If legacy is correct but inherited
+DRM is swapped, localize the selector to operations common to DRM handoff,
+chiefly DI quiesce/acknowledgment or client-enable XFB field-address writes.
+Any other transition must be recorded literally.
