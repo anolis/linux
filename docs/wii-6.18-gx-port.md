@@ -5705,3 +5705,44 @@ final legacy ownership was verified, read-only AVE access remained `0x62=0`,
 storage was synced, and the Wii was powered off. The complete log is preserved
 as `/root/20260806-correct-phase-acquire-4-swapped.dmesg.txt`, SHA-256
 `49f1fa52325b10baffd492e7cc60c2594ab2c63bbb56cf5a5622e2bad538d84d`.
+
+## 2026-08-06: Stage live AVE compensation viability control
+
+- Static `wii-ave-reg` SHA-256:
+  `f1fc92bcd90eb4bcd1cbf3285e295ed5087fe446e45c47c5852681d5539b95e0`
+- Reused `gcn-drm.ko` SHA-256:
+  `20df08fec98d625dc4821821e427b8b03d4bda96ccc5ffe30a4f42e1995061f5`
+- Target `wii-drm-console` SHA-256:
+  `66fb1a55e46366bc2313ade57fcde11f401cd44b3e1487ab1de2fa13b3c6ea81`
+
+The four-attempt cold acquisition series makes a swapped first standalone
+frame the reproducible test baseline. Stop searching for a naturally correct
+cold state. Instead determine whether the already validated AVE `0x62` bit-1
+exchange can serve as a stable operational compensation while KMS continues
+to render and flip pages.
+
+Begin from another real power cycle and run one explicit programmed-mode DRM
+transaction with the unchanged module and canonical RGB565 fixture. Require
+the established swapped mapping and read-only `0x62=0`. Keep the renderer
+running; do not freeze it. Deploy the checksum-pinned static utility and write
+only `0x02` with `wii-ave-reg /dev/i2c-0 --set-swap`. Require an immediate
+transition to the correct red, green, blue, gold, white, magenta, and teal
+mapping.
+
+After that transition, write visibly changing fixture text through tty1 for at
+least ten renderer updates so conversion and both XFB pages continue changing.
+The full frame must remain correctly mapped throughout and the client must stay
+alive. This is the new positive control beyond the earlier frozen-frame tests:
+the compensation must apply to subsequent XFB contents, not only the frame
+that was visible during the I2C transfer.
+
+Finally write only `0x00` with `--clear-swap` while the renderer remains live.
+Require the same active fixture to return immediately to the established
+swapped mapping. Read back zero, stop the exact client, and restore legacy
+ownership. Never unload DRM, restore legacy, or power off while this experiment
+intentionally leaves `0x62=2`.
+
+A complete swapped-to-correct-live-updates-to-swapped reversal validates
+`0x62=2` as a practical cold-session compensation and justifies staging a
+late, explicitly controlled DRM/encoder integration. It still does not identify
+or reset the upstream hidden phase, and it must not be described as such.
