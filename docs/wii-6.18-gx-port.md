@@ -5584,3 +5584,29 @@ transition to legacy restore/probe/setup. If legacy is correct but inherited
 DRM is swapped, localize the selector to operations common to DRM handoff,
 chiefly DI quiesce/acknowledgment or client-enable XFB field-address writes.
 Any other transition must be recorded literally.
+
+## 2026-08-06: Correct-phase acquisition attempt 1 is swapped
+
+After a clean software power-off and physical power-on, the Wii reached legacy
+ownership at approximately 59 seconds uptime. The first `--reuse-remote`
+preflight rejected a missing or mismatched `/tmp` generic DRM module before any
+VI ownership change. A normal checksum-verified upload then started explicit
+standalone mode with `program_mode=Y`.
+
+Kernel markers confirmed the expected reset and complete fixed-mode path:
+
+```text
+gcn-vi c002000.video: [drm] pulsed VI DCR reset
+gcn-vi c002000.video: [drm] programmed NTSC 480i: DCR=0001 ...
+gcn-vi c002000.video: [drm] bound fixed 640x480 programmed NTSC 480i mode, ...
+```
+
+The canonical labeled RGB565 fixture displayed the swapped sequence. This cold
+attempt therefore cannot seed the complementary inherited-mode control. No
+warm standalone retry was run. The exact client exited, legacy `gcn-vifb` and
+`gcn_gx` were restored, read-only AVE access returned `0x62=0`, storage was
+synced, and the Wii was powered off for another independent cold attempt.
+
+The log is preserved as
+`/root/20260806-correct-phase-acquire-1-swapped.dmesg.txt`, SHA-256
+`a6fd6ffd30523ca744a3f5e86905df494e6cc8bb0f361bb644b0dee88bda3260`.
