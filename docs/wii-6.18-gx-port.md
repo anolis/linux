@@ -5746,3 +5746,44 @@ A complete swapped-to-correct-live-updates-to-swapped reversal validates
 `0x62=2` as a practical cold-session compensation and justifies staging a
 late, explicitly controlled DRM/encoder integration. It still does not identify
 or reset the upstream hidden phase, and it must not be described as such.
+
+## 2026-08-06: Live AVE compensation remains correct across updates
+
+The Wii began from another real power cycle with legacy `gcn-vifb` ownership,
+read-only AVE `0x62=0`, and the checksum-pinned console client. The installed
+AVE utility was replaced with the staged static build and verified at SHA-256
+`f1fc92bcd90eb4bcd1cbf3285e295ed5087fe446e45c47c5852681d5539b95e0`.
+The unchanged DRM module then entered explicit programmed mode with the
+expected VI reset, NTSC 480i setup, and bind markers.
+
+Client PID 3204 remained alive with `program_mode=Y`. At `0x62=0`, the
+canonical full-frame RGB565 fixture displayed the reproducible cold-swapped
+mapping. Without stopping the renderer or touching VI or XFB memory, the
+utility wrote only `0x02` to AVE register `0x62` and read the same value back.
+All seven colors immediately became correct.
+
+The test then wrote ten visibly numbered updates through tty1 at one-second
+intervals. The client remained alive, conversion and presentation continued,
+and the user confirmed that all seven colors stayed correct throughout and
+after the updates. Read-only access still returned `0x62=2`. This demonstrates
+that the compensation applies to later framebuffer contents and page
+presentations, not only to the frame visible during the I2C transfer.
+
+With the renderer still live, writing only `0x00` changed readback from two to
+zero and immediately returned the active fixture to the same swapped mapping.
+This completes the required swapped-to-correct-live-updates-to-swapped
+reversible positive control.
+
+Exact client PID 3204 then exited, the harness restored legacy `gcn-vifb` and
+`gcn_gx`, final ownership was verified through the bound legacy platform
+device, and AVE readback remained `0x62=0`. The complete log is preserved as
+`/root/20260806-live-ave-compensation-pass.dmesg.txt`, SHA-256
+`ed56c78c3bc72147afccca085644f70921e1d75ade32e2fd974ce1dcd9824fe2`.
+
+This passes AVE bit 1 as a stable operational compensation for the currently
+reproducible cold-swapped session. The next implementation test may integrate
+an explicit late `0x62=2` write after DRM mode acquisition and before normal
+client presentation, with a mandatory `0x62=0` restoration on teardown. Keep
+the mechanism opt-in until repeated cold starts and warm module reloads define
+its safe lifecycle; it remains compensation for, not a reset of, the hidden
+upstream phase.
