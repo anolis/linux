@@ -5887,3 +5887,64 @@ valid and expected localization result: it would show that the visible AVE
 exchange has no reflection in this safe MMIO whitelist and strengthen the case
 for transaction tracing or external AVE I2C capture rather than a broader
 unsafe register sweep.
+
+## 2026-08-06: Whitelisted MMIO has no color-correlated state
+
+The deployed observer matched staged SHA-256
+`d3eaca0740403efa8e057add3e8f6d078a680ff00be68707af92282037f8bf32`.
+All four phases emitted exactly 46 labeled lines: one selected-XFB header,
+seven XFB words, and two complete 19-line MMIO samples. Every load and unload
+completed with the client or legacy framebuffer still operational, and the
+kernel logged no machine check, oops, or other fault.
+
+The legacy snapshot established the repetition filter. Its two samples changed
+only the live VI beam/field count, CP read/write distance, and PE token. Under
+the active DRM client, same-phase repeats additionally changed the selected
+top/bottom XFB page addresses as the renderer presented pages. Those fields
+were classified as dynamic before any cross-phase comparison.
+
+The hardware sequence then completed under one DRM ownership interval:
+
+```text
+AVE 0x62=0: visually swapped
+AVE 0x62=2: visually correct
+AVE 0x62=0: visually swapped again
+```
+
+The same live client PID 15556 remained active throughout. Each phase was
+explicitly redrawn and visually classified before its snapshot. AVE readback
+independently passed the required zero, two, zero control. The seven selected
+XFB sample sites contained the identical background word `0x00800080` in all
+three DRM phases.
+
+After masking only fields proven dynamic by the within-phase repeats, all
+whitelisted VI, CP, PE, PI, and Hollywood GPIO values were byte-identical for
+DRM swapped versus corrected, corrected versus cleared, and swapped versus
+cleared. In particular, GPIO output, direction, input, interrupt, enable, and
+ownership words showed no retained reflection of the AVE exchange setting once
+its I2C transaction returned the bus to idle.
+
+The apparatus passed a separate ownership positive control. Legacy versus DRM
+showed VI offset `0x30` word 0 changing from `0x10010001` to `0x00010001` and PE
+status changing from `0x0003` to `0x0000`, consistent with DRM interrupt
+quiescence and removal of generated GX ownership. The null color-phase diff is
+therefore not explained by an observer permanently returning constants.
+
+This rules out a readable color-correlated bit in the safe MMIO whitelist. Do
+not broaden the sweep to arbitrary Hollywood addresses: undocumented reads can
+acknowledge state or machine-check, and this result gives no candidate range.
+Move to ordered transaction tracing. Instrument Linux writes to VI and AVE,
+and use the documented TP219-TP226 DEBUG GPIO outputs as external logic-analyzer
+event markers when motherboard access is practical. Directly probing AVE SCL
+and SDA can independently capture the real I2C wire transaction.
+
+Teardown stopped exact PID 15556, restored legacy `gcn-vifb` and `gcn_gx`, and
+left AVE `0x62=0`. The preserved files are:
+
+```text
+legacy snapshot:       6e42f89cc391e72d8a97a9976ece052e1595cfc8e6c88fe590efefc7ecdaa830
+DRM swapped snapshot:  35ad5fa745649f674a8010a4a39864e1e788e68e5db3487b12c4bc50920b2eb1
+DRM corrected snapshot:4457d4a913f77262dbcb45f926b0e4fec299fb00b81870467b08e532d7226c5a
+DRM cleared snapshot:  dda46c9745b6b4cfb575f460bf8e0ecee0c8738713d933af4a198e2c8602e5c7
+complete dmesg:        26942f28863d299a514fb8fc0e8ee04914070d06ac068384c57996efde1f177a
+```
