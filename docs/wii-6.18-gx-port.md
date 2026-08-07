@@ -6009,3 +6009,68 @@ operation did not happen. After validation, launch the unchanged canonical
 RGB565 fixture to confirm that trace collection did not perturb the expected
 `0x62=2` corrected output, then use the ordinary transactional restore and
 verify AVE `0x62=0` with legacy `gcn-vifb` rebound.
+
+## 2026-08-06: Accept ordered VI/AVE software transaction tracing
+
+The corrected harness and all six remote modules matched their staged
+checksums. Tracefs was mounted on demand, the isolated `gcn-display` instance
+started while legacy still owned the video platform, and the preloaded
+`gcn_drm` tracepoint observed the first write made by the subsequent manual
+platform bind.
+
+The complete artifact contains 62 written and 62 retained events with no
+overrun. All 43 VI events have a contiguous sequence from 1 through 43. The
+trace begins with four DI quiescence writes, then records the DCR reset edge
+`0x0002` followed by zero. Known programmed-mode constants appear at the
+expected offsets, including `VTR=0x0f06`, `HTR0=0x476901ad`,
+`HTR1=0x02e850c0`, and final `DCR=0x0001`. XFB addresses and the second
+probe-time DI quiescence are also present.
+
+The AVE positive control is complete on the same monotonic trace clock:
+
+```text
+read request:  address 0x70, payload [62]
+read reply:    [00], result 2/2 messages
+write request: address 0x70, payload [62-02]
+write result:  1/1 message
+verify request: address 0x70, payload [62]
+verify reply:  [02], result 2/2 messages
+```
+
+Markers strictly bracket legacy ownership, transition start, legacy unbind,
+DRM bind completion, AVE set start, AVE set completion, active no-client state,
+and trace stop. This validates both sides of the measurement mechanism: the VI
+tracepoint reports known kernel MMIO writes, and the existing I2C events report
+known userspace AVE transactions and returned bytes.
+
+After capture stopped, the unchanged checksum-pinned RGB565 console client
+started as PID 25021. AVE readback remained `0x62=2`, and the user twice
+confirmed the expected red, green, blue, gold, white, magenta, and teal mapping.
+Thus the tracing build and completed capture did not perturb the compensated
+visual path.
+
+Exact-PID termination succeeded. Transactional restore read two, wrote zero,
+and verified zero before rebinding legacy `gcn-vifb` and reloading `gcn_gx`.
+Final checks found DRM unbound, no client or lifecycle marker, and tracing plus
+all instance events disabled. Udev reloaded the known unbound packaged
+`gcn_drm` instance without taking the platform device. A corrected
+case-sensitive fault audit found no BUG, oops, panic, machine check, watchdog,
+conversion failure, or trace overrun.
+
+Preserved artifacts:
+
+```text
+ordered trace: 2f0809b1aa96194a064af30f505359c3455b5c196141214d098908e0de9b35d7
+complete dmesg: 65ec6f9ccbea1445a4f6a76219a75f66d22d39104156e106a0c378cd9b09cac4
+client log:    17f4cd55eca14522a6729bc5bf82d4d2361078c0c997970f14d9447baf85f57c
+```
+
+The ordered software tracer is accepted. Next collect repeated explicit
+programmed-mode traces with no AVE write, launch the same canonical client only
+after each capture, and visually classify each acquisition as naturally
+swapped or naturally correct. Compare complete write order and inter-write
+timing only after at least one trace exists in each visual class. Identical
+traces across opposite visual classes would localize the hidden selector below
+Linux's observable VI/AVE transaction boundary and justify external I2C wire
+capture or DEBUG-pad timing markers; until then, no external instrument is
+required.
