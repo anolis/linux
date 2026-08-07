@@ -6413,3 +6413,30 @@ client log:    17f4cd55eca14522a6729bc5bf82d4d2361078c0c997970f14d9447baf85f57c
 This passes one complete kernel-owned acquisition/restoration transaction. It
 does not yet establish repeatability. Run one identical warm transaction and
 then one independent cold boot before accepting the lifecycle.
+
+## 2026-08-07: Driver-owned AVE warm repeat is correct
+
+The second transaction began from the restored warm baseline with AVE zero,
+legacy ownership, and the same checksum-pinned remote modules. Explicit
+programmed mode and tracing again ran without `--ave-swap`.
+
+The trace retained all 56 of 56 events, contains the byte-identical contiguous
+43-write VI sequence, and independently records `[62-02]`, a successful 1/1
+write, `[62]`, `[02]`, and a successful 2/2 verification before DRM bind. The
+unchanged RGB565 console started as PID 3337, AVE readback was two, and the user
+classified the fixture as correct.
+
+Exact-PID termination and ordinary restore again used no harness AVE marker.
+Driver remove logged verified `62=00`; final readback was zero, legacy was
+bound, DRM was unbound, and the corrected fault audit was empty. Preserved
+artifacts:
+
+```text
+correct trace: 2f182aee3c47595152780ba5a40d93808106e13f20cd6445b45166b9d8a0dd1f
+complete dmesg: 3045e510e02ab937fd9cd4981decdb05f94252c25932a1bd341f0268ea6ecbfb
+client log:    17f4cd55eca14522a6729bc5bf82d4d2361078c0c997970f14d9447baf85f57c
+```
+
+The kernel-owned lifecycle is correct for two consecutive warm transactions.
+Complete the staged acceptance procedure with one independent reboot, fresh
+module staging, and the same trace, visual, and teardown gates.
