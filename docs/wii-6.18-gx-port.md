@@ -5843,3 +5843,47 @@ phase decision until that behavior is resolved.
 The complete log is preserved as
 `/root/20260806-transactional-ave-lifecycle-pass.dmesg.txt`, SHA-256
 `dab0aad743d557513bf5f52237c5b99cf0153bf2de8f7c8b454e604a190a63bf`.
+
+## 2026-08-06: Stage whitelisted display-MMIO snapshot comparison
+
+- Observer module SHA-256:
+  `d3eaca0740403efa8e057add3e8f6d078a680ff00be68707af92282037f8bf32`
+
+Extend the existing read-only XFB observer into a constrained software
+equivalent of port-state sniffing. It retains the established selected-XFB
+samples and complete 0x100-byte VI readout, then adds only offsets already read
+by active kernel drivers: CP status/control and FIFO registers, PE interrupt
+status/token, PI FIFO base/end/write pointer, and both Hollywood GPIO register
+banks including ownership. It does not scan arbitrary Hollywood addresses.
+
+Each module load accepts a snapshot label and records two snapshots separated
+by one millisecond by default. At most eight samples and a one-second delay are
+accepted. The repeated reads distinguish stable state from the VI beam counter,
+interrupt flags, or other naturally changing observations. The module performs
+no MMIO write; the pre-existing optional selected-XFB cache flush remains off.
+
+The configured PowerPC module build, modpost, strict checkpatch, and
+`git diff --check` pass. Run this exact four-phase comparison on one ownership
+session:
+
+1. Capture two labeled snapshots under restored legacy ownership.
+2. Start programmed DRM without AVE compensation, render the canonical fixture,
+   require the reproducible swapped mapping at `0x62=0`, and capture twice.
+3. Keep the client live, write AVE `0x62=2`, require correct colors, and capture
+   twice without another DRM ownership transition.
+4. Clear AVE back to zero, require swapped colors again, and capture twice.
+
+Positive controls are mandatory. Every phase must emit exactly two complete
+snapshots. Selected-XFB fixture words must remain coherent across the three DRM
+phases, and AVE userspace readback must independently show zero, two, then zero.
+Known same-phase changes identify dynamic fields and must be masked before any
+cross-phase conclusion. Legacy-to-DRM differences validate ownership
+visibility but are not evidence of the color selector by themselves.
+
+The decisive comparison is DRM swapped versus AVE-corrected versus AVE-cleared.
+A stable MMIO bit that follows wrong/correct/wrong is a candidate mirrored or
+collateral state requiring an isolated control. No stable difference is also a
+valid and expected localization result: it would show that the visible AVE
+exchange has no reflection in this safe MMIO whitelist and strengthen the case
+for transaction tracing or external AVE I2C capture rather than a broader
+unsafe register sweep.
