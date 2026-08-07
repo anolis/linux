@@ -6110,3 +6110,42 @@ Continue independent no-AVE-write traced acquisitions with the same artifacts
 until a naturally correct sample is captured. Preserve every classification
 literally; do not use AVE compensation to convert a swapped acquisition into
 the missing positive class.
+
+## 2026-08-06: Natural traced acquisition 2 is also swapped
+
+The second independent warm acquisition reused the same checksum-pinned
+module, harness, programmed-mode path, AVE zero state, and RGB565 fixture. The
+trace retained all 50 of 50 events without overrun and again contained no I2C
+traffic. The user classified the live client PID 27202 output as swapped.
+
+After removing timestamps and task metadata, acquisitions 1 and 2 have
+byte-identical 43-event VI sequences. Their timing differences establish an
+initial same-class jitter baseline rather than a color predictor. Relative to
+VI sequence 1, selected event times in microseconds were:
+
+```text
+sequence             1     5     6     7    32     33     39     40
+acquisition 1         0    12    17  6532  6592  11433  11452  33409
+acquisition 2         0    12    17  6124  6185   9411   9430  43560
+```
+
+The reset assertion/deassertion timing is effectively identical, while printk,
+XFB clearing/cache maintenance, DRM setup, and scheduling introduce
+millisecond-scale variation later in probe. Do not treat timing differences of
+that ordinary magnitude as color-correlated if a naturally correct sample is
+eventually captured.
+
+Exact client termination and transactional restore passed. Final state was
+legacy `gcn-vifb` bound, DRM unbound, AVE `0x62=0`, and an empty corrected
+fault audit. Preserved artifacts:
+
+```text
+swapped trace: 4f8669c0a6941fef1e4887e5342fee08f0360f36d98c13d6a208d629c2f820a6
+complete dmesg: f4a172cc4500cd0e0bf087da8850e9f7140e8c4267da7f4dd429d337f194e259
+client log:    17f4cd55eca14522a6729bc5bf82d4d2361078c0c997970f14d9447baf85f57c
+```
+
+Pause with the Wii in the verified legacy/AVE-zero state. On resume, run
+natural acquisition 3 with the same no-write procedure. The comparison remains
+blocked on obtaining at least one naturally correct AVE-zero trace; two
+swapped traces alone cannot identify a cross-class transaction difference.
