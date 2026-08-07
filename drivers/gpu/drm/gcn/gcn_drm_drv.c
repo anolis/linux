@@ -14,10 +14,12 @@
 
 #include <asm/cacheflush.h>
 
+#include <drm/clients/drm_client_setup.h>
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_connector.h>
 #include <drm/drm_device.h>
 #include <drm/drm_drv.h>
+#include <drm/drm_fbdev_shmem.h>
 #include <drm/drm_fourcc.h>
 #include <drm/drm_framebuffer.h>
 #include <drm/drm_gem_atomic_helper.h>
@@ -647,7 +649,7 @@ static const struct drm_connector_funcs gcn_drm_connector_funcs = {
 };
 
 static const struct drm_mode_config_funcs gcn_drm_mode_config_funcs = {
-	.fb_create = drm_gem_fb_create,
+	.fb_create = drm_gem_fb_create_with_dirty,
 	.atomic_check = drm_atomic_helper_check,
 	.atomic_commit = drm_atomic_helper_commit,
 };
@@ -688,6 +690,7 @@ static const struct drm_driver gcn_drm_driver = {
 	.driver_features = DRIVER_MODESET | DRIVER_GEM | DRIVER_ATOMIC,
 	.fops = &gcn_drm_fops,
 	DRM_GEM_SHMEM_DRIVER_OPS,
+	DRM_FBDEV_SHMEM_DRIVER_OPS,
 	.name = GCN_DRM_NAME,
 	.desc = GCN_DRM_DESC,
 	.major = 1,
@@ -794,6 +797,7 @@ static int gcn_drm_probe(struct platform_device *pdev)
 	ret = drm_dev_register(&gcn->drm, 0);
 	if (ret)
 		return ret;
+	drm_client_setup(&gcn->drm, drm_format_info(DRM_FORMAT_RGB565));
 
 	drm_info(&gcn->drm,
 		 "bound fixed 640x480 %s mode, XFB %08x+%08x\n",

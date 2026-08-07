@@ -6480,3 +6480,55 @@ deterministic encoder state rather than inherited or historical color phase.
 Keep the reversible userspace utility and harness option as diagnostics for
 now, but do not use them during ordinary DRM operation or as evidence for
 future production tests.
+
+## 2026-08-07: Stage native DRM fbcon as the boot display owner
+
+- `zImage` SHA-256:
+  `2f389ad2ac2c54072dcd5bcc23d7d86c38193c966f56df02fca9dfcf08febc0e`
+- `vmlinux` SHA-256:
+  `c17d5242e2df82e328ae6f9ce6c8bca30ba9f37f7fcb77e7ae55b9bd5cc7d111`
+- rollback `zImage` SHA-256:
+  `b39cdf270d8c0a960ce9b47f53845137106dadb373e4d2a6ccc61cfec8392505`
+
+Promote the accepted GCN DRM and driver-owned AVE lifecycle from a reversible
+module test to normal boot ownership. Build `CONFIG_DRM_GCN_VI` and DRM into
+the kernel, enable DRM fbdev emulation, and disable legacy `gcn-vifb`. Remove
+the obsolete `video=gcn-vifb:tv=auto,nostalgic` boot argument while retaining
+`console=tty0` for fbcon.
+
+The GCN driver now supplies the shmem fbdev operations and calls
+`drm_client_setup()` after DRM registration with RGB565 as the preferred
+format. Its framebuffer creation path uses `drm_gem_fb_create_with_dirty`, so
+deferred fbcon writes enter the atomic update path and reach the XFB rather
+than only changing the shmem shadow buffer. RGB565 minimizes the boot console
+allocation and uses the already validated conversion path on this constrained
+24 MiB system.
+
+`wii_defconfig` resolves built-in DRM, GCN VI, client setup, fbdev emulation,
+the shmem helper, and framebuffer console. Legacy GameCube framebuffer support
+is unset. A complete `-j16` build links `gcn_drm_probe`,
+`drm_client_setup`, and `drm_fbdev_shmem_driver_fbdev_probe`; no legacy
+`gcn_vifb_probe` symbol is present. The embedded DT contains the AVE phandle
+and the revised boot arguments. `git diff --check` and strict checkpatch pass.
+
+Cold-boot acceptance procedure:
+
+1. Deploy only the checksum-pinned image, leave `/boot` read-only, and cold
+   boot. Require the kernel to bind `gcn-vi`, enable and verify AVE
+   `0x62=0x02`, register DRM, and create a DRM-backed fbcon without any
+   `gcn-vifb` bind or userspace mirror process.
+2. Require a visible console that continues updating through boot, has a
+   blinking cursor, and responds to keyboard input. Confirm correct colors and
+   no frozen initial frame, recurring blur, repeated columns, or conversion
+   errors.
+3. Over SSH, verify `/sys/class/drm/card0`, identify `/sys/class/graphics/fb0`
+   as DRM fbdev, confirm AVE readback two, and audit dmesg for faults. Recheck
+   the console after generating new output to prove dirty updates reach XFB.
+4. Reboot once without redeploying and repeat the visual, fbdev, AVE, and fault
+   gates. Do not use `tools/wii-drm-cycle.sh`: built-in DRM intentionally has
+   no legacy handoff or module-unload lifecycle.
+
+If the display fails but SSH remains available, restore the preserved rollback
+image from `/tmp/zImage.ngx.rollback-driver-owned-ave-b39cdf27`, verify its
+checksum before and after the local `/boot` copy, sync, and remount `/boot`
+read-only. A loss of both display and network requires physical card rollback.
