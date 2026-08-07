@@ -6229,3 +6229,38 @@ reports and avoid treating uncontrolled observations as a comparison class.
 Collect a small bounded number of additional identical acquisitions before
 deciding whether to stop waiting for the missing natural class and move the
 selector investigation below the observable Linux VI/AVE transaction boundary.
+
+## 2026-08-07: Natural traced acquisition 5 is swapped
+
+Acquisition 5 used the unchanged pinned modules, harness, explicit programmed
+mode, AVE-zero state, and RGB565 fixture. The trace retained all 50 of 50
+events without overrun, contains all 43 contiguous VI writes, and contains no
+I2C traffic. The user classified client PID 4273 as swapped.
+
+The complete semantic VI sequence is identical to acquisition 4. Selected
+relative event times were:
+
+```text
+sequence             1     5     6     7    32    33    39    40
+acquisition 5         0    12    16  3523  3583  6742  6759  28398
+```
+
+The reset assertion-to-deassertion interval remains four microseconds. Later
+timing is within the range already observed among swapped acquisitions and
+does not provide a color-correlated difference.
+
+Exact-PID teardown and transactional restore passed. Legacy `gcn-vifb` was
+bound, DRM was unbound, AVE remained `0x62=0`, and the corrected fault audit
+was empty. Preserved artifacts:
+
+```text
+swapped trace: fa243c7731bd071bdc058a53d8d42cdcc5c591f01d0a0680d4800dc81e66b51c
+complete dmesg: 4d273cd49fe81a0883a31f66e20cafbfcf6bc4ac96e4cea9ccb489bbcf0b0401
+client log:    17f4cd55eca14522a6729bc5bf82d4d2361078c0c997970f14d9447baf85f57c
+```
+
+The controlled natural series is swapped 5/5. Run one final identical
+acquisition, then stop this sampling phase if it is also swapped. Six complete
+same-class captures are enough to show that waiting indefinitely for a
+naturally correct AVE-zero sample is not an efficient diagnostic path, while
+still not asserting that such a state is impossible.
