@@ -5,6 +5,7 @@
  */
 
 #include <linux/delay.h>
+#include <linux/i2c.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
 #include <linux/module.h>
@@ -36,6 +37,10 @@
 #define GCN_DRM_HEIGHT		480
 #define GCN_DRM_XFB_PITCH	(GCN_DRM_WIDTH * 2)
 #define GCN_DRM_XFB_PAGE_SIZE	(GCN_DRM_XFB_PITCH * GCN_DRM_HEIGHT)
+
+#define AVE_CHROMA_EXCHANGE_REG	0x62
+#define AVE_CHROMA_EXCHANGE_OFF	0x00
+#define AVE_CHROMA_EXCHANGE_ON	0x02
 
 #define VI_VTR			0x00
 #define VI_DCR			0x02
@@ -111,6 +116,7 @@ struct gcn_drm {
 	struct drm_device drm;
 	struct drm_simple_display_pipe pipe;
 	struct drm_connector connector;
+	struct i2c_client *ave;
 	void __iomem *vi_base;
 	void *xfb;
 	u32 xfb_phys;
@@ -120,6 +126,7 @@ struct gcn_drm {
 	unsigned int visible_page;
 	unsigned int pending_page;
 	bool flip_pending;
+	bool ave_restore_needed;
 };
 
 static bool program_mode = true;
@@ -161,6 +168,112 @@ static __always_inline void gcn_drm_vi_write32(struct gcn_drm *gcn,
 static inline struct gcn_drm *to_gcn_drm(struct drm_device *drm)
 {
 	return container_of(drm, struct gcn_drm, drm);
+}
+
+static int gcn_drm_ave_write_verify(struct gcn_drm *gcn, u8 value)
+{
+	struct i2c_msg messages[2];
+	u8 command[] = { AVE_CHROMA_EXCHANGE_REG, value };
+	u8 reg = AVE_CHROMA_EXCHANGE_REG;
+	u8 readback;
+	int ret;
+
+	ret = i2c_master_send(gcn->ave, command, sizeof(command));
+	if (ret < 0)
+		return ret;
+	if (ret != sizeof(command))
+		return -EIO;
+
+	messages[0].addr = gcn->ave->addr;
+	messages[0].flags = gcn->ave->flags;
+	messages[0].len = sizeof(reg);
+	messages[0].buf = &reg;
+	messages[1].addr = gcn->ave->addr;
+	messages[1].flags = gcn->ave->flags | I2C_M_RD;
+	messages[1].len = sizeof(readback);
+	messages[1].buf = &readback;
+
+	ret = i2c_transfer(gcn->ave->adapter, messages, ARRAY_SIZE(messages));
+	if (ret < 0)
+		return ret;
+	if (ret != ARRAY_SIZE(messages))
+		return -EIO;
+	if (readback != value)
+		return -EIO;
+
+	return 0;
+}
+
+static int gcn_drm_restore_ave(struct gcn_drm *gcn)
+{
+	int ret;
+
+	if (!gcn->ave || !gcn->ave_restore_needed)
+		return 0;
+
+	ret = gcn_drm_ave_write_verify(gcn, AVE_CHROMA_EXCHANGE_OFF);
+	if (ret) {
+		drm_err(&gcn->drm,
+			"failed to restore AVE chroma exchange: %d\n", ret);
+		return ret;
+	}
+
+	gcn->ave_restore_needed = false;
+	drm_info(&gcn->drm, "restored AVE chroma exchange: 62=00\n");
+	return 0;
+}
+
+static void gcn_drm_release_ave(void *data)
+{
+	struct gcn_drm *gcn = data;
+
+	gcn_drm_restore_ave(gcn);
+	put_device(&gcn->ave->dev);
+	gcn->ave = NULL;
+}
+
+static int gcn_drm_acquire_ave(struct gcn_drm *gcn, struct device *dev)
+{
+	struct device_node *ave_node;
+	int ret;
+
+	ave_node = of_parse_phandle(dev->of_node, "audio-video-encoder", 0);
+	if (!ave_node) {
+		if (of_device_is_compatible(dev->of_node,
+					    "nintendo,hollywood-vi"))
+			return dev_err_probe(dev, -ENODEV,
+					     "missing audio-video-encoder\n");
+		return 0;
+	}
+
+	gcn->ave = of_find_i2c_device_by_node(ave_node);
+	of_node_put(ave_node);
+	if (!gcn->ave)
+		return dev_err_probe(dev, -EPROBE_DEFER,
+				     "AVE I2C client is not ready\n");
+
+	ret = devm_add_action_or_reset(dev, gcn_drm_release_ave, gcn);
+	if (ret)
+		return ret;
+
+	return 0;
+}
+
+static int gcn_drm_enable_ave(struct gcn_drm *gcn)
+{
+	int ret;
+
+	if (!gcn->ave)
+		return 0;
+
+	/* Cleanup must restore zero even if this transfer fails partway. */
+	gcn->ave_restore_needed = true;
+	ret = gcn_drm_ave_write_verify(gcn, AVE_CHROMA_EXCHANGE_ON);
+	if (ret)
+		return ret;
+
+	drm_info(&gcn->drm, "enabled AVE chroma exchange: 62=02\n");
+	return 0;
 }
 
 static const struct drm_display_mode gcn_drm_mode = {
@@ -618,12 +731,21 @@ static int gcn_drm_probe(struct platform_device *pdev)
 	spin_lock_init(&gcn->scanout_lock);
 	dev_info(dev, "probe: VI and XFB mapped\n");
 
+	ret = gcn_drm_acquire_ave(gcn, dev);
+	if (ret)
+		return ret;
+
 	if (program_mode)
 		gcn_drm_program_ntsc_480i(gcn);
 
 	if (!(in_be16(gcn->vi_base + VI_DCR) & VI_DCR_ENABLE))
 		return dev_err_probe(dev, -ENODEV,
 				     "VI has no active handoff mode\n");
+
+	ret = gcn_drm_enable_ave(gcn);
+	if (ret)
+		return dev_err_probe(dev, ret,
+				     "failed to enable AVE chroma exchange\n");
 
 	ret = drmm_mode_config_init(&gcn->drm);
 	if (ret)
@@ -690,6 +812,7 @@ static void gcn_drm_remove(struct platform_device *pdev)
 	gcn_drm_vi_write32(gcn, VI_DI1, 0);
 	gcn_drm_vi_write32(gcn, VI_DI2, 0);
 	gcn_drm_vi_write32(gcn, VI_DI3, 0);
+	gcn_drm_restore_ave(gcn);
 }
 
 static void gcn_drm_shutdown(struct platform_device *pdev)
@@ -697,6 +820,7 @@ static void gcn_drm_shutdown(struct platform_device *pdev)
 	struct gcn_drm *gcn = platform_get_drvdata(pdev);
 
 	drm_atomic_helper_shutdown(&gcn->drm);
+	gcn_drm_restore_ave(gcn);
 }
 
 static const struct of_device_id gcn_drm_of_match[] = {
