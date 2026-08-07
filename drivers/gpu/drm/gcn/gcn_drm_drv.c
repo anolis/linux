@@ -27,6 +27,8 @@
 #include <drm/drm_simple_kms_helper.h>
 #include <drm/drm_vblank.h>
 
+#include "gcn_drm_trace.h"
+
 #define GCN_DRM_NAME		"gcn-vi"
 #define GCN_DRM_DESC		"Nintendo GameCube/Wii VI DRM"
 
@@ -113,6 +115,7 @@ struct gcn_drm {
 	void *xfb;
 	u32 xfb_phys;
 	u32 xfb_size;
+	/* Protects page selection and pending scanout state. */
 	spinlock_t scanout_lock;
 	unsigned int visible_page;
 	unsigned int pending_page;
@@ -128,6 +131,32 @@ static const u32 gcn_drm_vi_filter[] = {
 	0x1ae771f0, 0x0db4a574, 0x00c1188e, 0xc4c0cbe2,
 	0xfcecdecf, 0x13130f08, 0x00080c0f,
 };
+
+static atomic_t gcn_drm_vi_write_sequence = ATOMIC_INIT(0);
+
+static __always_inline void gcn_drm_vi_write16(struct gcn_drm *gcn,
+					       u8 offset, u16 value)
+{
+	if (trace_gcn_vi_write_enabled()) {
+		unsigned int sequence;
+
+		sequence = atomic_inc_return(&gcn_drm_vi_write_sequence);
+		trace_gcn_vi_write(sequence, 16, offset, value, _RET_IP_);
+	}
+	out_be16(gcn->vi_base + offset, value);
+}
+
+static __always_inline void gcn_drm_vi_write32(struct gcn_drm *gcn,
+					       u8 offset, u32 value)
+{
+	if (trace_gcn_vi_write_enabled()) {
+		unsigned int sequence;
+
+		sequence = atomic_inc_return(&gcn_drm_vi_write_sequence);
+		trace_gcn_vi_write(sequence, 32, offset, value, _RET_IP_);
+	}
+	out_be32(gcn->vi_base + offset, value);
+}
 
 static inline struct gcn_drm *to_gcn_drm(struct drm_device *drm)
 {
@@ -288,9 +317,9 @@ static void gcn_drm_set_scanout(struct gcn_drm *gcn, unsigned int page)
 	if (!(in_be16(gcn->vi_base + VI_DCR) & VI_DCR_NIN))
 		bottom += GCN_DRM_XFB_PITCH;
 
-	out_be32(gcn->vi_base + VI_TFBL,
-		 VI_FB_POB | xof << VI_FB_XOF_SHIFT | top >> 5);
-	out_be32(gcn->vi_base + VI_BFBL, VI_FB_POB | bottom >> 5);
+	gcn_drm_vi_write32(gcn, VI_TFBL,
+			   VI_FB_POB | xof << VI_FB_XOF_SHIFT | top >> 5);
+	gcn_drm_vi_write32(gcn, VI_BFBL, VI_FB_POB | bottom >> 5);
 }
 
 static void gcn_drm_quiesce_irqs(struct gcn_drm *gcn)
@@ -301,47 +330,45 @@ static void gcn_drm_quiesce_irqs(struct gcn_drm *gcn)
 	for (i = 0; i < ARRAY_SIZE(di_regs); i++) {
 		u32 value = in_be32(gcn->vi_base + di_regs[i]);
 
-		out_be32(gcn->vi_base + di_regs[i],
-			 value & ~(VI_DI_IRQ | VI_DI_ENABLE));
+		gcn_drm_vi_write32(gcn, di_regs[i],
+				   value & ~(VI_DI_IRQ | VI_DI_ENABLE));
 	}
 }
 
 static void gcn_drm_program_ntsc_480i(struct gcn_drm *gcn)
 {
-	void __iomem *vi = gcn->vi_base;
-
 	gcn_drm_quiesce_irqs(gcn);
-	out_be16(vi + VI_DCR, VI_DCR_RESET);
+	gcn_drm_vi_write16(gcn, VI_DCR, VI_DCR_RESET);
 	udelay(2);
-	out_be16(vi + VI_DCR, 0);
+	gcn_drm_vi_write16(gcn, VI_DCR, 0);
 	drm_info(&gcn->drm, "pulsed VI DCR reset\n");
 
-	out_be16(vi + VI_VTR, VI_NTSC_VTR);
-	out_be32(vi + VI_HTR0, VI_NTSC_HTR0);
-	out_be32(vi + VI_HTR1, VI_NTSC_HTR1);
-	out_be32(vi + VI_VTO, VI_NTSC_VTO);
-	out_be32(vi + VI_VTE, VI_NTSC_VTE);
-	out_be32(vi + VI_BBOI, VI_NTSC_BBOI);
-	out_be32(vi + VI_BBEI, VI_NTSC_BBEI);
-	out_be32(vi + VI_TFBR, 0);
-	out_be32(vi + VI_BFBR, 0);
-	out_be16(vi + VI_PCR, VI_NTSC_PCR);
-	out_be16(vi + VI_HSR, VI_NTSC_HSR);
-	out_be32(vi + VI_FCT0, gcn_drm_vi_filter[0]);
-	out_be32(vi + VI_FCT1, gcn_drm_vi_filter[1]);
-	out_be32(vi + VI_FCT2, gcn_drm_vi_filter[2]);
-	out_be32(vi + VI_FCT3, gcn_drm_vi_filter[3]);
-	out_be32(vi + VI_FCT4, gcn_drm_vi_filter[4]);
-	out_be32(vi + VI_FCT5, gcn_drm_vi_filter[5]);
-	out_be32(vi + VI_FCT6, gcn_drm_vi_filter[6]);
-	out_be32(vi + VI_AA, 0x00ff0000);
-	out_be16(vi + VI_CLK, 0);
-	out_be16(vi + VI_HSW, GCN_DRM_WIDTH);
-	out_be16(vi + VI_HBE, 0);
-	out_be16(vi + VI_HBS, 0);
-	out_be16(vi + VI_UNK1, 0x00ff);
-	out_be32(vi + VI_UNK2, 0x00ff00ff);
-	out_be32(vi + VI_UNK3, 0x00ff00ff);
+	gcn_drm_vi_write16(gcn, VI_VTR, VI_NTSC_VTR);
+	gcn_drm_vi_write32(gcn, VI_HTR0, VI_NTSC_HTR0);
+	gcn_drm_vi_write32(gcn, VI_HTR1, VI_NTSC_HTR1);
+	gcn_drm_vi_write32(gcn, VI_VTO, VI_NTSC_VTO);
+	gcn_drm_vi_write32(gcn, VI_VTE, VI_NTSC_VTE);
+	gcn_drm_vi_write32(gcn, VI_BBOI, VI_NTSC_BBOI);
+	gcn_drm_vi_write32(gcn, VI_BBEI, VI_NTSC_BBEI);
+	gcn_drm_vi_write32(gcn, VI_TFBR, 0);
+	gcn_drm_vi_write32(gcn, VI_BFBR, 0);
+	gcn_drm_vi_write16(gcn, VI_PCR, VI_NTSC_PCR);
+	gcn_drm_vi_write16(gcn, VI_HSR, VI_NTSC_HSR);
+	gcn_drm_vi_write32(gcn, VI_FCT0, gcn_drm_vi_filter[0]);
+	gcn_drm_vi_write32(gcn, VI_FCT1, gcn_drm_vi_filter[1]);
+	gcn_drm_vi_write32(gcn, VI_FCT2, gcn_drm_vi_filter[2]);
+	gcn_drm_vi_write32(gcn, VI_FCT3, gcn_drm_vi_filter[3]);
+	gcn_drm_vi_write32(gcn, VI_FCT4, gcn_drm_vi_filter[4]);
+	gcn_drm_vi_write32(gcn, VI_FCT5, gcn_drm_vi_filter[5]);
+	gcn_drm_vi_write32(gcn, VI_FCT6, gcn_drm_vi_filter[6]);
+	gcn_drm_vi_write32(gcn, VI_AA, 0x00ff0000);
+	gcn_drm_vi_write16(gcn, VI_CLK, 0);
+	gcn_drm_vi_write16(gcn, VI_HSW, GCN_DRM_WIDTH);
+	gcn_drm_vi_write16(gcn, VI_HBE, 0);
+	gcn_drm_vi_write16(gcn, VI_HBS, 0);
+	gcn_drm_vi_write16(gcn, VI_UNK1, 0x00ff);
+	gcn_drm_vi_write32(gcn, VI_UNK2, 0x00ff00ff);
+	gcn_drm_vi_write32(gcn, VI_UNK3, 0x00ff00ff);
 
 	memset32(gcn->xfb, 0x10801080,
 		 2 * GCN_DRM_XFB_PAGE_SIZE / sizeof(u32));
@@ -349,17 +376,19 @@ static void gcn_drm_program_ntsc_480i(struct gcn_drm *gcn)
 			   (unsigned long)gcn->xfb +
 			   2 * GCN_DRM_XFB_PAGE_SIZE);
 	gcn_drm_set_scanout(gcn, 0);
-	out_be32(vi + VI_DI0, VI_NTSC_DI0);
-	out_be32(vi + VI_DI1, VI_NTSC_DI1);
-	out_be32(vi + VI_DI2, 0);
-	out_be32(vi + VI_DI3, 0);
-	out_be16(vi + VI_DCR, VI_DCR_ENABLE);
+	gcn_drm_vi_write32(gcn, VI_DI0, VI_NTSC_DI0);
+	gcn_drm_vi_write32(gcn, VI_DI1, VI_NTSC_DI1);
+	gcn_drm_vi_write32(gcn, VI_DI2, 0);
+	gcn_drm_vi_write32(gcn, VI_DI3, 0);
+	gcn_drm_vi_write16(gcn, VI_DCR, VI_DCR_ENABLE);
 
 	drm_info(&gcn->drm,
 		 "programmed NTSC 480i: DCR=%04x VTR=%04x HTR0=%08x HTR1=%08x PCR=%04x\n",
-		 in_be16(vi + VI_DCR), in_be16(vi + VI_VTR),
-		 in_be32(vi + VI_HTR0), in_be32(vi + VI_HTR1),
-		 in_be16(vi + VI_PCR));
+		 in_be16(gcn->vi_base + VI_DCR),
+		 in_be16(gcn->vi_base + VI_VTR),
+		 in_be32(gcn->vi_base + VI_HTR0),
+		 in_be32(gcn->vi_base + VI_HTR1),
+		 in_be16(gcn->vi_base + VI_PCR));
 }
 
 static void gcn_drm_arm_event(struct gcn_drm *gcn)
@@ -446,8 +475,8 @@ static int gcn_drm_enable_vblank(struct drm_simple_display_pipe *pipe)
 	struct gcn_drm *gcn = to_gcn_drm(pipe->crtc.dev);
 	u32 value = in_be32(gcn->vi_base + VI_DI1);
 
-	out_be32(gcn->vi_base + VI_DI1,
-		 (value & ~VI_DI_IRQ) | VI_DI_ENABLE);
+	gcn_drm_vi_write32(gcn, VI_DI1,
+			   (value & ~VI_DI_IRQ) | VI_DI_ENABLE);
 	return 0;
 }
 
@@ -456,8 +485,8 @@ static void gcn_drm_disable_vblank(struct drm_simple_display_pipe *pipe)
 	struct gcn_drm *gcn = to_gcn_drm(pipe->crtc.dev);
 	u32 value = in_be32(gcn->vi_base + VI_DI1);
 
-	out_be32(gcn->vi_base + VI_DI1,
-		 value & ~(VI_DI_IRQ | VI_DI_ENABLE));
+	gcn_drm_vi_write32(gcn, VI_DI1,
+			   value & ~(VI_DI_IRQ | VI_DI_ENABLE));
 }
 
 static const struct drm_simple_display_pipe_funcs gcn_drm_pipe_funcs = {
@@ -519,7 +548,7 @@ static irqreturn_t gcn_drm_irq(int irq, void *data)
 
 	value = in_be32(gcn->vi_base + VI_DI0);
 	if (value & VI_DI_IRQ) {
-		out_be32(gcn->vi_base + VI_DI0, value & ~VI_DI_IRQ);
+		gcn_drm_vi_write32(gcn, VI_DI0, value & ~VI_DI_IRQ);
 		handled = true;
 	}
 
@@ -532,7 +561,7 @@ static irqreturn_t gcn_drm_irq(int irq, void *data)
 			gcn->flip_pending = false;
 		}
 		spin_unlock_irqrestore(&gcn->scanout_lock, flags);
-		out_be32(gcn->vi_base + VI_DI1, value & ~VI_DI_IRQ);
+		gcn_drm_vi_write32(gcn, VI_DI1, value & ~VI_DI_IRQ);
 		drm_crtc_handle_vblank(&gcn->pipe.crtc);
 		handled = true;
 	}
@@ -657,10 +686,10 @@ static void gcn_drm_remove(struct platform_device *pdev)
 
 	drm_dev_unplug(&gcn->drm);
 	drm_atomic_helper_shutdown(&gcn->drm);
-	out_be32(gcn->vi_base + VI_DI0, 0);
-	out_be32(gcn->vi_base + VI_DI1, 0);
-	out_be32(gcn->vi_base + VI_DI2, 0);
-	out_be32(gcn->vi_base + VI_DI3, 0);
+	gcn_drm_vi_write32(gcn, VI_DI0, 0);
+	gcn_drm_vi_write32(gcn, VI_DI1, 0);
+	gcn_drm_vi_write32(gcn, VI_DI2, 0);
+	gcn_drm_vi_write32(gcn, VI_DI3, 0);
 }
 
 static void gcn_drm_shutdown(struct platform_device *pdev)

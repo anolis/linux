@@ -16,6 +16,8 @@ Options:
   --reuse-remote   verify and reuse checksum-matched modules in /tmp
   --program-mode   have gcn-drm program fixed NTSC 480i VI timing
   --ave-swap       set AVE chroma exchange after DRM bind; clear on restore
+  --trace-output FILE
+                   capture ordered VI and AVE transactions into local FILE
   --restore        unload DRM and restore legacy gcnfb/GX
   --allow-dirty    permit loading artifacts from an uncommitted tree
 
@@ -31,6 +33,7 @@ restore_only=0
 allow_dirty=0
 program_mode=0
 ave_swap=0
+trace_output=
 
 while (($#)); do
 	case "$1" in
@@ -49,6 +52,10 @@ while (($#)); do
 		;;
 	--ave-swap)
 		ave_swap=1
+		;;
+	--trace-output)
+		trace_output=$2
+		shift
 		;;
 	--restore)
 		restore_only=1
@@ -88,6 +95,13 @@ legacy_driver=/sys/bus/platform/drivers/gcn-vifb
 drm_driver=/sys/bus/platform/drivers/gcn-vi
 ave_swap_marker=/run/wii-drm-ave-swap-active
 ave_utility=/usr/local/sbin/wii-ave-reg
+trace_root=/sys/kernel/tracing
+trace_dir=$trace_root/instances/gcn-display
+remote_trace=/tmp/wii-display-transactions-$$.trace
+
+if [[ -n $trace_output && $trace_output != /* ]]; then
+	trace_output=$repo/$trace_output
+fi
 
 module_paths=(
 	drivers/gpu/drm/drm_panel_orientation_quirks.ko
@@ -156,6 +170,76 @@ remote_status()
 	remote_exec "printf '<6>drm-cycle: %s\\n' '$1' > /dev/kmsg"
 }
 
+transaction_trace_started=0
+start_transaction_trace()
+{
+	remote_exec "
+		grep -qs ' $trace_root tracefs ' /proc/mounts ||
+			mount -t tracefs tracefs $trace_root
+		mkdir -p $trace_dir
+		echo 0 > $trace_dir/tracing_on
+		echo nop > $trace_dir/current_tracer
+		if grep -qw mono $trace_dir/trace_clock; then
+			echo mono > $trace_dir/trace_clock
+		fi
+		echo 256 > $trace_dir/buffer_size_kb
+		echo 0 > $trace_dir/events/enable
+		: > $trace_dir/trace
+		echo 'adapter_nr == 0 && addr == 112' >
+			$trace_dir/events/i2c/i2c_write/filter
+		echo 'adapter_nr == 0 && addr == 112' >
+			$trace_dir/events/i2c/i2c_read/filter
+		echo 'adapter_nr == 0 && addr == 112' >
+			$trace_dir/events/i2c/i2c_reply/filter
+		echo 'adapter_nr == 0' >
+			$trace_dir/events/i2c/i2c_result/filter
+		echo 1 > $trace_dir/events/gcn_vi/gcn_vi_write/enable
+		echo 1 > $trace_dir/events/i2c/i2c_write/enable
+		echo 1 > $trace_dir/events/i2c/i2c_read/enable
+		echo 1 > $trace_dir/events/i2c/i2c_reply/enable
+		echo 1 > $trace_dir/events/i2c/i2c_result/enable
+		echo 1 > $trace_dir/tracing_on
+		printf '%s\\n' 'drm-cycle: trace-start commit=$commit' >
+			$trace_dir/trace_marker
+	"
+	transaction_trace_started=1
+}
+
+mark_transaction_trace()
+{
+	(( transaction_trace_started )) || return 0
+	remote_exec "printf '%s\\n' 'drm-cycle: $1' > $trace_dir/trace_marker"
+}
+
+disable_transaction_trace()
+{
+	(( transaction_trace_started )) || return 0
+	remote_exec "
+		echo 0 > $trace_dir/tracing_on
+		echo 0 > $trace_dir/events/enable
+	" || true
+	transaction_trace_started=0
+}
+
+save_transaction_trace()
+{
+	local trace_sha
+
+	mark_transaction_trace trace-stop
+	remote_exec "
+		echo 0 > $trace_dir/tracing_on
+		cat $trace_dir/trace > $remote_trace
+		echo 0 > $trace_dir/events/enable
+	"
+	transaction_trace_started=0
+	mkdir -p "$(dirname "$trace_output")"
+	scp "${ssh_options[@]}" "$remote:$remote_trace" "$trace_output"
+	remote_exec "rm -f $remote_trace"
+	trace_sha=$(sha256sum "$trace_output" | awk '{print $1}')
+	printf 'Transaction trace: %s\n' "$trace_output"
+	printf 'Transaction SHA-256: %s\n' "$trace_sha"
+}
+
 upload_module()
 {
 	local module=$1
@@ -215,6 +299,10 @@ leave_drm_active=0
 on_exit()
 {
 	status=$?
+	if (( status != 0 && transaction_trace_started )); then
+		echo "DRM transition trace aborted; disabling capture." >&2
+		disable_transaction_trace
+	fi
 	if (( status != 0 && transition_started && ! leave_drm_active )); then
 		echo "DRM transition failed; restoring legacy display." >&2
 		restore_legacy || true
@@ -265,29 +353,47 @@ if remote_exec "grep -q '^gcn_drm ' /proc/modules" &&
 	remote_exec "rmmod gcn_drm"
 fi
 
+if [[ -n $trace_output ]]; then
+	remote_status "preloading gcn-drm transaction tracepoint $commit"
+	if (( program_mode )); then
+		remote_exec "insmod /tmp/gcn-drm.ko program_mode=1"
+	else
+		remote_exec "insmod /tmp/gcn-drm.ko program_mode=0"
+	fi
+	remote_exec "grep -q '^gcn_drm ' /proc/modules"
+	start_transaction_trace
+	mark_transaction_trace legacy-bound
+fi
+
 remote_exec "test -e $legacy_driver/$device" || {
 	echo "Legacy gcnfb is not bound to $device; refusing ambiguous transition." >&2
 	exit 1
 }
 
 transition_started=1
+mark_transaction_trace transition-start
 remote_status "unloading GX accelerator"
 remote_exec "if grep -q '^gcn_gx ' /proc/modules; then rmmod gcn_gx; fi"
 remote_exec "printf '\\n=== DRM CYCLE: UNBINDING LEGACY GCNFB ===\\n' > /dev/tty0"
 
 remote_status "unbinding legacy gcnfb"
 remote_exec "printf '%s' '$device' > $legacy_driver/unbind"
+mark_transaction_trace legacy-unbound
 
 remote_status "loading gcn-drm $commit"
-if (( program_mode )); then
+if [[ -n $trace_output ]]; then
+	remote_exec "printf '%s' '$device' > $drm_driver/bind"
+elif (( program_mode )); then
 	remote_exec "insmod /tmp/gcn-drm.ko program_mode=1"
 else
 	remote_exec "insmod /tmp/gcn-drm.ko program_mode=0"
 fi
 remote_exec "test -e $drm_driver/$device"
 remote_exec "test -e /sys/class/drm/card0"
+mark_transaction_trace drm-bound
 
 if (( ave_swap )); then
+	mark_transaction_trace ave-set-start
 	remote_status "setting AVE chroma compensation"
 	remote_exec "
 		test -x $ave_utility
@@ -299,9 +405,15 @@ if (( ave_swap )); then
 			exit 1
 		fi
 	"
+	mark_transaction_trace ave-set-complete
 fi
 
 remote_exec "printf '\\n=== GCN DRM/KMS ACTIVE: $commit ===\\n' > /dev/tty0"
+mark_transaction_trace cycle-active-no-client
+
+if [[ -n $trace_output ]]; then
+	save_transaction_trace
+fi
 
 leave_drm_active=1
 printf '\nWii DRM/KMS cycle active\n'
