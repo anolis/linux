@@ -5809,3 +5809,37 @@ verified AVE utility and run one `--program-mode --ave-swap` cycle. Require
 correct colors on the first client frame, marker presence and `0x62=2` while
 active, then invoke ordinary `--restore` without `--ave-swap` and require
 marker removal, `0x62=0`, and legacy ownership before accepting the lifecycle.
+
+## 2026-08-06: Accept transactional AVE compensation lifecycle
+
+The Wii started from a fresh legacy baseline at AVE `0x62=0` with no lifecycle
+marker. The installed static AVE utility matched SHA-256
+`f1fc92bcd90eb4bcd1cbf3285e295ed5087fe446e45c47c5852681d5539b95e0`.
+Running the committed harness as `--no-build --program-mode --ave-swap`
+uploaded the checksum-pinned modules, bound DRM through the expected VI reset
+and NTSC setup path, and then wrote AVE register `0x62` from zero to two.
+
+Before any client presentation, `/run/wii-drm-ave-swap-active` existed and
+read-only AVE access returned two. The canonical RGB565 client remained alive
+as PID 1844 with `program_mode=Y`. Its first visible fixture frame displayed
+all seven semantic colors correctly, validating both the late ordering and the
+absence of an uncorrected first client frame.
+
+Exact PID 1844 exited before teardown. A separate plain
+`--restore --reuse-remote` invocation intentionally omitted `--ave-swap`.
+The persisted marker nevertheless selected the cleanup path, which read two,
+wrote zero, verified zero, and only then proceeded with DRM unload and legacy
+rebind. Final checks found legacy `gcn-vifb` ownership, no marker, and AVE
+`0x62=0`. Kernel log markers independently record both the set and clear
+operations.
+
+This accepts the harness lifecycle as a safe opt-in test and development path:
+compensation is active before the first client frame and a later independent
+restore cannot silently strand it. It does not make `0x62=2` a universal
+kernel default; warm states that naturally require zero still exist in the
+historical record. Production integration must retain an explicit policy or
+phase decision until that behavior is resolved.
+
+The complete log is preserved as
+`/root/20260806-transactional-ave-lifecycle-pass.dmesg.txt`, SHA-256
+`dab0aad743d557513bf5f52237c5b99cf0153bf2de8f7c8b454e604a190a63bf`.
