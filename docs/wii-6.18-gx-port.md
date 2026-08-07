@@ -5948,3 +5948,55 @@ DRM corrected snapshot:4457d4a913f77262dbcb45f926b0e4fec299fb00b81870467b08e532d
 DRM cleared snapshot:  dda46c9745b6b4cfb575f460bf8e0ecee0c8738713d933af4a198e2c8602e5c7
 complete dmesg:        26942f28863d299a514fb8fc0e8ee04914070d06ac068384c57996efde1f177a
 ```
+
+## 2026-08-06: Stage ordered VI/AVE transaction-trace positive control
+
+- Tracing implementation: `97e12de9f`
+- `gcn-drm.ko` SHA-256:
+  `bde57aa64a85a733e14d8ff990cc9bef0ae89115c43bac1b61f0aad750998aef`
+- `wii-drm-cycle.sh` SHA-256:
+  `6352360862aeec69e3bc7004df623179943067f5b90d5e9f991a17a8790979a4`
+
+The preceding read-only snapshot ruled out a retained color-correlated bit in
+the safe VI, CP, PE, PI, and GPIO whitelist. Move from state sampling to
+ordered software transaction tracing before considering external probes. No
+oscilloscope or logic analyzer is required for this stage.
+
+Every DRM VI write now passes through a width-aware wrapper with an opt-in
+`gcn_vi_write` tracepoint. An enabled event records a monotonically increasing
+write sequence, 16- or 32-bit width, register offset, value, and call site
+immediately before the original MMIO write. When disabled, the wrapper performs
+no atomic counter operation and issues the same direct big-endian MMIO write as
+before.
+
+The cycle harness adds `--trace-output FILE`. It preloads the module while the
+legacy driver still owns the platform device, then creates an isolated,
+256-KiB tracefs instance before legacy unbind. This allows the tracepoint to
+observe the first DRM probe write rather than beginning after mode setup. The
+same monotonic trace timeline includes the kernel's existing I2C transfer
+events filtered to adapter 0 and AVE address `0x70`. Explicit markers bracket
+legacy unbind, DRM bind, AVE compensation, and the active no-client state.
+Tracing stops automatically and the downloaded artifact receives a printed
+SHA-256 checksum. Error teardown disables tracing before restoring legacy
+ownership.
+
+Validate the measurement mechanism before drawing any color conclusion. Run a
+programmed-mode cycle with `--ave-swap` and a local trace-output path. Require:
+
+1. A complete, strictly increasing VI write sequence beginning with DI
+   quiescence and containing known constants such as `VTR=0x0f06`,
+   `HTR0=0x476901ad`, and final `DCR=0x0001`.
+2. I2C write events for the AVE register-address read transaction and the exact
+   compensation payload `[62 02]`, followed by a successful transfer result.
+3. Correct ordering of the bind, AVE-start, AVE-complete, and capture-stop
+   markers around those events.
+4. No trace overrun, missing sequence number, machine check, oops, conversion
+   failure, or loss of SSH/display ownership.
+
+Only after those positive controls pass may subsequent traces compare natural
+swapped and correct acquisitions. A trace with no AVE payload or no known VI
+constant is a failed instrument, not evidence that the corresponding hardware
+operation did not happen. After validation, launch the unchanged canonical
+RGB565 fixture to confirm that trace collection did not perturb the expected
+`0x62=2` corrected output, then use the ordinary transactional restore and
+verify AVE `0x62=0` with legacy `gcn-vifb` rebound.
