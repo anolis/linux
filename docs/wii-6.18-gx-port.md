@@ -6149,3 +6149,43 @@ Pause with the Wii in the verified legacy/AVE-zero state. On resume, run
 natural acquisition 3 with the same no-write procedure. The comparison remains
 blocked on obtaining at least one naturally correct AVE-zero trace; two
 swapped traces alone cannot identify a cross-class transaction difference.
+
+## 2026-08-07: Cold natural traced acquisition 3 is swapped
+
+Acquisition 3 began after an independent power cycle. The Wii reached legacy
+ownership at approximately 142 seconds uptime with AVE `0x62=0`; `/tmp` was
+empty, so every pinned module was uploaded and remotely checksum-verified
+before ownership changed. Explicit programmed mode was used with no AVE write.
+
+The trace retained all 50 of 50 events without overrun and again contained a
+contiguous 1-through-43 VI sequence with no I2C event. The unchanged RGB565
+console started as PID 1865, and the user classified the canonical fixture as
+swapped. After removing timestamps and task metadata, the full VI sequence is
+identical to acquisitions 1 and 2.
+
+Selected relative event times were:
+
+```text
+sequence             1     5     6     7    32    33    39    40
+acquisition 3         0    12    17  3549  3608  7296  7315  29360
+```
+
+The 5-microsecond DCR assertion-to-deassertion interval matches both warm
+swapped traces. Later timing variation remains inside the already established
+same-class scheduling and setup jitter and is not evidence of a selector.
+
+Exact client termination, transactional restore, AVE-zero verification,
+legacy rebind, and the corrected fault audit all passed. Preserved artifacts:
+
+```text
+swapped trace: b6ffe6637a3af5ee1422e5901c6c9b4d0f080a7c007b98ec29316b5195d542c7
+complete dmesg: 3a61f2d1c508d74addde5587a7d9df222e411f51314ad226bd89fa09e0e470d7
+client log:    17f4cd55eca14522a6729bc5bf82d4d2361078c0c997970f14d9447baf85f57c
+```
+
+The natural traced set is now swapped 3/3, including one independent cold
+boot. Continue only enough identical-artifact acquisitions to determine
+whether a naturally correct AVE-zero state remains reproducible under the
+transactional harness. Do not infer that it is impossible from three samples,
+but reassess historical correct-at-zero reports if the controlled series
+remains uniformly swapped.
