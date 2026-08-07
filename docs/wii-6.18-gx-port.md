@@ -6074,3 +6074,39 @@ traces across opposite visual classes would localize the hidden selector below
 Linux's observable VI/AVE transaction boundary and justify external I2C wire
 capture or DEBUG-pad timing markers; until then, no external instrument is
 required.
+
+## 2026-08-06: Natural traced acquisition 1 is swapped
+
+The first acquisition after tracer acceptance reused the exact module and
+harness artifacts with explicit programmed mode and no `--ave-swap` option.
+AVE readback was `0x62=0`, and the transaction trace contains no I2C event.
+It retained all 50 of 50 events without overrun, including a contiguous VI
+sequence from 1 through 43.
+
+After capture stopped, the unchanged RGB565 console started as PID 26181. The
+user classified the canonical fixture as swapped. This establishes the first
+natural visual-class baseline for the tracer; the earlier corrected trace does
+not count as a naturally correct comparison because it deliberately includes
+the AVE `[62 02]` compensation transaction.
+
+Removing timestamps and task metadata produced no semantic VI diff against
+the compensated positive-control run: all 43 sequence numbers, widths,
+offsets, values, and reported call sites match. That expected equality proves
+the baseline is internally coherent but cannot yet localize the hidden phase.
+Do not compare timing classes until a naturally correct AVE-zero acquisition
+exists.
+
+Exact client termination succeeded, legacy `gcn-vifb` and `gcn_gx` returned,
+DRM was unbound, AVE remained zero, and the corrected fault audit was empty.
+Preserved artifacts:
+
+```text
+swapped trace: 85fa7ec9e51400af6916818b273c7dddbe510b68aaf18327ca405cb6987e6966
+complete dmesg: 85a58bd707c99b4cbec24be74720c81abb0e86f5b44cfb8dcd695ab265bee62d
+client log:    17f4cd55eca14522a6729bc5bf82d4d2361078c0c997970f14d9447baf85f57c
+```
+
+Continue independent no-AVE-write traced acquisitions with the same artifacts
+until a naturally correct sample is captured. Preserve every classification
+literally; do not use AVE compensation to convert a swapped acquisition into
+the missing positive class.
