@@ -6370,3 +6370,46 @@ Hardware acceptance procedure:
 Do not count a userspace `wii-ave-reg --set-swap` action as a pass. This phase
 specifically validates that kernel ownership alone establishes and restores
 the encoder state.
+
+## 2026-08-07: First driver-owned AVE transaction is correct
+
+The checksum-pinned boot image was deployed over the network through a
+RAM-staged HTTP download, verified before and after a local `/boot` copy, and
+left with `/boot` remounted read-only. The rebooted live device tree contains
+the resolved `audio-video-encoder` phandle, client `0-0070` exists, AVE began at
+`0x62=0`, legacy `gcn-vifb` owned VI, and the boot fault audit was empty.
+
+All six modules were staged over HTTP and matched their local checksums. The
+cycle used explicit programmed mode and ordered tracing without `--ave-swap`.
+The complete trace retained all 56 of 56 events with no overrun. Its VI
+sequence is contiguous from 1 through 43. After the final VI mode write and
+before the `drm-bound` marker, the driver generated this exact I2C sequence:
+
+```text
+write request: address 0x70, payload [62-02]
+write result:  1/1 message
+read request:  address 0x70, payload [62]
+read reply:    [02], result 2/2 messages
+```
+
+The kernel logged `enabled AVE chroma exchange: 62=02` before mode-object
+initialization and DRM registration. No harness AVE lifecycle marker existed,
+so the exchange write cannot be attributed to userspace compensation.
+
+The unchanged checksum-pinned RGB565 console started as PID 2465. AVE readback
+was two, and the user classified the first displayed fixture as correct. Exact
+PID termination then preceded ordinary restore without `--ave-swap`.
+
+Driver remove logged `restored AVE chroma exchange: 62=00`. Final readback was
+zero, the harness marker remained absent, legacy `gcn-vifb` was bound, DRM was
+unbound, and the corrected fault audit was empty. Preserved artifacts:
+
+```text
+correct trace: 6137ba951ed1d35cef87ffcca26b2e0bce5fe2ae91b64abd34be3cdb1863d55b
+complete dmesg: 19fa94a1c5d0088e3e97bd65ddd8146d9feb10b694ef2e3143d61d8f5c98680b
+client log:    17f4cd55eca14522a6729bc5bf82d4d2361078c0c997970f14d9447baf85f57c
+```
+
+This passes one complete kernel-owned acquisition/restoration transaction. It
+does not yet establish repeatability. Run one identical warm transaction and
+then one independent cold boot before accepting the lifecycle.
