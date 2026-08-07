@@ -6189,3 +6189,43 @@ whether a naturally correct AVE-zero state remains reproducible under the
 transactional harness. Do not infer that it is impossible from three samples,
 but reassess historical correct-at-zero reports if the controlled series
 remains uniformly swapped.
+
+## 2026-08-07: Natural traced acquisition 4 is swapped
+
+Acquisition 4 reused the exact checksum-pinned module, harness,
+explicit-programmed-mode path, AVE-zero state, and canonical RGB565 fixture.
+The trace retained all 50 of 50 events without overrun, contains a contiguous
+VI sequence from 1 through 43, and contains no I2C event. The console client
+started as PID 2813, and the user classified the fixture as swapped.
+
+After removing timestamps and task metadata, the complete 43-event VI sequence
+is byte-identical to acquisition 3 and semantically identical to all preceding
+natural acquisitions. Selected relative event times were:
+
+```text
+sequence             1     5     6     7    32     33     39     40
+acquisition 4         0    13    17  8403  8463  26659  26679  50299
+```
+
+The DCR reset assertion-to-deassertion interval remains effectively identical
+to the preceding acquisitions. The larger later gaps remain ordinary
+same-visual-class scheduling and setup variation, so they cannot identify the
+hidden color selector.
+
+Exact client termination and transactional restore passed. Final state was
+legacy `gcn-vifb` bound, DRM unbound, AVE `0x62=0`, and an empty corrected
+fault audit. Preserved artifacts:
+
+```text
+swapped trace: dc6164b68686c1843b24f6df8d8fd1535cdafa838e1d9f7e7847be113d5afd81
+complete dmesg: 2a6cbbb493fc0a5be6bfdadfb3b9a56982607ada937e08dc8c681323dff18f95
+client log:    17f4cd55eca14522a6729bc5bf82d4d2361078c0c997970f14d9447baf85f57c
+```
+
+The controlled natural set is now swapped 4/4, with one independent cold boot.
+This still does not prove that a naturally correct AVE-zero acquisition is
+impossible. It does strengthen the need to reassess historical correct-at-zero
+reports and avoid treating uncontrolled observations as a comparison class.
+Collect a small bounded number of additional identical acquisitions before
+deciding whether to stop waiting for the missing natural class and move the
+selector investigation below the observable Linux VI/AVE transaction boundary.
