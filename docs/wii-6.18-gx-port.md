@@ -6310,3 +6310,63 @@ validate write placement and lifecycle behavior, then repeat cold and warm
 color fixtures to establish reliability. Keep external I2C wire capture and
 DEBUG-pad markers as deeper reversal tools only if the explicit driver-owned
 AVE sequence proves nondeterministic.
+
+## 2026-08-07: Stage driver-owned AVE chroma-exchange lifecycle
+
+- VI encoder-phandle binding: `9db029f3a`
+- DRM/AVE implementation: `df08bbbf1`
+- `gcn-drm.ko` SHA-256:
+  `90546eaa24d77678f71720edc7d0a0121ceaf99c69b7ed429539b6d07ab6d7a6`
+- `zImage` and `dtbImage.wii` SHA-256:
+  `b39cdf270d8c0a960ce9b47f53845137106dadb373e4d2a6ccc61cfec8392505`
+
+The bounded natural-acquisition phase ended swapped 6/6. Stop waiting for an
+uncontrolled correct-at-zero state and turn the validated `AVE[0x62]=0x02`
+compensation into explicit DRM ownership behavior.
+
+Wii DTS again links the Hollywood VI node to the AVE I2C client. The DRM probe
+resolves and retains that client before touching VI, defers until the adapter
+is ready, and leaves phandle-free Flipper handling unchanged. After programming
+and validating the VI mode, but before registering the DRM device, it writes
+register `0x62=0x02` and requires a matching combined-transaction readback.
+Transfer errors, short transfers, and readback mismatches fail probe rather
+than exposing a silently misconfigured display.
+
+The setting remains active for the complete DRM ownership interval. A
+userspace pipe disable does not release VI ownership and therefore does not
+clear the AVE setting. Driver remove and shutdown restore and verify
+`0x62=0x00`. A managed cleanup action retains the AVE client reference and
+provides probe-failure restoration plus one remove-path retry before releasing
+the client.
+
+The complete PowerPC module set and modpost pass with `-j16`. DTC resolves
+`audio-video-encoder` to the AVE child phandle, and both the Wii DTB wrapper and
+`zImage` build. Patch-only strict checkpatch has no implementation error; its
+only warning requested the binding documentation be committed separately,
+which commit `9db029f3a` does. The live Wii DT lacks this phandle, so hardware
+validation requires deploying the pinned boot image rather than replacing only
+the module.
+
+Hardware acceptance procedure:
+
+1. Boot the checksum-matched image into legacy ownership. Require the live VI
+   node to contain `audio-video-encoder`, client `0-0070` to exist, and AVE
+   readback to begin at zero.
+2. Upload and verify the pinned module set. Start explicit programmed DRM with
+   ordered tracing but without the harness `--ave-swap` option. Require the
+   trace to contain the known 43-write VI sequence followed by the driver's
+   exact AVE write `[62-02]`, successful transfer, and matching readback before
+   DRM bind completion. No userspace AVE write is permitted.
+3. Start the unchanged checksum-pinned RGB565 fixture only after trace capture.
+   Require correct red, green, blue, gold, white, magenta, and teal mapping on
+   the first acquisition. A swapped fixture rejects this implementation.
+4. Stop the exact client PID and invoke ordinary transactional restore without
+   `--ave-swap`. Require the driver log to report verified `62=00` restoration,
+   AVE readback zero, legacy `gcn-vifb` bound, DRM unbound, and an empty fault
+   audit.
+5. If the first transaction passes, repeat at least one warm transaction and
+   one independent cold boot before accepting the lifecycle as reliable.
+
+Do not count a userspace `wii-ave-reg --set-swap` action as a pass. This phase
+specifically validates that kernel ownership alone establishes and restores
+the encoder state.
