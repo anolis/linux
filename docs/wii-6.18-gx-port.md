@@ -6440,3 +6440,43 @@ client log:    17f4cd55eca14522a6729bc5bf82d4d2361078c0c997970f14d9447baf85f57c
 The kernel-owned lifecycle is correct for two consecutive warm transactions.
 Complete the staged acceptance procedure with one independent reboot, fresh
 module staging, and the same trace, visual, and teardown gates.
+
+## 2026-08-07: Accept driver-owned AVE chroma-exchange lifecycle
+
+The Wii rebooted independently into the pinned phandle-enabled image. At 59
+seconds uptime, the live VI phandle and AVE client were present, AVE readback
+was zero, legacy owned VI, DRM was unbound, `/tmp` contained no modules, and
+the boot fault audit was empty. The six modules were freshly transferred over
+HTTP and independently matched the same staged checksums.
+
+The cold transaction again used explicit programmed mode and tracing without
+`--ave-swap`. Its trace retained all 56 of 56 events, contains the same
+contiguous 43-write VI sequence, and records the exact driver `[62-02]`, 1/1
+write result, `[62]` read request, `[02]` reply, and 2/2 verification before
+DRM bind. No userspace AVE write or lifecycle marker existed.
+
+The unchanged RGB565 client started as PID 1797. AVE readback was two, and the
+user classified the independent cold fixture as correct. Exact-PID termination
+and ordinary restore then caused driver remove to log verified `62=00`.
+Final readback was zero, legacy was bound, DRM was unbound, the harness marker
+was absent, `/boot` remained read-only, and the corrected fault audit was empty.
+Preserved artifacts:
+
+```text
+correct trace: ea9ce6d3d588c94f5ebbbb7435fc36d1541453b79705afe23d3c88bfa08d71ba
+complete dmesg: 9e72578e3889b6a3b2f18af118ac31affec5ff584dd451d8e32a1fc33245b677
+client log:    17f4cd55eca14522a6729bc5bf82d4d2361078c0c997970f14d9447baf85f57c
+```
+
+Accept the driver-owned AVE lifecycle. Three consecutive transactions produced
+correct first-frame colors: two warm ownership cycles and one independent
+reboot with fresh module staging. Every acquisition traced and verified the
+kernel's `0x62=0x02` write before DRM exposure, and every teardown restored
+and verified `0x62=0x00` before legacy ownership returned. No transaction used
+the harness compensation path.
+
+The former natural AVE-zero sampling path is closed. DRM can now rely on a
+deterministic encoder state rather than inherited or historical color phase.
+Keep the reversible userspace utility and harness option as diagnostics for
+now, but do not use them during ordinary DRM operation or as evidence for
+future production tests.
