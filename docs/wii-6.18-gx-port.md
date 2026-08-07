@@ -6264,3 +6264,49 @@ acquisition, then stop this sampling phase if it is also swapped. Six complete
 same-class captures are enough to show that waiting indefinitely for a
 naturally correct AVE-zero sample is not an efficient diagnostic path, while
 still not asserting that such a state is impossible.
+
+## 2026-08-07: Natural traced acquisition 6 is swapped; end sampling phase
+
+The sixth and final bounded acquisition reused every pinned artifact and the
+same explicit programmed-mode, no-AVE-write procedure. All 50 of 50 trace
+events were retained without overrun. The VI sequence is contiguous from 1
+through 43, contains no I2C event, and is semantically identical to acquisition
+5. The user classified client PID 6355 as swapped.
+
+Selected relative event times were:
+
+```text
+sequence             1     5     6     7    32     33     39     40
+acquisition 6         0    13    17  3553  3611  10355  10373  28320
+```
+
+The four-microsecond DCR reset interval again matches the controlled series.
+Later variation remains ordinary same-class setup and scheduling jitter.
+
+Exact-PID teardown, trace preservation, transactional restore, and the final
+state audit all passed. Legacy `gcn-vifb` is bound, DRM is unbound, AVE remains
+`0x62=0`, and the corrected fault audit is empty. Preserved artifacts:
+
+```text
+swapped trace: ec1272f92c8cd99f7fbf9b7ec36d66c15a772bc2d0bdebf378f99d62c9ca64e1
+complete dmesg: 32d426f9ea36b61b244a294b617b2b7af1990c92b91a3750e6cb4ec8fa5544a1
+client log:    17f4cd55eca14522a6729bc5bf82d4d2361078c0c997970f14d9447baf85f57c
+```
+
+End the natural-acquisition sampling phase at swapped 6/6, including one
+independent cold boot. This is not proof that a naturally correct AVE-zero
+state cannot exist, but it is sufficient evidence that waiting for one is not
+a reproducible engineering strategy. Historical correct-at-zero observations
+were not acquired under this complete controlled procedure and must not be
+used as the missing comparison class.
+
+The accepted positive control already demonstrates a deterministic practical
+path: the exact AVE write `[62 02]` changes the unchanged RGB565 fixture from
+swapped to correct, readback verifies two, and clearing the register returns
+the same live client to swapped. The next implementation phase should make
+that exchange setting an explicit, verified part of DRM display enable or
+mode setup, with restore to zero on disable/unbind. Use the ordered tracer to
+validate write placement and lifecycle behavior, then repeat cold and warm
+color fixtures to establish reliability. Keep external I2C wire capture and
+DEBUG-pad markers as deeper reversal tools only if the explicit driver-owned
+AVE sequence proves nondeterministic.
