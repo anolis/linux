@@ -5952,10 +5952,11 @@ complete dmesg:        26942f28863d299a514fb8fc0e8ee04914070d06ac068384c57996efd
 ## 2026-08-06: Stage ordered VI/AVE transaction-trace positive control
 
 - Tracing implementation: `97e12de9f`
+- Wii-shell redirection fix: `b5ee207d8`
 - `gcn-drm.ko` SHA-256:
   `bde57aa64a85a733e14d8ff990cc9bef0ae89115c43bac1b61f0aad750998aef`
 - `wii-drm-cycle.sh` SHA-256:
-  `6352360862aeec69e3bc7004df623179943067f5b90d5e9f991a17a8790979a4`
+  `3adad89c4e175b6fde79992a7af15a9f9c95afeefb5f9b9df8a289387e753f82`
 
 The preceding read-only snapshot ruled out a retained color-correlated bit in
 the safe VI, CP, PE, PI, and GPIO whitelist. Move from state sampling to
@@ -5979,6 +5980,14 @@ legacy unbind, DRM bind, AVE compensation, and the active no-client state.
 Tracing stops automatically and the downloaded artifact receives a printed
 SHA-256 checksum. Error teardown disables tracing before restoring legacy
 ownership.
+
+The first invocation stopped before ownership changed because the Wii shell
+does not accept a newline immediately after a redirection operator. Commit
+`b5ee207d8` keeps each remote tracefs destination on the same command line.
+An isolated live preflight then enabled all five filtered event files, captured
+a trace marker, disabled the instance, and verified that legacy `gcn-vifb`
+remained bound. No VI write, AVE write, or visual result occurred in the
+rejected invocation.
 
 Validate the measurement mechanism before drawing any color conclusion. Run a
 programmed-mode cycle with `--ave-swap` and a local trace-output path. Require:
