@@ -185,22 +185,17 @@ start_transaction_trace()
 		echo 256 > $trace_dir/buffer_size_kb
 		echo 0 > $trace_dir/events/enable
 		: > $trace_dir/trace
-		echo 'adapter_nr == 0 && addr == 112' >
-			$trace_dir/events/i2c/i2c_write/filter
-		echo 'adapter_nr == 0 && addr == 112' >
-			$trace_dir/events/i2c/i2c_read/filter
-		echo 'adapter_nr == 0 && addr == 112' >
-			$trace_dir/events/i2c/i2c_reply/filter
-		echo 'adapter_nr == 0' >
-			$trace_dir/events/i2c/i2c_result/filter
+		echo 'adapter_nr == 0 && addr == 112' > $trace_dir/events/i2c/i2c_write/filter
+		echo 'adapter_nr == 0 && addr == 112' > $trace_dir/events/i2c/i2c_read/filter
+		echo 'adapter_nr == 0 && addr == 112' > $trace_dir/events/i2c/i2c_reply/filter
+		echo 'adapter_nr == 0' > $trace_dir/events/i2c/i2c_result/filter
 		echo 1 > $trace_dir/events/gcn_vi/gcn_vi_write/enable
 		echo 1 > $trace_dir/events/i2c/i2c_write/enable
 		echo 1 > $trace_dir/events/i2c/i2c_read/enable
 		echo 1 > $trace_dir/events/i2c/i2c_reply/enable
 		echo 1 > $trace_dir/events/i2c/i2c_result/enable
 		echo 1 > $trace_dir/tracing_on
-		printf '%s\\n' 'drm-cycle: trace-start commit=$commit' >
-			$trace_dir/trace_marker
+		printf '%s\\n' 'drm-cycle: trace-start commit=$commit' > $trace_dir/trace_marker
 	"
 	transaction_trace_started=1
 }
