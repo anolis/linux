@@ -7014,3 +7014,26 @@ would isolate the regression to the image's DT reservation change rather than
 the card, root filesystem, Wi-Fi setup, or module contents. The control is not
 safe for loading `gcn-gx.ko`; its old reservation overlaps the enlarged live
 kernel.
+
+Control result: the accepted MEM2-wrapper image also failed under the current
+boot conditions. Its normally transient static frame remained on screen, the
+Wii never answered ARP, ping, or SSH after the full startup window, and the
+root filesystem contained none of the four diagnostic files that had been
+removed before boot. This disproves the relocated GX reservation as the cause
+of the present failure. Do not change GX, framebuffer, DRM, or reservation
+code while this shared pre-init boot failure is unresolved.
+
+The host mounts the root partition read/write. `/init-diag.sh` remains an
+executable POSIX shell script with SHA-256
+`cf579d2b8681304eaf06b982fd729b7e48da9aa7f670a17b5f15efcf7efc7367`,
+and its `/bin/sh` interpreter resolves to `dash`. Its first post-mount action
+would create `dmesg.txt`; absence of that file places the failure before PID 1.
+
+Use the preserved pre-DRM modular-fbcon image as a broader boot-path positive
+control, without changing the root filesystem or any graphics source. Its
+SHA-256 is
+`fbf92f081b1cd5c8e35d65c9ec2175d3cb00c25ababc82d54a1f9d5f54220c81`.
+Do not load the installed `gcn-gx.ko` during this control. A successful boot
+would localize the failure to the newer built-in-DRM/MEM2-wrapper image family;
+another pre-init failure would instead require wrapper and early-kernel stage
+instrumentation or boot-media diagnosis before graphics work resumes.
