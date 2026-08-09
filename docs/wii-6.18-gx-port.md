@@ -6700,3 +6700,30 @@ Hardware procedure and outcome matrix:
 
 Do not run the modular cycle harness on this image. Its purpose is only to
 separate built-in platform probe from DRM fbcon startup.
+
+## 2026-08-09: Reject built-in probe-only boot
+
+Commit `5d485df76` and image
+`4e18496d4139cc0e737dc78d0143a31f9fe008190651197de564f43cebc26b48`
+were deployed with matching staged and installed checksums. `/boot` was
+verified read-only before reboot.
+
+The first SSH check began after a 20-second wait and timed out after eight
+additional seconds. After a further 25-second bounded wait, the final check
+failed with `No route to host`. The Wii therefore did not reach the known
+network baseline in more than 50 seconds. No framebuffer client could have
+started because the embedded command line explicitly selected
+`drm_client_lib.active=none`.
+
+Reject early native fbcon activity as the explanation for the first built-in
+boot failure. This result does not yet distinguish GCN's built-in platform
+probe from the larger built-in DRM core/image or another configuration/order
+interaction. The intentionally static display is not diagnostic and no live
+log can be recovered without network or persistent storage.
+
+Physical-card rollback to the accepted modular image is required. After
+rollback, isolate one level earlier: build DRM core in but keep GCN VI modular
+and retain legacy `gcn-vifb` as the boot owner. A successful ordinary legacy
+boot would validate the larger built-in DRM core and leave GCN's built-in
+registration/probe ordering as the remaining suspect. A failure before any
+GCN ownership change would instead implicate built-in DRM core size or config.
