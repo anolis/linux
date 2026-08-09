@@ -7093,3 +7093,26 @@ status, newly created diagnostic files, SSH, a live command line containing the
 embedded PID 1 and both blacklists, legacy `gcn-vifb` as `fb0`, and no loaded
 GX/DRM modules or kernel fault. This is a boot-harness validation, not a
 graphics test.
+
+Hardware result: accept the embedded diagnostic boot harness. The exact image
+booted to `/init-diag.sh`, brought up Wi-Fi and OpenSSH, and remained live over
+SSH. `/proc/cmdline` contains the complete embedded argument string including
+both module blacklists. Legacy `gcn-vifb` owns `fb0`; neither `gcn_gx` nor any
+DRM module is loaded. DHCP's bounded foreground command returned 124 after the
+lease was already installed, as in earlier accepted runs; gateway and host
+pings passed and SSH was ready at 48.4 seconds.
+
+Preserved live log hashes:
+
+```text
+dmesg.txt:       e41046bd1ed4ef2b85b0bc9acd4b51c60710803bf2119caac0956f4dde858d26
+early-dmesg.txt: 2b4fb0dbf08dfcb4c2c22a8ed8981e3f94397db3050f8eb05537bc13676c3067
+wpa-debug.txt:   08098a641ad682dc5a90484e63e1602b8caea267947b014b68630a7cec528058
+sshd-debug.txt:  6e453408f190b8b75a3b9ba0128cbb2be464feb1edf0bfea292922d3de9b4e59
+```
+
+The only warning is the already documented PowerPC alignment exception from
+`memset()` in `dma_alloc_from_dev_coherent()` while OHCI initializes its MEM1
+pool. Execution recovers, both boot and networking complete, and this is not a
+new fault. Use this embedded-DT method for subsequent boot controls; do not
+attempt runtime arguments through Gumboot on the current Mini version.
