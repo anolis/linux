@@ -21,8 +21,9 @@ Options:
   --restore        unload DRM and restore legacy gcnfb/GX
   --allow-dirty    permit loading artifacts from an uncommitted tree
 
-The running kernel must already contain built-in DRM core. A normal cycle
-leaves gcn-drm active for inspection. Any failed transition restores gcnfb.
+The running kernel must match the built module ABI. A normal cycle leaves
+gcn-drm and its native DRM fbcon active for inspection. Any failed transition
+restores gcnfb.
 EOF
 }
 
@@ -108,6 +109,7 @@ module_paths=(
 	drivers/gpu/drm/drm.ko
 	drivers/gpu/drm/drm_kms_helper.ko
 	drivers/gpu/drm/drm_shmem_helper.ko
+	drivers/gpu/drm/clients/drm_client_lib.ko
 	drivers/gpu/drm/gcn/gcn-drm.ko
 	drivers/video/fbdev/gcn-gx.ko
 )
@@ -116,10 +118,11 @@ remote_modules=(
 	/tmp/drm.ko
 	/tmp/drm_kms_helper.ko
 	/tmp/drm_shmem_helper.ko
+	/tmp/drm_client_lib.ko
 	/tmp/gcn-drm.ko
 	/tmp/gcn-gx.ko
 )
-gx_module_index=5
+gx_module_index=6
 
 if (( build && ! restore_only )); then
 	CCACHE_DISABLE=1 ARCH=powerpc CROSS_COMPILE=powerpc-linux-gnu- \
@@ -274,6 +277,7 @@ restore_legacy()
 		fi
 		set +e
 		rmmod gcn_drm 2>/dev/null
+		rmmod drm_client_lib 2>/dev/null
 		rmmod drm_shmem_helper 2>/dev/null
 		rmmod drm_kms_helper 2>/dev/null
 		rmmod drm 2>/dev/null
@@ -334,19 +338,30 @@ for i in "${!module_paths[@]}"; do
 	upload_module "${module_paths[$i]}" "${remote_modules[$i]}"
 done
 
-remote_status "preflighting generic DRM modules"
-remote_exec "grep -q '^drm_panel_orientation_quirks ' /proc/modules || insmod /tmp/drm_panel_orientation_quirks.ko"
-remote_exec "grep -q '^drm ' /proc/modules || insmod /tmp/drm.ko"
-remote_exec "grep -q '^drm_kms_helper ' /proc/modules || insmod /tmp/drm_kms_helper.ko"
-remote_exec "grep -q '^drm_shmem_helper ' /proc/modules || insmod /tmp/drm_shmem_helper.ko"
-
 # udev may have loaded gcn_drm while legacy still owned the platform device.
-# Remove that unbound instance so the requested parameter is applied at probe.
+# Remove that unbound instance and its generic stack so the checksum-matched
+# modules are the ones used for this cycle.
 if remote_exec "grep -q '^gcn_drm ' /proc/modules" &&
    ! remote_exec "test -e $drm_driver/$device"; then
 	remote_status "removing stale unbound gcn-drm"
 	remote_exec "rmmod gcn_drm"
 fi
+
+remote_status "replacing generic DRM modules"
+remote_exec "
+	set -e
+	rmmod drm_client_lib 2>/dev/null || test ! -d /sys/module/drm_client_lib
+	rmmod drm_shmem_helper 2>/dev/null || test ! -d /sys/module/drm_shmem_helper
+	rmmod drm_kms_helper 2>/dev/null || test ! -d /sys/module/drm_kms_helper
+	rmmod drm 2>/dev/null || test ! -d /sys/module/drm
+	rmmod drm_panel_orientation_quirks 2>/dev/null ||
+		test ! -d /sys/module/drm_panel_orientation_quirks
+	insmod /tmp/drm_panel_orientation_quirks.ko
+	insmod /tmp/drm.ko
+	insmod /tmp/drm_kms_helper.ko
+	insmod /tmp/drm_shmem_helper.ko
+	insmod /tmp/drm_client_lib.ko
+"
 
 if [[ -n $trace_output ]]; then
 	remote_status "preloading gcn-drm transaction tracepoint $commit"
@@ -385,6 +400,8 @@ else
 fi
 remote_exec "test -e $drm_driver/$device"
 remote_exec "test -e /sys/class/drm/card0"
+remote_exec "test -e /sys/class/graphics/fb0"
+remote_exec "test \"\$(cat /sys/class/graphics/fb0/name)\" = gcn-vidrmfb"
 mark_transaction_trace drm-bound
 
 if (( ave_swap )); then
@@ -404,7 +421,7 @@ if (( ave_swap )); then
 fi
 
 remote_exec "printf '\\n=== GCN DRM/KMS ACTIVE: $commit ===\\n' > /dev/tty0"
-mark_transaction_trace cycle-active-no-client
+mark_transaction_trace cycle-active-native-fbcon
 
 if [[ -n $trace_output ]]; then
 	save_transaction_trace
