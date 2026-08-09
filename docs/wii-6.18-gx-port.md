@@ -6609,3 +6609,51 @@ Hardware procedure:
 A pass validates native DRM fbcon independently of built-in probe ordering. A
 freeze at module load with SSH still alive localizes the rejected boot result
 to DRM/fbdev ownership rather than unrelated late boot initialization.
+
+## 2026-08-09: Accept reversible native DRM fbcon lifecycle
+
+The checksum-pinned image booted normally into legacy ownership. At the
+baseline gate, `gcn-vifb` was `fb0`, DRM was absent, SSH was responsive, and
+`/boot` was read-only. All six staged modules independently matched the hashes
+recorded above.
+
+The first generic-module preflight attempted to load `drm_client_lib` before
+`drm_kms_helper`. It failed with unresolved `drm_fb_helper_*` symbols while
+legacy remained bound; no display transition occurred. Loading in the verified
+order `drm`, `drm_kms_helper`, `drm_shmem_helper`, then `drm_client_lib`
+succeeded. Preserve that order in future automation.
+
+The exact GCN module was preloaded unbound, the GX helper was removed, and the
+legacy platform device was unbound. Binding `c002000.video` to `gcn-vi`
+completed normally. The driver programmed VI, enabled and verified AVE
+`0x62=0x02`, registered `card0`, and created `fb0` as `gcn-vidrmfb`. Fbcon
+switched from the dummy console to the DRM framebuffer. No
+`wii-drm-console`, `wii-drm-test`, or other framebuffer mirror process ran.
+
+The user classified the initial console as normal. Three separately timed
+`/dev/tty0` writes labeled `NATIVE DRM DIRTY UPDATE 1/3` through `3/3` all
+appeared clearly. This is a positive hardware control for the
+`drm_gem_fb_create_with_dirty` plus shmem fbdev update path: native fbcon can
+update the GCN XFB without a userspace copy loop.
+
+Module removal completed, logged verified AVE restoration to `0x62=0x00`, and
+removed `card0`. Rebinding legacy recreated `fb0` as `gcn-vifb`; `gcn_gx`
+re-registered and the restoration marker appeared normally. The user
+classified the restored console as normal. The remaining idle DRM modules
+were unloaded after the lifecycle, leaving only `gcn_gx`, legacy ownership,
+AVE zero, `/boot` read-only, and an empty relevant fault audit.
+
+Preserved artifacts:
+
+```text
+complete dmesg: 69e8ea3a7f982e97816a913822d1525e67fe4458119cd44612b043e0d007eae8
+handoff log:    12f38041cd3ffaf4a438ea3e81b7bbcf3802476df234e299a19dfe34320f6d18
+restore log:    b82d5bf42cfa020f4003d00929490dc90ce9c9c0d161af4eb606c665fe8524fe
+```
+
+Accept the native DRM fbcon implementation and reversible ownership lifecycle.
+The rejected built-in image is no longer evidence against fbdev dirty updates;
+the same implementation works when loaded after boot. The remaining problem
+is boot-time ownership/probe interaction. Update `wii-drm-cycle.sh` for
+`drm_client_lib` and no-mirror native-fbcon validation before designing the
+next built-in isolation test.
