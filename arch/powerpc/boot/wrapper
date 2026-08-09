@@ -352,6 +352,7 @@ gamecube|wii)
 	# Keep large wrappers out of 24 MiB MEM1 and its reserved GX buffers.
 	link_address='0x10010000'
 	make_space=n
+	wii_kernel_limit='0x1300000'
     else
 	link_address='0x600000'
     fi
@@ -393,6 +394,36 @@ vmz="$tmpdir/`basename \"$kernel\"`.$ext"
 # Calculate the vmlinux.strip size
 ${CROSS}objcopy $objflags "$kernel" "$vmz.$$"
 strip_size=$(${CONFIG_SHELL} "${srctree}/scripts/file-size.sh" "$vmz.$$")
+
+if [ -n "$wii_kernel_limit" ]; then
+    kernel_load_addr=$(${CROSS}objdump -p "$kernel" | awk '
+	/^[[:space:]]*LOAD / {
+		for (i = 1; i <= NF; i++)
+			if ($i == "paddr") {
+				print $(i + 1)
+				exit
+			}
+	}')
+    kernel_mem_size=$(${CROSS}objdump -p "$kernel" | awk '
+	/^[[:space:]]*LOAD / {
+		getline
+		for (i = 1; i <= NF; i++)
+			if ($i == "memsz") {
+				print $(i + 1)
+				exit
+			}
+	}')
+    if [ -z "$kernel_load_addr" ] || [ -z "$kernel_mem_size" ]; then
+	echo "ERROR: Unable to determine Wii kernel memory extent" >&2
+	exit 1
+    fi
+    kernel_end=$((kernel_load_addr + kernel_mem_size))
+    if [ "$kernel_end" -gt "$((wii_kernel_limit))" ]; then
+	echo "ERROR: Wii kernel end 0x$(printf '%x' "$kernel_end") overlaps" \
+		"GX texture memory at $wii_kernel_limit" >&2
+	exit 1
+    fi
+fi
 
 if [ -z "$cacheit" -o ! -f "$vmz$compression" -o "$vmz$compression" -ot "$kernel" ]; then
     # recompress the image if we need to

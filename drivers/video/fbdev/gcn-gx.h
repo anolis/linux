@@ -109,7 +109,7 @@
  * cannot address MEM2 (0x10000000+).  kmalloc returns MEM2 on Wii Linux
  * (MEM1 and MEM2 are coalesced).  Use the DTS-reserved region instead. */
 #define GX_TEX_BUF_SIZE		(640 * 576 * 2)
-#define GX_TEX_BUF_MEM1_PHYS	0x01200000	/* reserved in wii.dts */
-#define GX_TEX_BUF_ALT_MEM1_PHYS	0x012c0000	/* second 768 KB slot */
+#define GX_TEX_BUF_MEM1_PHYS	0x01300000	/* reserved in wii.dts */
+#define GX_TEX_BUF_ALT_MEM1_PHYS	0x013c0000	/* second 768 KB slot */
 
 #endif /* _GCN_GX_H */

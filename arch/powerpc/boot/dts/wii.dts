@@ -19,7 +19,7 @@
  */
 /*/memreserve/ 0x10000000 0x0004000;*/	/* DSP RAM */
 /memreserve/ 0x01698000 0x00168000;	/* two 640x576 YUYV XFBs */
-/memreserve/ 0x01200000 0x00180000;	/* two GX texture buffers */
+/memreserve/ 0x01300000 0x00180000;	/* two GX texture buffers */
 /memreserve/ 0x01684000 0x00010000;	/* GX command FIFO */
 
 / {

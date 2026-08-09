@@ -6933,8 +6933,56 @@ prevent the successful boot, but any later GX texture upload at the old fixed
 address can overwrite live kernel data or BSS.
 
 Before restoring the normal modular GX lifecycle, relocate only the GX texture
-reservation to a verified MEM2 range below mini's `0x13800000` boundary and
-outside the transient wrapper/FDT allocations. Keep the accepted MEM2 wrapper,
-DRM-core-only payload, XFB addresses, FIFO address, and diagnostic init path
-unchanged. Validate the new reserved range in the early memory log before
-loading `gcn_gx`; then load it explicitly and require a clean fault audit.
+reservation to a verified MEM1 range above the kernel and below the existing
+OHCI pool. The GX texture unit cannot address MEM2. Keep the accepted MEM2
+wrapper, DRM-core-only payload, XFB addresses, FIFO address, and diagnostic
+init path unchanged. Validate the new reserved range in the early memory log
+before loading `gcn_gx`; then load it explicitly and require a clean fault
+audit.
+
+## 2026-08-09: Stage relocated MEM1 GX texture window
+
+The accepted DRM-core kernel occupies `0x00000000-0x01288708`, overlapping
+the former GX texture reservation at `0x01200000-0x01380000`. Move the two
+fixed RGB565 texture slots to `0x01300000` and `0x013c0000`, with one combined
+DTS reservation of `0x01300000-0x01480000`. Each slot remains 768 KiB, enough
+for the maximum 640x576 RGB565 upload of 737,280 bytes.
+
+This placement leaves `0x778f8` bytes (about 478 KiB) between the current
+kernel end and the first texture slot, and `0x80000` bytes (512 KiB) between
+the reservation end and the OHCI pool at `0x01500000`. The GX FIFO at
+`0x01684000` and both XFBs beginning at `0x01698000` are unchanged.
+
+Add a Wii-only wrapper build guard that reads the first kernel `PT_LOAD`
+physical address and memory size from `objdump -p`, computes the in-memory
+kernel end, and rejects any image extending beyond `0x01300000`. Failure to
+parse the extent is also fatal. GameCube wrapper behavior is unchanged. A
+positive/negative parser assertion measured the current end as `0x01288708`,
+confirmed that it exceeds the obsolete `0x01200000` boundary, and confirmed
+that it fits below the new boundary. `bash -n`, `git diff --check`, and the
+complete `ARCH=powerpc CROSS_COMPILE=powerpc-linux-gnu- make zImage modules
+-j16` build pass.
+
+The embedded DT reserve map was extracted from the image and independently
+checked. It contains the texture reservation at `0x01300000` with size
+`0x00180000`, the FIFO at `0x01684000` with size `0x00010000`, and the XFB
+reservation at `0x01698000` with size `0x00168000`. The wrapper remains in
+MEM2 with entry `0x10010000` and memory end `0x106334a0`.
+
+Pinned test artifacts:
+
+```text
+zImage.ngx: 685a7a7fe92bef21cf1cab34528d64b3fc5aad5c65afce9bc887bc02af52254d
+gcn-gx.ko:  0b2f29bc94df5e0b4ef6c64239334529bd8606f5c0474b28c9d4458e2b038556
+vmlinux:    655ccd6556a5e8034bccde5f30baf96efe7ac47e670ad870f2bfc7f7dc8063e0
+```
+
+Deploy the image and matching module together. Boot the diagnostic init and
+wait at least 60 seconds even if the display remains frozen; the wrapper's
+disc-slot light is a permanent entry marker, not a completion signal. Over
+SSH, first verify the baseline and early reservation log, then explicitly
+load the pinned `gcn-gx.ko`, because this diagnostic init does not load it.
+Require `gcn-gx: ready fifo=01684000 tex=01300000/013c0000`, drained FIFO
+diagnostics, continued network/CPU responsiveness, and no oops, exception,
+machine check, or memory corruption. Record the full-frame display result
+separately from machine liveness.
