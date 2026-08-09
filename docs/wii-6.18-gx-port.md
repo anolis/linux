@@ -7037,3 +7037,28 @@ Do not load the installed `gcn-gx.ko` during this control. A successful boot
 would localize the failure to the newer built-in-DRM/MEM2-wrapper image family;
 another pre-init failure would instead require wrapper and early-kernel stage
 instrumentation or boot-media diagnosis before graphics work resumes.
+
+Correction: retract the recent pre-PID1 classifications. Static inspection of
+all three deployed images shows that none embeds `init=/init-diag.sh`; each
+contains only its DTS default `root=/dev/mmcblk0p2 rootwait ro ...` command
+line. The current `gumboot.lst` invokes `kernel /zImage.ngx` without appended
+arguments. Therefore absence of the four diagnostic files is expected and
+does not place the failure before PID 1.
+
+The normal root filesystem explicitly lists `gcn_gx` in `/etc/modules` line
+11. The modular-fbcon control reached a normal visible console before failing,
+consistent with normal userspace starting and then loading the installed
+relocated-address module against an incompatible old-layout kernel. Do not use
+that run as a clean boot positive control and do not infer a graphics-code
+regression from it. The two MEM2-wrapper runs likewise had neither the intended
+diagnostic PID 1 nor an expected automatic Wi-Fi/SSHD path, so their missing
+network and logs are not valid boot-failure controls.
+
+Restore a deterministic boot harness in the SD-card `gumboot.lst` by appending
+`root=/dev/mmcblk0p2 rootwait rw init=/init-diag.sh console=tty0
+video=gcn-vifb:tv=auto,nostalgic udbg-immortal log_buf_len=1M
+module_blacklist=gcn_drm,gcn_gx` to the kernel line. This is boot-media test
+configuration, not a kernel or graphics-source change. Re-run the preserved
+modular-fbcon image first. Success requires fresh diagnostics and SSH; do not
+load either graphics module. Only after that control passes should the two
+MEM2-wrapper images be compared under the exact same command line.
