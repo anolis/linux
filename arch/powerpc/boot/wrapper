@@ -347,8 +347,14 @@ xpedite52*)
     platformo=$object/cuboot-85xx.o
     ;;
 gamecube|wii)
-    link_address='0x600000'
     platformo="$object/$platform-head.o $object/$platform.o"
+    if [ "$platform" = "wii" ]; then
+	# Keep large wrappers out of 24 MiB MEM1 and its reserved GX buffers.
+	link_address='0x10010000'
+	make_space=n
+    else
+	link_address='0x600000'
+    fi
     ;;
 microwatt)
     link_address='0x500000'

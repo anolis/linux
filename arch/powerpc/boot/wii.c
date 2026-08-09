@@ -134,8 +134,20 @@ out:
 
 void platform_init(unsigned long r3, unsigned long r4, unsigned long r5)
 {
-	u32 heapsize = 24*1024*1024 - (u32)_end;
+	u32 heap_top = 24 * 1024 * 1024;
+	u32 wrapper_end = (u32)_end;
+	u32 heapsize;
 
+	if (wrapper_end >= heap_top) {
+		if (mipc_get_mem2_boundary(&heap_top))
+			heap_top = MEM2_TOP - FIRMWARE_DEFAULT_SIZE;
+	}
+
+	if (wrapper_end >= heap_top)
+		fatal("Wii boot wrapper exceeds available memory "
+		      "(_end=%08X, top=%08X)\n", wrapper_end, heap_top);
+
+	heapsize = heap_top - wrapper_end;
 	simple_alloc_init(_end, heapsize, 32, 64);
 	fdt_init(_dtb_start);
 
@@ -150,4 +162,3 @@ void platform_init(unsigned long r3, unsigned long r4, unsigned long r5)
 
 	platform_ops.fixups = platform_fixups;
 }
-

@@ -6825,3 +6825,60 @@ read-only. Do not make another DRM ownership change for the next test. Move
 the Wii boot wrapper and its allocator to a valid MEM2 window, first verifying
 the decompressor's source/destination and Gumboot ELF-load assumptions, then
 re-run this exact DRM-core-only configuration as the control.
+
+## 2026-08-09: Stage Wii boot wrapper in MEM2
+
+- `zImage` SHA-256:
+  `2bb4d24654ba734151bcfb5af8e3e1ae11b50759cee6f8a5bf2be6efa1ad7be6`
+- unchanged `vmlinux` SHA-256:
+  `655ccd6556a5e8034bccde5f30baf96efe7ac47e670ad870f2bfc7f7dc8063e0`
+- accepted rollback image SHA-256:
+  `fbf92f081b1cd5c8e35d65c9ec2175d3cb00c25ababc82d54a1f9d5f54220c81`
+
+Correct the boot-image layout without changing the kernel or DRM test
+configuration. Link the Wii wrapper at `0x10010000`, immediately after the
+16 KiB MEM2 DSP reservation, and disable the generic MEM1-oriented
+`make_space` relocation for Wii only. GameCube retains its existing
+`0x00600000` behavior.
+
+When a Wii wrapper resides above MEM1, initialize its simple allocator from
+`_end` to mini's reported MEM2 boundary. Retain the existing 24 MiB MEM1 heap
+for smaller/older wrappers. If mini's header cannot be read, use the existing
+conservative fallback top of `0x13400000`; if `_end` reaches either selected
+ceiling, fail explicitly instead of allowing unsigned subtraction to
+underflow.
+
+The boot flow was checked against the exact sources involved:
+
+- `wii-head.S` installs an identity BAT for the complete
+  `0x10000000-0x14000000` MEM2 range before entering C code.
+- The generic wrapper decompresses the kernel to address zero. Its overlap
+  checks now compare the MEM2 `_start`/`_end` against the unchanged kernel
+  load and memory sizes, so the MEM1 output cannot overwrite the wrapper or
+  relocated FDT.
+- Gumboot revision `de22677b99f0` sends the complete ELF buffer to mini via
+  `IPC_PPC_BOOT`; it does not impose a MEM1 load address.
+- BootMii's published ELF loader revision `0b3705f9705e` copies each `PT_LOAD`
+  segment to its declared `p_paddr` and enters at `e_entry`, with no MEM1-only
+  address filter. MEM2 physical load addresses are therefore representable by
+  the loader path.
+
+The complete `-j16` build passes, as do wrapper shell syntax and
+`git diff --check`. Final ELF layout:
+
+```text
+entry/PT_LOAD start: 0x10010000
+PT_LOAD file end:    0x10630acc
+PT_LOAD memory end:  0x106334a0
+conservative top:    0x13400000
+```
+
+The `vmlinux` checksum exactly matches the rejected DRM-core-only image. This
+is therefore a direct A/B test of wrapper placement, not another DRM change.
+Deploy the pinned image and require the ordinary legacy console and SSH
+baseline. A pass validates the MEM2 wrapper and proves the earlier failures
+were boot-image layout failures. Then inspect the live command line,
+`gcn-vifb` ownership, absence of `gcn_drm`, AVE zero, fault log, and read-only
+`/boot` exactly as specified for the DRM-core-only test. A failure still needs
+physical rollback, but should be classified by the earliest visible Gumboot,
+wrapper LED, or console stage rather than attributed to DRM.
