@@ -6774,3 +6774,54 @@ Hardware procedure and outcome matrix:
    directly usable. Do not attempt the modular handoff until the matching
    helper/client modules are staged and the blacklist implications are
    understood.
+
+## 2026-08-09: Reject DRM-core-only boot and identify wrapper overflow
+
+Commit `750b3a2b1` and image
+`1387b9556c35827030fda945e457cf3b626c400b345724234e90772532952163`
+were deployed with matching staged and installed checksums. The display froze
+during boot. An SSH probe after the initial bounded wait timed out, and a
+second probe after another 25 seconds failed with `No route to host`. The Wii
+did not reach the network baseline even though GCN DRM was modular and
+kernel-blacklisted and built-in legacy `gcn-vifb` remained configured.
+
+Reject both the GCN DRM platform probe and native fbcon as causes of this boot
+failure. The near-identical uncompressed sizes of this image (`0x12c8d00`)
+and the previous all-built-in failure (`0x12c8f88`) instead exposed a PowerPC
+Wii boot-wrapper limit:
+
+```text
+failed image entry/load address: 0x01300000
+failed wrapper file extent:      0x01300000-0x01920acc
+failed wrapper memory extent:    0x01300000-0x019234a0
+Wii MEM1 extent:                 0x00000000-0x01800000
+accepted image entry/load:       0x00f00000
+accepted wrapper memory extent:  0x00f00000-0x014f24a0
+```
+
+`arch/powerpc/boot/wrapper` defaults Wii to `0x00600000`, then relocates the
+wrapper to the next MiB above the uncompressed kernel whenever the two would
+overlap. For this image that generic rule selected `0x01300000`. The resulting
+`PT_LOAD` segment extends more than one MiB beyond the end of physical MEM1.
+It also crosses the DTS-reserved GX texture, FIFO, and XFB ranges, although the
+hard physical-memory overflow is sufficient to reject the layout.
+
+The platform wrapper independently confirms this limit. `wii.c` initializes
+its allocator with:
+
+```c
+u32 heapsize = 24*1024*1024 - (u32)_end;
+simple_alloc_init(_end, heapsize, 32, 64);
+```
+
+With `_end=0x019234a0`, the heap-size subtraction underflows. The accepted
+modular image ends at `0x014f24a0`, remains below 24 MiB, and boots. This is a
+positive and negative layout control using the same boot wrapper and hardware.
+
+Physical-card rollback restored the accepted modular image
+`fbf92f081b1cd5c8e35d65c9ec2175d3cb00c25ababc82d54a1f9d5f54220c81`.
+Source and installed checksums matched after sync, and `/boot` was remounted
+read-only. Do not make another DRM ownership change for the next test. Move
+the Wii boot wrapper and its allocator to a valid MEM2 window, first verifying
+the decompressor's source/destination and Gumboot ELF-load assumptions, then
+re-run this exact DRM-core-only configuration as the control.
