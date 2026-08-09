@@ -7159,3 +7159,24 @@ module_blacklist=gcn_drm,gcn_gx`. Omit the optional video override,
 `udbg-immortal`, and enlarged printk buffer for this control. If the short form
 boots, investigate wrapper/FDT handling of the larger property; if it fails,
 compare a fresh unmodified-base rebuild before changing boot code.
+
+## 2026-08-09: Stage short-bootargs MEM2-wrapper isolation
+
+- Test commit: `5dfff227b`
+- `zImage` SHA-256:
+  `17ac3e1d4aee7fe0e4a4b4a0ed76833f55596afc1748f6924ce83cc69cdfac48`
+- Unchanged `vmlinux` SHA-256:
+  `e2a30e3f9ba58d656f910878735434d8e5cb7ac3f6951ecb08b0d579cf0fbe8f`
+- Unchanged, undeployed `gcn-gx.ko` SHA-256:
+  `88474048238caad1e992ca961969f6d42b07fece9fa5438937deac94720dffe1`
+
+Change only the embedded DT string from the rejected long form to
+`root=/dev/mmcblk0p2 rootwait rw init=/init-diag.sh console=tty0
+module_blacklist=gcn_drm,gcn_gx`. The incremental `zImage modules -j16` build
+regenerated only the DT and wrapper. `vmlinux`, the module, and the wrapper
+`PT_LOAD` boundaries remain unchanged. Static inspection confirms the exact
+short command line in the final image.
+
+Deploy only the image and repeat the diagnostic/SSH gates. A pass isolates the
+failure to optional bootargs or resulting FDT contents. A failure requires a
+fresh unmodified-base rebuild comparison; do not change graphics code.
