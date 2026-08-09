@@ -41,7 +41,7 @@
 	};
 
 	chosen {
-		bootargs = "root=/dev/mmcblk0p2 rootwait ro console=tty0 udbg-immortal log_buf_len=1M";
+		bootargs = "root=/dev/mmcblk0p2 rootwait ro console=tty0 video=gcn-vifb:tv=auto,nostalgic udbg-immortal log_buf_len=1M";
 	};
 
 	memory {

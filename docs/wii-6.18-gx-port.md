@@ -6560,3 +6560,52 @@ userspace framebuffer mirror. Require DRM to create its own fbdev console,
 continue rendering new console output, preserve correct colors, and restore
 legacy ownership cleanly on module removal. This separates native fbcon
 behavior from built-in probe ordering and retains an SSH recovery path.
+
+## 2026-08-09: Stage reversible native DRM fbcon handoff
+
+- `zImage` SHA-256:
+  `fbf92f081b1cd5c8e35d65c9ec2175d3cb00c25ababc82d54a1f9d5f54220c81`
+- `gcn-drm.ko` SHA-256:
+  `72c5ac10a276f93f3ab2ff4b08aa428a68a91bac331e12d437af04df62b48490`
+- `drm.ko` SHA-256:
+  `038eda5366251f715648d8fea770cdb2f19ec45ccc86104a14824f43ca5e65ce`
+- `drm_kms_helper.ko` SHA-256:
+  `b3bb89745cd925a092d7a8c249a008c0d1f4d5d49cee80ee857c516d95dfea2f`
+- `drm_shmem_helper.ko` SHA-256:
+  `9acfcdf4cb2c9d34e0f42fbc15fad0e6bf08f5793d22fe7be99e478948b03d07`
+- `drm_client_lib.ko` SHA-256:
+  `cdb90dc4d66ea83c7d28bd31a66b16ad3fdd62bb5fc027387b3ebd2bd933fa39`
+- `drm_panel_orientation_quirks.ko` SHA-256:
+  `fa1e9862ec9379b26b572df3b4e93878f21e563264ad6fd8353a4f27dcadd1df`
+
+Retain the fbdev client implementation from rejected boot-owner commit
+`01b86015c`, but restore the accepted ownership topology: DRM and GCN VI are
+modules, legacy `gcn-vifb` is built in, and the legacy video boot argument is
+present. DRM fbdev emulation remains enabled. The resolved module stack places
+the default fbdev client in `drm_client_lib.ko`, and `gcn-drm.ko` declares that
+module as a dependency.
+
+The complete image and module build passes with `-j16`; `git diff --check`
+passes. This test requires the new image because the accepted rollback kernel
+does not contain the matching DRM fbdev client module/configuration.
+
+Hardware procedure:
+
+1. Deploy the checksum-pinned image and matching module stack, leave `/boot`
+   read-only, and reboot into legacy ownership. Require `gcn-vifb` as `fb0`,
+   working SSH, no DRM device, AVE zero, and an empty relevant fault audit.
+2. Stop any process using the legacy framebuffer, unbind `gcn-vifb`, and load
+   the exact module stack in dependency order. Do not start
+   `wii-drm-console` or any other userspace framebuffer mirror.
+3. Require `gcn-drm` to enable and verify AVE `0x62=0x02`, register `card0`,
+   create a DRM fbdev `fb0`, and attach fbcon. Generate new tty output after
+   bind and require it to appear on screen with a blinking cursor, correct
+   colors, and no freeze, blur, repeated columns, or conversion errors.
+4. Remove the exact GCN DRM module and dependencies, rebind legacy, and require
+   verified AVE restoration to zero, a responsive legacy console, and no
+   kernel fault. If module removal cannot complete, reboot restores the known
+   legacy boot owner.
+
+A pass validates native DRM fbcon independently of built-in probe ordering. A
+freeze at module load with SSH still alive localizes the rejected boot result
+to DRM/fbdev ownership rather than unrelated late boot initialization.
