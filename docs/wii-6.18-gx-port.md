@@ -7180,3 +7180,34 @@ short command line in the final image.
 Deploy only the image and repeat the diagnostic/SSH gates. A pass isolates the
 failure to optional bootargs or resulting FDT contents. A failure requires a
 fresh unmodified-base rebuild comparison; do not change graphics code.
+
+Hardware result: reject the short-bootargs image before PID 1. The display and
+wrapper-light behavior matched the long form, networking never appeared, and
+the returned root filesystem again contained none of the four diagnostic
+files. Bootargs length and the removed optional parameters are therefore ruled
+out.
+
+## 2026-08-09: Stage fresh unmodified MEM2-wrapper rebuild
+
+- Test commit: `6e4efe0f0`
+- Source base: `c37e03e16`
+- `zImage` SHA-256:
+  `82320b32b7d6b8e4531aab8ef52f51fa048726e2c31ded7cad90216759dd37a5`
+- `vmlinux` SHA-256:
+  `e2a30e3f9ba58d656f910878735434d8e5cb7ac3f6951ecb08b0d579cf0fbe8f`
+- Matching, undeployed `gcn-gx.ko` SHA-256:
+  `88474048238caad1e992ca961969f6d42b07fece9fa5438937deac94720dffe1`
+
+Restore the exact original DTS command line. A source-tree comparison confirms
+that `wii.dts` and all implementation files now match accepted base
+`c37e03e16`; only generated build identity differs from the historical image.
+The incremental `zImage modules -j16` build passes. Wrapper entry and memory
+end remain `0x10010000` and `0x106334a0`.
+
+This image starts normal userspace and contains no diagnostic PID 1. Prevent
+the rootfs `/etc/modules` entry from loading GX by temporarily moving the
+installed `gcn-gx.ko` out of its module path; preserve it for restoration. Do
+not alter `/etc/modules` or graphics source. Success is a stable legacy console
+through normal boot. If this fresh base fails while historical image
+`2bb4d246...` succeeds under the same disabled-module rootfs, investigate
+build reproducibility and generated payload differences.
