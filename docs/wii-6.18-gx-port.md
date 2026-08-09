@@ -6986,3 +6986,31 @@ Require `gcn-gx: ready fifo=01684000 tex=01300000/013c0000`, drained FIFO
 diagnostics, continued network/CPU responsiveness, and no oops, exception,
 machine check, or memory corruption. Record the full-frame display result
 separately from machine liveness.
+
+Hardware result: reject this image before module loading. Two cold boots of
+the exact checksum-pinned image both left the normally transient color-static
+frame on screen permanently. The wrapper-entry disc-slot light remained on,
+but that light is intentionally latched and is not a crash indicator. After a
+90-second window, ARP resolution for `10.3.10.12` was `FAILED`, ping returned
+destination-host-unreachable, and SSH returned no-route-to-host.
+
+The first return appeared to contain diagnostics, but all four files were
+byte-identical to the previous accepted boot. Before the exact-image retry,
+those files were renamed in place. The second return contained no new
+`early-dmesg.txt`, `dmesg.txt`, `wpa-debug.txt`, or `sshd-debug.txt`, proving
+that `/init-diag.sh` was never entered. The installed image and module still
+matched the pinned hashes after the failed boot. Do not attribute failure to
+the static frame itself; the user confirms that a brief instance is part of
+normal Wii Linux startup. Only its persistence, absent networking, and absent
+fresh logs establish the failed progress boundary.
+
+Run a direct A/B boot-path control before changing another address. Restore
+the already accepted MEM2-wrapper image from commit `c37e03e16`, SHA-256
+`2bb4d24654ba734151bcfb5af8e3e1ae11b50759cee6f8a5bf2be6efa1ad7be6`,
+which retains the old `0x01200000-0x01380000` texture reservation. Leave the
+root filesystem and unloaded relocated-address `gcn-gx.ko` unchanged. The
+diagnostic init does not load that module, so a successful boot and fresh logs
+would isolate the regression to the image's DT reservation change rather than
+the card, root filesystem, Wi-Fi setup, or module contents. The control is not
+safe for loading `gcn-gx.ko`; its old reservation overlaps the enlarged live
+kernel.
