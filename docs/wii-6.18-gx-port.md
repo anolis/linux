@@ -6727,3 +6727,9 @@ and retain legacy `gcn-vifb` as the boot owner. A successful ordinary legacy
 boot would validate the larger built-in DRM core and leave GCN's built-in
 registration/probe ordering as the remaining suspect. A failure before any
 GCN ownership change would instead implicate built-in DRM core size or config.
+
+Physical-card rollback subsequently restored the accepted modular image
+`fbf92f081b1cd5c8e35d65c9ec2175d3cb00c25ababc82d54a1f9d5f54220c81`.
+Source and installed checksums matched after sync, and the boot partition was
+returned read-only. The Wii booted normally: SSH returned, legacy `gcn-vifb`
+was `fb0`, DRM was absent, AVE read zero, and `/boot` remained read-only.
