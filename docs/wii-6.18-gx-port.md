@@ -6657,3 +6657,46 @@ the same implementation works when loaded after boot. The remaining problem
 is boot-time ownership/probe interaction. Update `wii-drm-cycle.sh` for
 `drm_client_lib` and no-mirror native-fbcon validation before designing the
 next built-in isolation test.
+
+## 2026-08-09: Stage built-in DRM probe without fbcon
+
+- `zImage` SHA-256:
+  `4e18496d4139cc0e737dc78d0143a31f9fe008190651197de564f43cebc26b48`
+- `vmlinux` SHA-256:
+  `4a4dc41f57ce4c12fe202dafe7c4bf6231e99eb4d782e40d2b3df5eb87c8cdf4`
+- accepted modular rollback image SHA-256:
+  `fbf92f081b1cd5c8e35d65c9ec2175d3cb00c25ababc82d54a1f9d5f54220c81`
+
+The reversible module test accepts the native fbcon implementation and dirty
+update path. Isolate the rejected built-in boot by retaining built-in DRM and
+GCN VI with legacy disabled, but add the documented DRM client selector
+`drm_client_lib.active=none` to the kernel command line. The GCN probe still
+maps and programs VI, owns the IRQ, enables AVE chroma exchange, registers
+`card0`, and returns; `drm_client_setup()` deliberately starts no fbdev client.
+No driver implementation changes in this test.
+
+The complete `-j16` image build passes. The resolved config contains built-in
+DRM, GCN VI, client selection, and fbdev emulation with legacy GameCube
+framebuffer disabled. The embedded DT contains the AVE phandle and exact
+`active=none` command line. `git diff --check` passes.
+
+Hardware procedure and outcome matrix:
+
+1. Deploy the checksum-pinned image, verify the installed checksum, leave
+   `/boot` read-only, and reboot. The display is expected to retain a static
+   pre-DRM frame because neither legacy nor DRM fbdev will update it. Do not
+   classify that expected display freeze as a machine failure.
+2. Poll SSH independently. If SSH returns, require built-in `gcn-vi` bound,
+   `card0` present, no `/proc/fb` entry, AVE `0x62=0x02`, the command line to
+   contain `drm_client_lib.active=none`, and an empty relevant fault audit.
+   This passes built-in probe and localizes the rejected image to early fbcon
+   setup or boot-time console updates.
+3. If SSH does not return within the same bounded boot interval, reject
+   built-in GCN DRM probe independently of fbcon. Physical-card rollback is
+   then required because a static screen alone provides no diagnostic stage.
+4. After either result, restore the accepted modular image
+   `fbf92f081b1cd5c8e35d65c9ec2175d3cb00c25ababc82d54a1f9d5f54220c81`,
+   verify the installed checksum, and leave `/boot` read-only.
+
+Do not run the modular cycle harness on this image. Its purpose is only to
+separate built-in platform probe from DRM fbcon startup.
