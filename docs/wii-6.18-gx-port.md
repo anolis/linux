@@ -6532,3 +6532,31 @@ If the display fails but SSH remains available, restore the preserved rollback
 image from `/tmp/zImage.ngx.rollback-driver-owned-ave-b39cdf27`, verify its
 checksum before and after the local `/boot` copy, sync, and remount `/boot`
 read-only. A loss of both display and network requires physical card rollback.
+
+## 2026-08-09: Reject first native DRM boot-owner attempt
+
+Commit `01b86015c` and its checksum-pinned image
+`2f389ad2ac2c54072dcd5bcc23d7d86c38193c966f56df02fca9dfcf08febc0e`
+were deployed with matching pre-copy and installed checksums. `/boot` was
+returned read-only before reboot.
+
+The display froze during boot and the Wii did not return on SSH within the
+bounded post-boot check. No pstore record or persistent failed-boot log was
+available, so this result does not identify whether the failure occurred in
+built-in GCN DRM probe, DRM fbdev client setup, or a later boot dependency.
+Do not accept this image and do not infer a specific root cause from the
+frozen last frame.
+
+Physical-card rollback restored the accepted image with SHA-256
+`b39cdf270d8c0a960ce9b47f53845137106dadb373e4d2a6ccc61cfec8392505`.
+The source and installed checksums matched after sync, and the boot partition
+was returned read-only. The Wii subsequently booted normally with legacy
+`gcn-vifb` as `fb0`, no DRM device, working SSH, and `/boot` read-only.
+
+Before retrying built-in ownership, validate the new fbdev client path under
+the existing reversible module handoff. Keep legacy `gcn-vifb` as the boot
+owner, build GCN DRM as a module, unbind legacy, and load the module without a
+userspace framebuffer mirror. Require DRM to create its own fbdev console,
+continue rendering new console output, preserve correct colors, and restore
+legacy ownership cleanly on module removal. This separates native fbcon
+behavior from built-in probe ordering and retains an SSH recovery path.
