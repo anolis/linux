@@ -6882,3 +6882,59 @@ were boot-image layout failures. Then inspect the live command line,
 `/boot` exactly as specified for the DRM-core-only test. A failure still needs
 physical rollback, but should be classified by the earliest visible Gumboot,
 wrapper LED, or console stage rather than attributed to DRM.
+
+## 2026-08-09: Accept MEM2 wrapper boot, retain display failure
+
+Commit `c37e03e16` and image
+`2bb4d24654ba734151bcfb5af8e3e1ae11b50759cee6f8a5bf2be6efa1ad7be6`
+were deployed with matching staged and installed checksums. The user saw
+Gumboot, one frame of color static, and then a frozen display. The front disc
+slot light came on and remained lit.
+
+Do not classify either observation as a machine failure. `wii-head.S`
+deliberately sets the front blue LED immediately after installing the Wii BATs
+as its permanent "wrapper entered" marker; it contains no matching clear. The
+returned persistent log proves that the kernel completed boot despite the
+display:
+
+- the MEM2 wrapper entered and handed a valid FDT to the kernel;
+- legacy `gcn-vifb` probed as `fb0` with software conversion selected;
+- the root filesystem mounted and `/init-diag.sh` started;
+- Wi-Fi completed its four-way handshake;
+- DHCP bound `10.3.10.12`, and gateway and host pings both passed;
+- OpenSSH listened on port 22; and
+- the script wrote its final completion marker at 47.6 seconds.
+
+The two live SSH probes were false negatives caused by timing. The diagnostic
+boot does not start OpenSSH until after an eight-second WPA stability gate, a
+25-second `dhclient` timeout, and two three-packet ping checks. It reached the
+listen socket at 46.4 seconds, later than the bounded probes, and the card was
+removed before another probe. Increase this diagnostic image's SSH readiness
+window to at least 60 seconds in future tests.
+
+Preserved artifact hashes:
+
+```text
+dmesg.txt:       11f4b793435b132fba3dba4775ea6751186f4659273e9870ee30430eb7d887d9
+early-dmesg.txt: 25172cb06fca5fb6dd7e70ebe50fc9f5b29d3cdc7e29d8ac372452b640ac0639
+wpa-debug.txt:   e5dbe6790240365c0b661b56fee79f6d93e60f4944a2cd8080f89347b45aa0cb
+sshd-debug.txt:  6e453408f190b8b75a3b9ba0128cbb2be464feb1edf0bfea292922d3de9b4e59
+```
+
+Accept the MEM2 wrapper and built-in DRM-core boot. The remaining visual
+failure is real but is not evidence of a stopped CPU.
+
+The enlarged kernel exposes a second independent layout conflict. Its
+`PT_LOAD` memory extent is `0x00000000-0x01288708`, while the Wii DTS still
+reserves `0x01200000-0x01380000` for two GX texture buffers. The final kernel
+therefore occupies the first `0x88708` bytes of the old texture reservation.
+`gcn_gx` was not loaded by this diagnostic init path, so this overlap did not
+prevent the successful boot, but any later GX texture upload at the old fixed
+address can overwrite live kernel data or BSS.
+
+Before restoring the normal modular GX lifecycle, relocate only the GX texture
+reservation to a verified MEM2 range below mini's `0x13800000` boundary and
+outside the transient wrapper/FDT allocations. Keep the accepted MEM2 wrapper,
+DRM-core-only payload, XFB addresses, FIFO address, and diagnostic init path
+unchanged. Validate the new reserved range in the early memory log before
+loading `gcn_gx`; then load it explicitly and require a clean fault audit.
