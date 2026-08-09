@@ -7062,3 +7062,34 @@ configuration, not a kernel or graphics-source change. Re-run the preserved
 modular-fbcon image first. Success requires fresh diagnostics and SSH; do not
 load either graphics module. Only after that control passes should the two
 MEM2-wrapper images be compared under the exact same command line.
+
+The Gumboot override attempt failed before Linux with `could not edit
+bootargs: -1` and `MINI boot failed: -1`. Restore the original `gumboot.lst`;
+this Mini version does not support Gumboot's runtime bootargs-edit operation.
+
+## 2026-08-09: Stage embedded diagnostic PID 1 control
+
+- Isolated boot-only branch: `test/wii-embedded-diag-bootargs`
+- Test commit: `202db1f06`
+- Base commit: accepted modular-fbcon source `e344ac116`
+- `zImage` SHA-256:
+  `da36498313772c9428957e2b42abdcfc412c2f23be35dc5c013362dfd59a834b`
+- `vmlinux` SHA-256:
+  `b6ca02f67be0f7ff47f835c021281bbcf1f5269633d1166bc85def69de33b3a1`
+- Matching but intentionally undeployed `gcn-gx.ko` SHA-256:
+  `88474048238caad1e992ca961969f6d42b07fece9fa5438937deac94720dffe1`
+
+Build from the exact accepted modular-fbcon source and configuration, changing
+only the Wii DT `/chosen/bootargs` string. Embed `rootwait rw
+init=/init-diag.sh` and `module_blacklist=gcn_drm,gcn_gx`; retain legacy
+`gcn-vifb` ownership. The complete clean `zImage modules -j16` build and an
+incremental verification build pass, `git diff --check` passes, and static
+inspection of the final image finds the complete intended command line.
+
+Deploy only the image. Leave the root filesystem and installed graphics module
+unchanged because neither module may load in this control. Restore the original
+Gumboot kernel line with no arguments. Success requires visible diagnostic
+status, newly created diagnostic files, SSH, a live command line containing the
+embedded PID 1 and both blacklists, legacy `gcn-vifb` as `fb0`, and no loaded
+GX/DRM modules or kernel fault. This is a boot-harness validation, not a
+graphics test.
