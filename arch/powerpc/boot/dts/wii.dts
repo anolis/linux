@@ -41,7 +41,7 @@
 	};
 
 	chosen {
-		bootargs = "root=/dev/mmcblk0p2 rootwait rw init=/init-diag.sh console=tty0 video=gcn-vifb:tv=auto,nostalgic udbg-immortal log_buf_len=1M module_blacklist=gcn_drm,gcn_gx";
+		bootargs = "root=/dev/mmcblk0p2 rootwait rw init=/init-diag.sh console=tty0 module_blacklist=gcn_drm,gcn_gx";
 	};
 
 	memory {
