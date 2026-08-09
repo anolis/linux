@@ -6733,3 +6733,44 @@ Physical-card rollback subsequently restored the accepted modular image
 Source and installed checksums matched after sync, and the boot partition was
 returned read-only. The Wii booted normally: SSH returned, legacy `gcn-vifb`
 was `fb0`, DRM was absent, AVE read zero, and `/boot` remained read-only.
+
+## 2026-08-09: Stage built-in DRM-core-only boot
+
+- `zImage` SHA-256:
+  `1387b9556c35827030fda945e457cf3b626c400b345724234e90772532952163`
+- `vmlinux` SHA-256:
+  `655ccd6556a5e8034bccde5f30baf96efe7ac47e670ad870f2bfc7f7dc8063e0`
+- modular `gcn-drm.ko` SHA-256:
+  `477aa26650a550e887542d010198461e66e7e46eedf484584dce6e750ac699c7`
+- accepted rollback image SHA-256:
+  `fbf92f081b1cd5c8e35d65c9ec2175d3cb00c25ababc82d54a1f9d5f54220c81`
+
+Isolate the failed built-in GCN boot one level earlier. Keep DRM core built in,
+but build GCN VI and the DRM client/helper stack as modules. Restore built-in
+legacy `gcn-vifb`, modular `gcn_gx`, and the accepted legacy video argument.
+Add the kernel-enforced `module_blacklist=gcn_drm` parameter so userspace
+cannot auto-load either an installed stale GCN module or the newly built one.
+
+The complete `-j16` image and module build passes. The uncompressed kernel is
+`0x12c8d00`, only `0x288` bytes smaller than the failed all-built-in image at
+`0x12c8f88`, making this a strong image-size control. `System.map` contains
+built-in `drm_dev_register` but no `gcn_drm_probe`. The embedded DT contains
+the AVE phandle, legacy video argument, and exact kernel module blacklist.
+`git diff --check` passes.
+
+Hardware procedure and outcome matrix:
+
+1. Deploy and verify the checksum-pinned image, leave `/boot` read-only, and
+   reboot. Require the ordinary updating legacy console rather than a static
+   last frame.
+2. Require SSH to return, `gcn-vifb` to own `fb0`, AVE to remain zero, no
+   `card0`, no `gcn_drm` module, and the live command line to contain
+   `module_blacklist=gcn_drm`. Audit for faults and confirm `/boot` read-only.
+3. A pass validates the built-in DRM core and near-identical image size,
+   localizing the previous failures to built-in GCN registration/probe timing.
+   A failure before any GCN load implicates the built-in DRM core/config or
+   image layout instead.
+4. This image retains the accepted legacy boot owner, so a successful boot is
+   directly usable. Do not attempt the modular handoff until the matching
+   helper/client modules are staged and the blacklist implications are
+   understood.
