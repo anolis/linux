@@ -7181,11 +7181,21 @@ Deploy only the image and repeat the diagnostic/SSH gates. A pass isolates the
 failure to optional bootargs or resulting FDT contents. A failure requires a
 fresh unmodified-base rebuild comparison; do not change graphics code.
 
-Hardware result: reject the short-bootargs image before PID 1. The display and
-wrapper-light behavior matched the long form, networking never appeared, and
-the returned root filesystem again contained none of the four diagnostic
-files. Bootargs length and the removed optional parameters are therefore ruled
-out.
+Initial hardware result retracted: the SD adapter returned with its physical
+write-protect switch engaged. The host reported `RO=1` for the disk and both
+partitions, and the ext3 root mounted read-only. Absence of diagnostic files in
+that run therefore could not prove that PID 1 was not entered.
+
+Checksum-identical rerun result: reject the short-bootargs image before PID 1.
+Before boot, the host reported `RO=0` for the disk and both partitions, mounted
+the root read-write, and successfully created, inspected, removed, and synced a
+test file. The deployed `zImage.ngx` still hashed to
+`17ac3e1d4aee7fe0e4a4b4a0ed76833f55596afc1748f6924ce83cc69cdfac48`.
+The Wii remained on the normally transient static frame, never appeared on the
+network, and the returned writable root contained none of `early-dmesg.txt`,
+`dmesg.txt`, `wpa-debug.txt`, or `sshd-debug.txt`. This independently confirms
+that `/init-diag.sh` was not entered. Bootargs length and the removed optional
+parameters are therefore ruled out for this MEM2-wrapper rebuild.
 
 ## 2026-08-09: Stage fresh unmodified MEM2-wrapper rebuild
 
