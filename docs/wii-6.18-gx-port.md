@@ -7142,3 +7142,20 @@ the same gates as the modular-fbcon harness: fresh logs, SSH, exact live
 command line, legacy `gcn-vifb` as `fb0`, no GX/DRM module, and no new fault.
 This isolates the larger built-in DRM-core kernel plus MEM2 wrapper without
 loading any graphics accelerator or DRM driver.
+
+Hardware result: reject the long-bootargs MEM2-wrapper rebuild before PID 1.
+Two boots of the exact image remained on the normally transient static frame
+with the wrapper light latched. Neither boot answered ARP, ping, or SSH. The
+first returned root filesystem contained no newly created diagnostic file,
+proving that the embedded init was not entered; the exact-binary retry
+reproduced the same liveness failure.
+
+Do not interpret this as a graphics result. No graphics module loaded and no
+graphics source differs from the accepted MEM2-wrapper base. The wrapper
+`PT_LOAD` boundaries also match the accepted layout. Isolate the remaining DT
+input difference by shortening the embedded command line to only
+`root=/dev/mmcblk0p2 rootwait rw init=/init-diag.sh console=tty0
+module_blacklist=gcn_drm,gcn_gx`. Omit the optional video override,
+`udbg-immortal`, and enlarged printk buffer for this control. If the short form
+boots, investigate wrapper/FDT handling of the larger property; if it fails,
+compare a fresh unmodified-base rebuild before changing boot code.
