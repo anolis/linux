@@ -7116,3 +7116,29 @@ The only warning is the already documented PowerPC alignment exception from
 pool. Execution recovers, both boot and networking complete, and this is not a
 new fault. Use this embedded-DT method for subsequent boot controls; do not
 attempt runtime arguments through Gumboot on the current Mini version.
+
+## 2026-08-09: Stage MEM2-wrapper embedded diagnostic control
+
+- Isolated boot-only branch: `test/wii-mem2-wrapper-embedded-diag`
+- Test commit: `6bc326bcb`
+- Base commit: accepted MEM2-wrapper source `c37e03e16`
+- `zImage` SHA-256:
+  `a7814f82666fcc71249653db5638590786e1ad25d9ff26d961b7521ad7708c4f`
+- `vmlinux` SHA-256:
+  `e2a30e3f9ba58d656f910878735434d8e5cb7ac3f6951ecb08b0d579cf0fbe8f`
+- Matching but intentionally undeployed `gcn-gx.ko` SHA-256:
+  `88474048238caad1e992ca961969f6d42b07fece9fa5438937deac94720dffe1`
+
+Build from the previously accepted MEM2-wrapper source and configuration,
+changing only the Wii DT chosen bootargs. The final wrapper remains linked at
+`0x10010000`; its `PT_LOAD` file end is `0x10630acc` and memory end is
+`0x106334a0`, matching the accepted layout. The complete clean and incremental
+`zImage modules -j16` builds pass, `git diff --check` passes, and the image
+contains the validated embedded diagnostic command line with both graphics
+module blacklists.
+
+Deploy only this image over the accepted diagnostic rootfs. Success requires
+the same gates as the modular-fbcon harness: fresh logs, SSH, exact live
+command line, legacy `gcn-vifb` as `fb0`, no GX/DRM module, and no new fault.
+This isolates the larger built-in DRM-core kernel plus MEM2 wrapper without
+loading any graphics accelerator or DRM driver.
