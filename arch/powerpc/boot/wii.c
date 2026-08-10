@@ -23,6 +23,8 @@ BSS_STACK(8192);
 
 #define EXI_CTRL		HW_REG(0x0d800070)
 #define EXI_CTRL_ENABLE		(1<<0)
+#define GPIO_OUT		HW_REG(0x0d8000c0)
+#define GPIO_SLOT_LED		(1<<5)
 
 #define MEM2_TOP		(0x10000000 + 64*1024*1024)
 #define FIRMWARE_DEFAULT_SIZE	(12*1024*1024)
@@ -149,6 +151,9 @@ static void wii_kernel_entry(unsigned long fdt_addr, void *vmlinux_addr)
 
 	memcpy(fdt_mem1, (void *)fdt_addr, fdt_size);
 	flush_cache(fdt_mem1, fdt_size);
+
+	/* Clear Mini's LED state; only Linux's heartbeat may turn it on. */
+	out_be32(GPIO_OUT, in_be32(GPIO_OUT) & ~GPIO_SLOT_LED);
 	((kernel_entry_t)vmlinux_addr)((unsigned long)fdt_mem1, 0, NULL);
 }
 
