@@ -7238,3 +7238,29 @@ direct binary control next: deploy preserved historical image
 without restoring the disabled module or changing the root filesystem. A pass
 would establish a build-reproducibility or payload-content problem; a failure
 would invalidate the earlier acceptance under current boot-media conditions.
+
+## 2026-08-10: Stage unchanged historical image with rootfs diagnostic init
+
+- Historical `zImage` SHA-256:
+  `2bb4d24654ba734151bcfb5af8e3e1ae11b50759cee6f8a5bf2be6efa1ad7be6`
+- Preserved SysV `/sbin/init` SHA-256:
+  `9bb25e184d04bbb5768cb37961835abacf3499b807374707ba8d84ee0d8fd014`
+- Existing `/init-diag.sh` SHA-256:
+  `cf579d2b8681304eaf06b982fd729b7e48da9aa7f670a17b5f15efcf7efc7367`
+
+The historical image's default command line starts normal userspace, so a
+persistent static display alone cannot distinguish a display freeze from a
+kernel failure. Keep the historical image byte-exact and make the diagnostic
+PID 1 deterministic through the root filesystem instead: rename the regular
+SysV init binary to `/sbin/init.sysvinit.sha256-9bb25e18` and install relative
+symlink `/sbin/init -> ../init-diag.sh`. Keep the installed `gcn-gx.ko` renamed
+to `gcn-gx.ko.disabled-fresh-base`; the script does not load it.
+
+The host mounted ext3 read-write and the redirect plus backup were synced and
+read back with the hashes above. Afterward the USB card-reader device node
+disappeared while the cached mount remained visible as read-only. Kernel logs
+contain no ext3 error and the block-device hardware read-only flags stayed
+zero, so treat this as a host reader/adapter disconnect. Unmount the stale
+mount and physically reseat the card before boot. Success requires fresh
+diagnostic files and SSH after at least 60 seconds; display state and the
+wrapper LED are not liveness criteria.
