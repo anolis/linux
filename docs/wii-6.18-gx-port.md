@@ -7264,3 +7264,21 @@ zero, so treat this as a host reader/adapter disconnect. Unmount the stale
 mount and physically reseat the card before boot. Success requires fresh
 diagnostic files and SSH after at least 60 seconds; display state and the
 wrapper LED are not liveness criteria.
+
+Hardware result: the historical image does not currently reproduce its earlier
+accepted boot. The returned card still contained exact image `2bb4d246...`,
+the diagnostic `/sbin/init` symlink and checksum-verified SysV init backup were
+intact, and `gcn-gx.ko` remained outside its module path. Nevertheless, no
+diagnostic file was created and SSH never appeared during the full window.
+The static frame is therefore accompanied by failure to reach the deterministic
+rootfs diagnostic init, not merely an unobserved normal-userspace boot.
+
+Do not erase the earlier accepted log evidence: this same historical artifact
+did complete boot once. Its present failure means fresh-build reproducibility
+is not the sole issue and points to a state-sensitive MEM2 wrapper/loader path
+or a changed boot-media environment. Re-run the proven pre-MEM2 modular
+embedded-diagnostic image `da36498313772c9428957e2b42abdcfc412c2f23be35dc5c013362dfd59a834b`
+without changing the rootfs redirect or disabled module. A pass localizes the
+current failure to the MEM2-wrapper image family. A failure means the previously
+validated card/loader environment itself no longer reproduces and must be
+repaired before wrapper analysis continues.
