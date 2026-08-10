@@ -7629,3 +7629,37 @@ Interpret the result:
 - off: `machine_init()` completed and reached its return path; the failure is
   later in the entry assembly or `start_kernel()` path;
 - heartbeat: Linux reached normal device probing and timer progress.
+
+Hardware result: the LED changed to off and remained off. All four diagnostic
+hashes remained unchanged, and the required marker did not appear in a fresh
+log. This proves that `machine_init()` reached its final marker and return
+path. The unresolved interval now contains `__save_cpu_setup`, `MMU_init`,
+`MMU_init_hw_patch`, the unmapped `load_up_mmu` transition, the final MMU-on
+`rfi`, and entry into `start_kernel()`.
+
+## 2026-08-10: Stage start_kernel entry marker
+
+- Test branch: `test/wii-mem2-fdt-in-mem1`
+- Test commit: `c4fc75a02`
+- Parent machine-return marker: `7a4b64124`
+- `zImage` SHA-256:
+  `1be30d43d2c76454bdea32b485565b781c49262862cdd0927292e3e6ea17b74f`
+- Instrumented `vmlinux` SHA-256:
+  `14940677a82f37232ea131b9698bf9382e9dfbf6347ede064b8d921b87fc1c5c`
+- Required command-line marker: `wii_test=start_kernel_led_7a4b`
+
+Retain the wrapper and `machine_init()` sequence, whose final state is off.
+Under `CONFIG_WII`, assert the slot LED as the first C-level operation in
+`start_kernel()` using the already initialized PowerPC early-I/O mapping.
+Disassembly verifies that the GPIO map, bit-5 assertion, and unmap precede
+`set_task_stack_end_magic()`, CPU initialization, banner output, and
+`setup_arch()`.
+
+Interpret the result:
+
+- off: `machine_init()` returned, but execution did not reach the first
+  `start_kernel()` marker; the failure is in the intervening assembly/MMU
+  transition;
+- solid: the final MMU-on `rfi` reached virtual `start_kernel()` and early
+  MMIO worked, but normal device-level heartbeat and PID 1 were not reached;
+- heartbeat: Linux reached normal device probing and timer progress.
