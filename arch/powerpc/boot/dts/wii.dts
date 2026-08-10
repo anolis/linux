@@ -41,7 +41,7 @@
 	};
 
 	chosen {
-		bootargs = "root=/dev/mmcblk0p2 rootwait rw init=/init-diag.sh console=tty0 module_blacklist=gcn_drm,gcn_gx wii_test=mem1_fdt_led_zero_c103";
+		bootargs = "root=/dev/mmcblk0p2 rootwait rw init=/init-diag.sh console=tty0 module_blacklist=gcn_drm,gcn_gx wii_test=machine_init_led_c672";
 	};
 
 	memory {

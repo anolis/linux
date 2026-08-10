@@ -59,6 +59,25 @@ EXPORT_SYMBOL_GPL(boot_cpuid_phys);
 int smp_hw_index[NR_CPUS];
 EXPORT_SYMBOL(smp_hw_index);
 
+#ifdef CONFIG_WII
+#define WII_GPIO_OUT_PHYS	0x0d8000c0
+#define WII_GPIO_SLOT_LED	BIT(5)
+
+static void __init wii_machine_init_led_on(void)
+{
+	void __iomem *gpio;
+
+	gpio = early_ioremap(WII_GPIO_OUT_PHYS, sizeof(u32));
+	if (!gpio)
+		return;
+
+	setbits32(gpio, WII_GPIO_SLOT_LED);
+	early_iounmap(gpio, sizeof(u32));
+}
+#else
+static inline void wii_machine_init_led_on(void) { }
+#endif
+
 unsigned int DMA_MODE_READ;
 unsigned int DMA_MODE_WRITE;
 
@@ -82,6 +101,7 @@ notrace void __init machine_init(u64 dt_ptr)
 	setup_feature_keys();
 
 	early_ioremap_init();
+	wii_machine_init_led_on();
 
 	/* Enable early debugging if any specified (see udbg.h) */
 	udbg_early_init();
