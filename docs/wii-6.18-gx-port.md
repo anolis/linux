@@ -7489,3 +7489,44 @@ Keep Linux's heartbeat default trigger. Interpret the physical sequence:
   timer/interrupt loss before the first or a subsequent heartbeat transition;
 - LED never turns off: failure precedes this wrapper kentry hook or the GPIO
   write itself is ineffective.
+
+Hardware result: the LED turned off and remained off, while all four returned
+diagnostic hashes remained unchanged. This positively validates the wrapper
+kentry hook, MEM1 FDT copy/flush path, direct GPIO write, and indirect branch
+into the Linux payload. Linux did not activate its later `gpio-leds`
+heartbeat before failure.
+
+The existing Wii platform code also clears this LED in `wii_setup_arch()`.
+Because pre-clear failed images retained the loader's solid LED, those images
+did not prove that `setup_arch()` ran. The remaining failure window begins at
+the kernel entry assembly and ends before Wii setup/device probing. Instrument
+`machine_init()` next, before flat-device-tree parsing and early MMU setup.
+
+## 2026-08-10: Stage early machine_init LED marker
+
+- Test branch: `test/wii-mem2-fdt-in-mem1`
+- Test commit: `eebf06721`
+- Parent wrapper-clear control: `c672611f5`
+- `zImage` SHA-256:
+  `7b399df19b7f1ad189057e5f42a82466ea3f43631caeb03a3895b513f3bce745`
+- Instrumented `vmlinux` SHA-256:
+  `55d5d2fdd341572a17337e60d977f9736512cb4c5ab2464df83e5e81b1197fa9`
+- Required command-line marker: `wii_test=machine_init_led_c672`
+
+Retain the wrapper's immediate pre-entry LED clear. Under `CONFIG_WII`, add
+the earliest practical C-level Linux marker in 32-bit `machine_init()`:
+immediately after `early_ioremap_init()`, map physical GPIO output register
+`0x0d8000c0`, assert slot-LED bit 5, and unmap it. This executes before udbg
+initialization, `early_init_devtree()`, and `early_init_mmu()`.
+
+Disassembly verifies the final payload calls `early_ioremap_init`, maps
+`0x0d8000c0`, performs the big-endian bit-5 read/modify/write, unmaps it, and
+only then calls `udbg_early_init` and `early_init_devtree`.
+
+Interpret the result:
+
+- off: wrapper entered Linux, but execution did not reach this marker or early
+  MMIO mapping failed;
+- solid on: `machine_init()` and early MMIO ran, but Linux did not reach a
+  working device-level heartbeat;
+- heartbeat: Linux reached normal `gpio-leds` probing and timer progress.
