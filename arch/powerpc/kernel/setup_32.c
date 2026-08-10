@@ -119,6 +119,7 @@ notrace void __init machine_init(u64 dt_ptr)
 	wii_machine_init_led_set(false);
 
 	early_init_mmu();
+	wii_machine_init_led_set(true);
 
 	setup_kdump_trampoline();
 }
