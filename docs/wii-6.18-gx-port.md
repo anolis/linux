@@ -7282,3 +7282,50 @@ without changing the rootfs redirect or disabled module. A pass localizes the
 current failure to the MEM2-wrapper image family. A failure means the previously
 validated card/loader environment itself no longer reproduces and must be
 repaired before wrapper analysis continues.
+
+Hardware result: accept the pre-MEM2 modular environment control. Exact image
+`da36498313772c9428957e2b42abdcfc412c2f23be35dc5c013362dfd59a834b`
+booted visibly and reached SSH at 61 seconds. The live command line contains
+the embedded diagnostic init and both graphics-module blacklists, `gcn-vifb`
+owns `fb0`, and no GX or DRM module is loaded. The script completed at 47.6
+seconds after WPA association, DHCP, successful gateway and host pings, and
+OpenSSH startup.
+
+Preserved control hashes:
+
+```text
+dmesg.txt:       9f934006bfbe49f68fcbbaeebfc6bb437dc7c6527dc7c1eb8239dd9c9a97d3ee
+early-dmesg.txt: c69323435c00def53e20fb97c3142a697a1da9b0405368924c09f8bcee28f61a
+wpa-debug.txt:   d5224b496d107139089ebb7ce285bbe5a680a4b1ddfe832fe3094f8bdb30cc22
+sshd-debug.txt:  6e453408f190b8b75a3b9ba0128cbb2be464feb1edf0bfea292922d3de9b4e59
+```
+
+This clean A/B result localizes the present failure to the MEM2-wrapper image
+family, not the SD card, Gumboot, Mini's general ELF path, root filesystem,
+diagnostic script, Wi-Fi, or graphics modules. Audit wrapper entry, MEM2 cache
+coherency, heap/FDT relocation, and decompression before returning to GX work.
+
+Primary-source audit identifies the deterministic boundary. Gumboot revision
+`de22677b99f0` reads the complete ELF, leaves it unchanged when no command-line
+arguments are supplied, flushes that source buffer, and sends it through
+`IPC_PPC_BOOT`. Its optional argument editor requires literal
+`mark.start=1`/`mark.end=1` markers, explaining the earlier `-1` result on this
+wrapper. Mini revision `fc1234b22df9` validates and copies each `PT_LOAD`,
+flushes the Starlet cache and AHB writes, resets Broadway, and enters the ELF.
+This weakens a stale-loader-cache explanation.
+
+The MEM2 wrapper initializes `simple_alloc` above its own `_end`, and
+`fdt_init()` unconditionally relocates the device tree with that allocator.
+The finalized FDT is therefore passed to Linux at a physical MEM2 address near
+`0x10600000`. In `head_book3s_32.S`, Linux preserves `r3`, clears all wrapper
+BATs, and installs one initial 256 MiB BAT mapping physical
+`0x00000000-0x0fffffff`. MEM2 begins at `0x10000000`, immediately beyond that
+mapping. `machine_init()` later dereferences `__va(dt_ptr)` before the full MMU
+is initialized, so an MEM2 FDT is inaccessible at exactly this stage.
+
+Test this mechanism without changing graphics or the kernel payload: add a
+Wii `platform_ops.kentry` hook that copies the packed FDT into a bounded,
+non-overlapping MEM1 buffer, flushes it, and enters the unchanged kernel with
+the MEM1 address. Retain the already-rejected short embedded diagnostic
+command line. A boot validates the initial-BAT/FDT diagnosis; another failure
+requires LED stage markers around finalize, copy, and kernel entry.
