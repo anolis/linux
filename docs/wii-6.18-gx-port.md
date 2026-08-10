@@ -7530,3 +7530,38 @@ Interpret the result:
 - solid on: `machine_init()` and early MMIO ran, but Linux did not reach a
   working device-level heartbeat;
 - heartbeat: Linux reached normal `gpio-leds` probing and timer progress.
+
+Hardware result: solid on, with all four diagnostic hashes unchanged. The
+wrapper first cleared the loader state, then Linux's marker reasserted the LED.
+This positively proves entry into 32-bit `machine_init()`, successful
+`early_ioremap_init()`, and successful early MMIO access. The kernel still
+did not reach PID 1 or a working device-level heartbeat.
+
+The next unresolved call is `early_init_devtree(__va(dt_ptr))`, followed by
+`early_init_mmu()`. Bracket the first call without changing the copied FDT or
+memory layout.
+
+## 2026-08-10: Stage early_init_devtree return marker
+
+- Test branch: `test/wii-mem2-fdt-in-mem1`
+- Test commit: `5117e6864`
+- Parent machine marker: `eebf06721`
+- `zImage` SHA-256:
+  `b686d87d48d01f8a529189a2e95440e098951c06e60df7f6483743c1c341b3dd`
+- Instrumented `vmlinux` SHA-256:
+  `6f310a9dba0f164a5cdf7bcc906be6f862be663467e86a3129279f98ea8485f6`
+- Required command-line marker: `wii_test=fdt_return_led_eebf`
+
+Keep the wrapper clear and machine-entry assertion. Generalize the early GPIO
+helper to set or clear the slot LED, then clear it immediately after
+`early_init_devtree()` returns and before `early_init_mmu()` begins.
+Disassembly verifies the exact sequence: LED set, udbg setup and instruction
+patching, `early_init_devtree`, LED clear, then `early_init_mmu`.
+
+Interpret the result:
+
+- solid: execution entered `machine_init()` but did not return from
+  `early_init_devtree()`;
+- off: flat-device-tree initialization returned; failure is in
+  `early_init_mmu()` or later;
+- heartbeat: Linux reached normal device probing and timer progress.
