@@ -7355,3 +7355,56 @@ modules -j16` builds pass with a stable image checksum,
 at entry `0x10010000` with memory end `0x106334a0`. Deploy only the image over
 the current rootfs diagnostic redirect and disabled GX module. Success requires
 fresh diagnostic files and SSH after the full 60-second window.
+
+The first returned-log result is invalid. The card image was exact
+`2403d04e...`, but `early-dmesg.txt` identified Linux build
+`Sun Aug 9 14:50:09 CDT 2026` with the older long modular-test command line.
+The MEM1-FDT kernel's unchanged `vmlinux` identifies build
+`Sun Aug 9 15:33:00 CDT 2026`, and its DTS contains the short command line
+above. The returned log was the accepted modular control log extended through
+uptime 2190 seconds and a second diagnostic-script invocation. It cannot prove
+that the MEM1-FDT image entered Linux. Do not record this run as either a pass
+or a failure.
+
+## 2026-08-10: Stage self-identifying MEM1 FDT rerun
+
+- Test branch: `test/wii-mem2-fdt-in-mem1`
+- Test commit: `c9959c278`
+- Parent implementation commit: `343a6c5ff`
+- `zImage` SHA-256:
+  `cbf1468bac728de636931e147ca39b97259e7dd75df14bfbcde9da8f9524fafe`
+- Unchanged `vmlinux` SHA-256:
+  `e2a30e3f9ba58d656f910878735434d8e5cb7ac3f6951ecb08b0d579cf0fbe8f`
+- Required command-line marker: `wii_test=mem1_fdt_343a6c5ff`
+
+Change only the embedded test identity. Preserve the MEM1 FDT handoff, short
+diagnostic command line, legacy framebuffer, rootfs init redirect, and
+GX/DRM module blacklist. The image remains a MEM2 wrapper at entry
+`0x10010000`; the kernel payload and its 15:33 build identity are unchanged.
+
+The returned-card verdict is mechanical: at least one diagnostic hash must
+change from its pre-deployment value, and fresh `early-dmesg.txt` must contain
+both the 15:33 kernel identity and
+`wii_test=mem1_fdt_343a6c5ff`. Otherwise the test did not prove entry into
+this kernel.
+
+## Hardware-cycle harness
+
+Use `tools/wii-hw-cycle.sh` for subsequent card tests:
+
+```sh
+tools/wii-hw-cycle.sh stage TEST_ID
+# Boot the Wii, wait for the diagnostic cycle, then return the card.
+tools/wii-hw-cycle.sh collect TEST_ID
+```
+
+`stage` validates a matching `wii_test=TEST_ID` DTS marker, rejects
+uncommitted tracked source, builds `zImage` with `make -j16`, archives the
+image and build identity, snapshots all four old diagnostic hashes, mounts the
+SD partitions by label, copies with normal-user permissions, syncs, and
+checksum-verifies the on-card image. `collect` copies only changed logs and
+requires the exact test marker in fresh early dmesg. The harness therefore
+needs neither root access nor deletion of root-owned logs. Artifacts and
+manifests live under
+`~/.local/state/wii-linux-ngx/hw-tests/`; `status` reports the current card
+and latest run.
