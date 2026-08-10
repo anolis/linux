@@ -110,6 +110,7 @@
 #include <asm/setup.h>
 #include <asm/sections.h>
 #include <asm/cacheflush.h>
+#include <asm/early_ioremap.h>
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/initcall.h>
@@ -150,6 +151,25 @@ static char *static_command_line;
 static char *extra_command_line;
 /* Extra init arguments */
 static char *extra_init_args;
+
+#ifdef CONFIG_WII
+#define WII_GPIO_OUT_PHYS	0x0d8000c0
+#define WII_GPIO_SLOT_LED	BIT(5)
+
+static void __init wii_start_kernel_led_set(void)
+{
+	void __iomem *gpio;
+
+	gpio = early_ioremap(WII_GPIO_OUT_PHYS, sizeof(u32));
+	if (!gpio)
+		return;
+
+	setbits32(gpio, WII_GPIO_SLOT_LED);
+	early_iounmap(gpio, sizeof(u32));
+}
+#else
+static inline void wii_start_kernel_led_set(void) { }
+#endif
 
 #ifdef CONFIG_BOOT_CONFIG
 /* Is bootconfig on command line? */
@@ -911,6 +931,7 @@ void start_kernel(void)
 	char *command_line;
 	char *after_dashes;
 
+	wii_start_kernel_led_set();
 	set_task_stack_end_magic(&init_task);
 	smp_setup_processor_id();
 	debug_objects_early_init();
