@@ -41,7 +41,7 @@
 	};
 
 	chosen {
-		bootargs = "root=/dev/mmcblk0p2 rootwait rw init=/init-diag.sh console=tty0 module_blacklist=gcn_drm,gcn_gx wii_test=mem1_fdt_343a6c5ff";
+		bootargs = "root=/dev/mmcblk0p2 rootwait rw init=/init-diag.sh console=tty0 module_blacklist=gcn_drm,gcn_gx wii_test=mem1_fdt_led_hb_c995";
 	};
 
 	memory {
@@ -259,6 +259,7 @@
 		drive-slot {
 			label = "wii:blue:drive_slot";
 			gpios = <&GPIO 5 GPIO_ACTIVE_HIGH>;
+			linux,default-trigger = "heartbeat";
 			panic-indicator;
 		};
 	};
