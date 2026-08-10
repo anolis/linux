@@ -7446,3 +7446,46 @@ Interpret the physical result narrowly:
 
 This test changes no graphics code. If there is no heartbeat, instrument
 earlier wrapper/kernel boundaries rather than adding userspace diagnostics.
+
+Hardware result: no heartbeat and no PID 1 evidence. The screen remained on
+the normal static transition frame and the blue drive-slot LED remained solid.
+The harness found all four returned diagnostic hashes unchanged from their
+pre-deployment values.
+
+Do not interpret the solid LED as proof that `gpio-leds` probed. Failed images
+predating the heartbeat property also left this LED solid, so Mini or another
+loader stage can carry that state into Linux. Kernel source confirms that a
+panic would transfer a `panic-indicator` LED to the panic trigger and toggle
+it from the panic loop; a permanently solid light is not the expected panic
+signature. The valid conclusion is only that the heartbeat never became
+operational before the failure.
+
+## 2026-08-10: Stage wrapper-clear versus kernel-heartbeat control
+
+- Test branch: `test/wii-mem2-fdt-in-mem1`
+- Test commit: `c672611f5`
+- Parent heartbeat control: `c103b492f`
+- `zImage` SHA-256:
+  `ba4f17848ae1ee94da4ed8d22b9ef28d063e97a94d770a0065892de72af18f75`
+- Unchanged `vmlinux` SHA-256:
+  `e2a30e3f9ba58d656f910878735434d8e5cb7ac3f6951ecb08b0d579cf0fbe8f`
+- Required command-line marker: `wii_test=mem1_fdt_led_zero_c103`
+
+Remove the inherited loader state as a confound. In the wrapper kentry hook,
+after the finalized FDT is copied and flushed to MEM1 and immediately before
+entering the unchanged Linux payload, clear `GP_SLOTLED` (bit 5) in the PPC
+GPIO output register at `0x0d8000c0`. BootMii Mini defines this exact register
+and bit as `HW_GPIO1BOUT` and `GP_SLOTLED`; the slot LED is PPC-owned.
+Disassembly confirms the wrapper performs the big-endian read/modify/write
+between `flush_cache` and the kernel indirect branch.
+
+Keep Linux's heartbeat default trigger. Interpret the physical sequence:
+
+- LED turns off and stays off: wrapper kentry ran, but Linux never activated a
+  working `gpio-leds` heartbeat;
+- LED turns off, then double-pulses: Linux device probing and timer progress
+  are alive;
+- LED turns off, then returns solid: Linux activated the LED path, followed by
+  timer/interrupt loss before the first or a subsequent heartbeat transition;
+- LED never turns off: failure precedes this wrapper kentry hook or the GPIO
+  write itself is ineffective.
