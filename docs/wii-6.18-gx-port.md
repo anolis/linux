@@ -7329,3 +7329,29 @@ non-overlapping MEM1 buffer, flushes it, and enters the unchanged kernel with
 the MEM1 address. Retain the already-rejected short embedded diagnostic
 command line. A boot validates the initial-BAT/FDT diagnosis; another failure
 requires LED stage markers around finalize, copy, and kernel entry.
+
+## 2026-08-10: Stage MEM1 FDT handoff control
+
+- Isolated branch: `test/wii-mem2-fdt-in-mem1`
+- Test commit: `343a6c5ff`
+- `zImage` SHA-256:
+  `2403d04e1a202abb7ce171402fac8cd848cdb91c7c0f6afaf9da7e2bcf07a594`
+- Unchanged `vmlinux` SHA-256:
+  `e2a30e3f9ba58d656f910878735434d8e5cb7ac3f6951ecb08b0d579cf0fbe8f`
+- Unchanged, intentionally unloaded `gcn-gx.ko` SHA-256:
+  `88474048238caad1e992ca961969f6d42b07fece9fa5438937deac94720dffe1`
+
+Add only a Wii `platform_ops.kentry` hook to the previously rejected short
+diagnostic MEM2 image. Validate the packed FDT size, copy it from the MEM2 heap
+to `0x01480000`, flush the copied bytes, and enter the unchanged kernel with
+that MEM1 address. The 512 KiB target ends immediately before the OHCI pool at
+`0x01500000`; the kernel ends at `0x01288708`, and the old GX texture reserve
+ends at `0x01380000`. Static disassembly confirms the hook passes `0x01480000`
+in `r3` and calls the unchanged kernel entry.
+
+Two successive `ARCH=powerpc CROSS_COMPILE=powerpc-linux-gnu- make zImage
+modules -j16` builds pass with a stable image checksum,
+`git diff --check` passes, the FDT is 5,505 bytes, and the final wrapper remains
+at entry `0x10010000` with memory end `0x106334a0`. Deploy only the image over
+the current rootfs diagnostic redirect and disabled GX module. Success requires
+fresh diagnostic files and SSH after the full 60-second window.
