@@ -122,6 +122,7 @@ notrace void __init machine_init(u64 dt_ptr)
 	wii_machine_init_led_set(true);
 
 	setup_kdump_trampoline();
+	wii_machine_init_led_set(false);
 }
 
 /* Checks "l2cr=xxxx" command-line option */
