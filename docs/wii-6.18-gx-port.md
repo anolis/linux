@@ -7565,3 +7565,33 @@ Interpret the result:
 - off: flat-device-tree initialization returned; failure is in
   `early_init_mmu()` or later;
 - heartbeat: Linux reached normal device probing and timer progress.
+
+Hardware result: the LED changed from solid on to off and remained off. All
+four diagnostic hashes remained unchanged. This proves that
+`early_init_devtree()` returned successfully using the FDT copied from MEM2
+to MEM1. The failure is in `early_init_mmu()` or later, before normal
+`gpio-leds` heartbeat activation and PID 1.
+
+## 2026-08-10: Stage early_init_mmu return marker
+
+- Test branch: `test/wii-mem2-fdt-in-mem1`
+- Test commit: `bf13fa482`
+- Parent FDT-return marker: `5117e6864`
+- `zImage` SHA-256:
+  `7de29795e57cb5f9afac792515256d897e27e70382e3c4159c1be7f662640f19`
+- Instrumented `vmlinux` SHA-256:
+  `9e618aaff96f4fb9fda61fac1e12125c97c8787ff3a9cb3f8f5bb4db9e9b2cdb`
+- Required command-line marker: `wii_test=mmu_return_led_5117`
+
+Keep the wrapper clear, machine-entry assertion, and post-FDT clear. Reassert
+the LED immediately after `early_init_mmu()` returns and before
+`setup_kdump_trampoline()`. Disassembly verifies that the early-MMU call is
+followed by the GPIO map, bit-5 assertion, and unmap.
+
+Interpret the result:
+
+- off: `early_init_devtree()` returned, but execution did not pass the
+  post-`early_init_mmu()` marker;
+- solid: early MMU initialization returned; the failure is in the transition
+  to or execution of `start_kernel()` and later setup;
+- heartbeat: Linux reached normal device probing and timer progress.
