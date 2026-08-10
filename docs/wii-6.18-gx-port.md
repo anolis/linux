@@ -7408,3 +7408,41 @@ needs neither root access nor deletion of root-owned logs. Artifacts and
 manifests live under
 `~/.local/state/wii-linux-ngx/hw-tests/`; `status` reports the current card
 and latest run.
+
+Hardware result for the self-identifying MEM1-FDT rerun: reject before
+diagnostic PID 1. The harness verified the deployed card image as
+`cbf1468bac728de636931e147ca39b97259e7dd75df14bfbcde9da8f9524fafe`
+and recorded all four pre-boot hashes. On return, `dmesg.txt`,
+`early-dmesg.txt`, `wpa-debug.txt`, and `sshd-debug.txt` were all
+byte-identical to those pre-boot files. There is therefore no log from this
+kernel and no evidence that it entered `/init-diag.sh`. This result is
+distinct from the retracted prior run because the unchanged hashes were
+captured automatically before deployment.
+
+## 2026-08-10: Stage kernel drive-slot heartbeat
+
+- Test branch: `test/wii-mem2-fdt-in-mem1`
+- Test commit: `c103b492f`
+- Parent marked control: `c9959c278`
+- `zImage` SHA-256:
+  `28952d83321831e625b8d046271f9380b41d72ca3034371cdcd50027ee3346d5`
+- Unchanged `vmlinux` SHA-256:
+  `e2a30e3f9ba58d656f910878735434d8e5cb7ac3f6951ecb08b0d579cf0fbe8f`
+- Required command-line marker: `wii_test=mem1_fdt_led_hb_c995`
+
+Set `linux,default-trigger = "heartbeat"` on the existing
+`wii:blue:drive_slot` GPIO LED. `CONFIG_LEDS_GPIO=y` and
+`CONFIG_LEDS_TRIGGER_HEARTBEAT=y` are built into this kernel, so the
+scheduler-driven double pulse starts when `gpio-leds` probes and does not
+depend on PID 1, SSH, graphics, direct MMIO, or SD-card writes. Preserve the
+existing `panic-indicator` property.
+
+Interpret the physical result narrowly:
+
+- no heartbeat: failure occurs before the LED class device probes;
+- heartbeat: Linux reached device probing and its scheduler remains alive;
+- panic override/solid illumination: inspect panic output before inferring a
+  normal heartbeat state.
+
+This test changes no graphics code. If there is no heartbeat, instrument
+earlier wrapper/kernel boundaries rather than adding userspace diagnostics.
