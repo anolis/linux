@@ -7221,3 +7221,20 @@ not alter `/etc/modules` or graphics source. Success is a stable legacy console
 through normal boot. If this fresh base fails while historical image
 `2bb4d246...` succeeds under the same disabled-module rootfs, investigate
 build reproducibility and generated payload differences.
+
+Hardware result: reject the fresh unmodified-base rebuild. The on-card image
+matched `82320b32b7d6b8e4531aab8ef52f51fa048726e2c31ded7cad90216759dd37a5`,
+Gumboot remained unchanged, and the installed `gcn-gx.ko` was renamed out of
+its module path before boot. The normally transient static frame remained for
+the full observation window and no legacy console appeared. The returned card
+still contained the exact image and the module remained disabled.
+
+This is not a graphics result. Although the source and wrapper boundaries
+match `c37e03e16`, this rebuild's `vmlinux` hash (`e2a30e3f...`) differs from
+the historical accepted build (`655ccd65...`). The two `zImage` files have the
+same 6,498,360-byte size but first differ inside the compressed payload. Run a
+direct binary control next: deploy preserved historical image
+`2bb4d24654ba734151bcfb5af8e3e1ae11b50759cee6f8a5bf2be6efa1ad7be6`
+without restoring the disabled module or changing the root filesystem. A pass
+would establish a build-reproducibility or payload-content problem; a failure
+would invalidate the earlier acceptance under current boot-media conditions.
