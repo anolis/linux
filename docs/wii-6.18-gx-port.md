@@ -7595,3 +7595,37 @@ Interpret the result:
 - solid: early MMU initialization returned; the failure is in the transition
   to or execution of `start_kernel()` and later setup;
 - heartbeat: Linux reached normal device probing and timer progress.
+
+Hardware result: the LED changed back to solid on and remained on. All four
+diagnostic hashes remained unchanged, and the required marker did not appear
+in a fresh log. This proves that `early_init_mmu()` returned successfully.
+Because `CONFIG_CRASH_DUMP` is disabled, the following
+`setup_kdump_trampoline()` call compiles to an empty inline function. The next
+test therefore clears the LED at the end of `machine_init()` to distinguish a
+successful return from failure in the subsequent assembly-to-`start_kernel()`
+transition.
+
+## 2026-08-10: Stage machine_init return marker
+
+- Test branch: `test/wii-mem2-fdt-in-mem1`
+- Test commit: `7a4b64124`
+- Parent MMU-return marker: `bf13fa482`
+- `zImage` SHA-256:
+  `939556cad7f8c1a5b83b04c4f756035d7e641512dd2df1a315231df4bad0c065`
+- Instrumented `vmlinux` SHA-256:
+  `482a7cc9052e0130b865d1c06cac9737c3b687061130d91a24dabdfb9537f4f7`
+- Required command-line marker: `wii_test=machine_return_led_bf13`
+
+Keep every preceding marker, then clear the slot LED at the end of
+`machine_init()`. `CONFIG_CRASH_DUMP` is disabled, so
+`setup_kdump_trampoline()` emits no call or instructions in this build.
+Disassembly verifies that the final GPIO clear is immediately followed by the
+`machine_init()` epilogue and `blr`.
+
+Interpret the result:
+
+- solid: execution returned from `early_init_mmu()` but did not reach the
+  final `machine_init()` marker;
+- off: `machine_init()` completed and reached its return path; the failure is
+  later in the entry assembly or `start_kernel()` path;
+- heartbeat: Linux reached normal device probing and timer progress.
