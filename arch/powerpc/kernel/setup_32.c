@@ -63,7 +63,7 @@ EXPORT_SYMBOL(smp_hw_index);
 #define WII_GPIO_OUT_PHYS	0x0d8000c0
 #define WII_GPIO_SLOT_LED	BIT(5)
 
-static void __init wii_machine_init_led_set(bool on)
+void __init wii_machine_init_led_set(bool on)
 {
 	void __iomem *gpio;
 

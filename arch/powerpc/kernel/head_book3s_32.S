@@ -971,6 +971,10 @@ END_MMU_FTR_SECTION_IFCLR(MMU_FTR_HPTE_TABLE)
 	li	r3,0
 	mr	r4,r31
 	bl	machine_init
+#ifdef CONFIG_WII
+	li	r3,1
+	bl	wii_machine_init_led_set
+#endif
 	bl	__save_cpu_setup
 	bl	MMU_init
 	bl	MMU_init_hw_patch
