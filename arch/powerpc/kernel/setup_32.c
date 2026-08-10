@@ -63,7 +63,7 @@ EXPORT_SYMBOL(smp_hw_index);
 #define WII_GPIO_OUT_PHYS	0x0d8000c0
 #define WII_GPIO_SLOT_LED	BIT(5)
 
-static void __init wii_machine_init_led_on(void)
+static void __init wii_machine_init_led_set(bool on)
 {
 	void __iomem *gpio;
 
@@ -71,11 +71,14 @@ static void __init wii_machine_init_led_on(void)
 	if (!gpio)
 		return;
 
-	setbits32(gpio, WII_GPIO_SLOT_LED);
+	if (on)
+		setbits32(gpio, WII_GPIO_SLOT_LED);
+	else
+		clrbits32(gpio, WII_GPIO_SLOT_LED);
 	early_iounmap(gpio, sizeof(u32));
 }
 #else
-static inline void wii_machine_init_led_on(void) { }
+static inline void wii_machine_init_led_set(bool on) { }
 #endif
 
 unsigned int DMA_MODE_READ;
@@ -101,7 +104,7 @@ notrace void __init machine_init(u64 dt_ptr)
 	setup_feature_keys();
 
 	early_ioremap_init();
-	wii_machine_init_led_on();
+	wii_machine_init_led_set(true);
 
 	/* Enable early debugging if any specified (see udbg.h) */
 	udbg_early_init();
@@ -113,6 +116,7 @@ notrace void __init machine_init(u64 dt_ptr)
 
 	/* Do some early initialization based on the flat device tree */
 	early_init_devtree(__va(dt_ptr));
+	wii_machine_init_led_set(false);
 
 	early_init_mmu();
 
