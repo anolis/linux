@@ -7663,3 +7663,34 @@ Interpret the result:
 - solid: the final MMU-on `rfi` reached virtual `start_kernel()` and early
   MMIO worked, but normal device-level heartbeat and PID 1 were not reached;
 - heartbeat: Linux reached normal device probing and timer progress.
+
+Hardware result: the LED remained off. All four diagnostic hashes remained
+unchanged, and the required marker did not appear in a fresh log. The kernel
+therefore did not reach the first C-level operation in `start_kernel()`.
+The failure lies after the final marker in `machine_init()` and before virtual
+`start_kernel()` entry, across the intervening Book3S assembly and MMU setup.
+
+## 2026-08-10: Stage post-machine_init assembly marker
+
+- Test branch: `test/wii-mem2-fdt-in-mem1`
+- Test commit: `1674539e2`
+- Parent start-kernel marker: `c4fc75a02`
+- `zImage` SHA-256:
+  `0c3ad561d6880d88a302282ac8a8c572b4c134baeb6b53f4550f70a205cabf43`
+- Instrumented `vmlinux` SHA-256:
+  `087d5c3ce8940662e22b47472ef70a1933265e3e5eeab3b77fb446982dfa36f5`
+- Required command-line marker: `wii_test=machine_bl_return_led_c4fc`
+
+Retain the final `machine_init()` clear. Expose its already validated early
+GPIO helper and call it from `start_here` immediately after `bl machine_init`,
+before `bl __save_cpu_setup`. Disassembly verifies this exact ordering and
+then shows `MMU_init`, `MMU_init_hw_patch`, the MMU-off `rfi`, `load_up_mmu`,
+and the final MMU-on `rfi` to `start_kernel()`.
+
+Interpret the result:
+
+- off: execution reached the final marker inside `machine_init()` but did not
+  successfully return to and run the next Book3S assembly marker;
+- solid: control returned to `start_here`; the failure is in
+  `__save_cpu_setup` or the subsequent MMU transition;
+- heartbeat: Linux reached normal device probing and timer progress.
