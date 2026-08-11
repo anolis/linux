@@ -2089,8 +2089,10 @@ static int gx_submit_generated(const void *vfb, u32 xfb_phys,
 	}
 
 	fifo_pos = 0;
-	if (!live_frame)
+	if (!live_frame) {
 		gx_load_libogc_init_preamble();
+		gx_setup_display_copy_state();
+	}
 	gx_setup_rgb565_texture_state(width, height);
 	gx_setup_texture_rgb565(tex_buf, width, height);
 	if (gx_use_direct_texcoord) {
