@@ -1,0 +1,79 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/gpu/nintendo,flipper-gx.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Nintendo Flipper and Hollywood GX graphics processor
+
+maintainers:
+  - Bill Carson <anolisporcatus@gmail.com>
+
+description: |
+  GX is the fixed-function graphics processor in the Nintendo GameCube
+  Flipper and Wii Hollywood chipsets.  Its command processor and pixel engine
+  have separate register windows.  Command and texture storage must reside in
+  the console's MEM1 memory, while FIFO pointer registers are shared with the
+  processor interface interrupt controller.
+
+properties:
+  $nodename:
+    pattern: '^gpu@[a-f0-9]+$'
+
+  compatible:
+    oneOf:
+      - items:
+          - const: nintendo,hollywood-gx
+          - const: nintendo,flipper-gx
+      - const: nintendo,flipper-gx
+
+  reg:
+    minItems: 2
+    maxItems: 2
+
+  reg-names:
+    items:
+      - const: cp
+      - const: pe
+
+  interrupts:
+    maxItems: 1
+    description: Pixel-engine token and finish interrupt.
+
+  memory-region:
+    minItems: 2
+    maxItems: 2
+
+  memory-region-names:
+    items:
+      - const: fifo
+      - const: texture
+
+  nintendo,processor-interface:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description:
+      Processor-interface syscon containing the shared GX FIFO pointers.
+
+required:
+  - compatible
+  - reg
+  - reg-names
+  - interrupts
+  - memory-region
+  - memory-region-names
+  - nintendo,processor-interface
+
+additionalProperties: false
+
+examples:
+  - |
+    gpu@c000000 {
+        compatible = "nintendo,hollywood-gx", "nintendo,flipper-gx";
+        reg = <0x0c000000 0x80>, <0x0c001000 0x10>;
+        reg-names = "cp", "pe";
+        interrupts = <10>;
+        memory-region = <&gx_fifo>, <&gx_texture>;
+        memory-region-names = "fifo", "texture";
+        nintendo,processor-interface = <&pi>;
+    };
+...

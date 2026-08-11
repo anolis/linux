@@ -1834,6 +1834,7 @@ config FB_GAMECUBE
 config FB_GAMECUBE_GX
 	tristate "Nintendo GameCube/Wii GX acceleration"
 	depends on FB_GAMECUBE && WII
+	select MFD_SYSCON
 	default m
 	help
 	  Build the optional GX accelerator for the Nintendo GameCube/Wii VI

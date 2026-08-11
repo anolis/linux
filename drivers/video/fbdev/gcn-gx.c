@@ -33,10 +33,10 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/io.h>
+#include <linux/ioport.h>
 #include <linux/slab.h>
 #include <linux/delay.h>
 #include <linux/interrupt.h>
-#include <linux/irqdomain.h>
 #include <linux/ktime.h>
 #include <linux/math64.h>
 #include <linux/mutex.h>
@@ -46,6 +46,11 @@
 #include <linux/debugfs.h>
 #include <linux/fs.h>
 #include <linux/vmalloc.h>
+#include <linux/mfd/syscon.h>
+#include <linux/of_address.h>
+#include <linux/of_reserved_mem.h>
+#include <linux/platform_device.h>
+#include <linux/regmap.h>
 #include <asm/cacheflush.h>
 #include <asm/div64.h>
 #include <asm/page.h>
@@ -58,10 +63,11 @@
 #include <linux/gcn_drm_accel.h>
 #endif
 
-static void __iomem *hw_base;		/* 0x0C000000, size GX_HW_MAP_SIZE */
-static u16 __iomem *cp_regs;		/* hw_base + 0x0000 */
-static u16 __iomem *pe_regs;		/* hw_base + 0x1000 */
-static u32 __iomem *pi_regs;		/* hw_base + 0x3000 (PI, 32-bit) */
+static u16 __iomem *cp_regs;
+static u16 __iomem *pe_regs;
+static struct regmap *pi_regmap;
+static phys_addr_t gx_fifo_phys;
+static phys_addr_t gx_tex_phys;
 
 /* Byte offset of the next GX command byte within gx_fifo_buf.
  * GX commands are written here directly; gx_submit_cmds() advances
@@ -70,7 +76,6 @@ static u32 __iomem *pi_regs;		/* hw_base + 0x3000 (PI, 32-bit) */
 static u32 fifo_pos;
 
 /* FIFO buffer — must be in memory the GPU can DMA, 32-byte aligned */
-#define GX_FIFO_MEM1_PHYS	0x01684000
 static void *gx_fifo_buf_raw;
 static void *gx_fifo_buf;
 
@@ -80,11 +85,11 @@ static void *gx_tex_buf;
 static void *gx_tex_buf_alt;
 static u16 gx_expected_token;
 static unsigned int gx_pe_finish_irq;
+static bool gx_pe_finish_irq_requested;
 static u32 gx_pe_finish_count;
 static DECLARE_WAIT_QUEUE_HEAD(gx_pe_finish_wait);
 static DEFINE_MUTEX(gx_submit_lock);
 
-#define GX_PE_FINISH_HWIRQ	10
 #define GX_DRM_FRAME_PE_FINISHES	2
 
 enum gx_finish_diag_phase {
@@ -287,12 +292,15 @@ static inline u16 cp_read(int reg)
 
 static inline void pi_write(int reg, u32 val)
 {
-	iowrite32be(val, pi_regs + reg);
+	regmap_write(pi_regmap, reg * sizeof(u32), val);
 }
 
 static inline u32 pi_read(int reg)
 {
-	return ioread32be(pi_regs + reg);
+	unsigned int val = 0;
+
+	regmap_read(pi_regmap, reg * sizeof(u32), &val);
+	return val;
 }
 
 /*
@@ -2621,10 +2629,66 @@ static const struct gcn_drm_accel_ops gcn_gx_drm_accel_ops = {
 /* Module lifecycle                                                     */
 /* ------------------------------------------------------------------ */
 
-static int gcn_gx_init(void)
+#define GX_MEM_ALIGNMENT	32
+
+static bool gx_resources_overlap(const struct resource *a,
+				 const struct resource *b)
 {
+	return a->start <= b->end && b->start <= a->end;
+}
+
+static int gx_get_reserved_region(struct platform_device *pdev,
+				  const char *name, size_t min_size,
+				  struct resource *res)
+{
+	struct device_node *memory;
+	struct device_node *region;
+	struct resource mem1;
+	int index;
 	int ret;
-	u32 fifo_phys;
+
+	index = of_property_match_string(pdev->dev.of_node,
+					 "memory-region-names", name);
+	if (index < 0)
+		return index;
+
+	region = of_parse_phandle(pdev->dev.of_node, "memory-region", index);
+	if (!region)
+		return -ENODEV;
+	if (of_property_read_bool(region, "no-map")) {
+		of_node_put(region);
+		return -EINVAL;
+	}
+	of_node_put(region);
+
+	ret = of_reserved_mem_region_to_resource_byname(pdev->dev.of_node,
+							 name, res);
+	if (ret)
+		return ret;
+	if (resource_size(res) < min_size ||
+	    !IS_ALIGNED(res->start, GX_MEM_ALIGNMENT) ||
+	    !IS_ALIGNED(resource_size(res), GX_MEM_ALIGNMENT))
+		return -EINVAL;
+
+	memory = of_find_node_by_type(NULL, "memory");
+	if (!memory)
+		return -ENODEV;
+	ret = of_address_to_resource(memory, 0, &mem1);
+	of_node_put(memory);
+	if (ret)
+		return ret;
+	if (!resource_contains(&mem1, res))
+		return -ERANGE;
+
+	return 0;
+}
+
+static int gcn_gx_init(struct platform_device *pdev)
+{
+	struct resource fifo_mem;
+	struct resource texture_mem;
+	int irq;
+	int ret;
 
 	if (!strcmp(gx_renderer, "generated")) {
 		gx_use_reference = false;
@@ -2711,54 +2775,71 @@ static int gcn_gx_init(void)
 		return -EINVAL;
 	}
 
+	cp_regs = (u16 __iomem *)devm_platform_ioremap_resource_byname(pdev,
+								 "cp");
+	if (IS_ERR(cp_regs))
+		return PTR_ERR(cp_regs);
+	pe_regs = (u16 __iomem *)devm_platform_ioremap_resource_byname(pdev,
+								 "pe");
+	if (IS_ERR(pe_regs))
+		return PTR_ERR(pe_regs);
+
+	pi_regmap = syscon_regmap_lookup_by_phandle(pdev->dev.of_node,
+						    "nintendo,processor-interface");
+	if (IS_ERR(pi_regmap))
+		return PTR_ERR(pi_regmap);
+
+	ret = gx_get_reserved_region(pdev, "fifo", GX_FIFO_SIZE, &fifo_mem);
+	if (ret)
+		return dev_err_probe(&pdev->dev, ret,
+				     "invalid FIFO memory region\n");
+	ret = gx_get_reserved_region(pdev, "texture",
+				     2 * GX_TEX_BUF_SLOT_SIZE, &texture_mem);
+	if (ret)
+		return dev_err_probe(&pdev->dev, ret,
+				     "invalid texture memory region\n");
+	if (gx_resources_overlap(&fifo_mem, &texture_mem))
+		return dev_err_probe(&pdev->dev, -EINVAL,
+				     "FIFO and texture memory overlap\n");
+
+	irq = platform_get_irq(pdev, 0);
+	if (irq < 0)
+		return irq;
+	gx_pe_finish_irq = irq;
+
 	/*
 	 * Mini leaves PI_FIFO_WPTR=0x00000000.  VI hardware generates wgPipe
 	 * bursts during retrace; those bursts DMA to PI_FIFO_WPTR.  With
 	 * WPTR=0 they overwrite the exception vectors at physical 0.
 	 *
-	 * Order: alloc → ioremap → set WPTR → THEN any printk.
-	 * A single printk can trigger a VI retrace via console output.
+	 * Order: resolve resources -> set WPTR -> THEN any successful-probe
+	 * printk.  A single printk can trigger a VI retrace via console output.
 	 */
 	gx_fifo_buf_raw = NULL;
-	gx_fifo_buf = (void *)__va(GX_FIFO_MEM1_PHYS);
+	gx_fifo_phys = fifo_mem.start;
+	gx_fifo_buf = (void *)__va(gx_fifo_phys);
 	memset(gx_fifo_buf, 0, GX_FIFO_SIZE);
-	fifo_phys = (u32)virt_to_phys(gx_fifo_buf);
 	flush_dcache_range((unsigned long)gx_fifo_buf,
 			   (unsigned long)gx_fifo_buf + GX_FIFO_SIZE);
-
-	hw_base = ioremap(GX_HW_BASE, GX_HW_MAP_SIZE);
-	if (!hw_base) {
-		ret = -ENOMEM;
-		goto err_fifo;
-	}
-	cp_regs = (u16 __iomem *)(hw_base + GX_CP_OFFSET);
-	pe_regs = (u16 __iomem *)(hw_base + GX_PE_OFFSET);
-	pi_regs = (u32 __iomem *)(hw_base + 0x3000);
 
 	/* Clear stale PE events before the finish IRQ line is unmasked. */
 	pe_write(PE_REG_INTR_STATUS, PE_TOKEN_BIT | PE_FINISH_BIT);
 
 	/* Redirect wgPipe DMA bursts to our zeroed buffer (was addr 0 in mini) */
-	iowrite32be(fifo_phys, pi_regs + PI_REG_FIFO_WPTR);
+	pi_write(PI_REG_FIFO_WPTR, gx_fifo_phys);
 
 	ret = gx_fifo_init();
 	if (ret)
 		goto err_hw;
 
-	gx_pe_finish_irq = irq_create_mapping(NULL, GX_PE_FINISH_HWIRQ);
-	if (!gx_pe_finish_irq) {
-		ret = -ENXIO;
-		pr_err("gcn-gx: failed to map PE finish hwirq %u\n",
-		       GX_PE_FINISH_HWIRQ);
-		goto err_hw;
-	}
 	ret = request_irq(gx_pe_finish_irq, gx_pe_finish_handler, 0,
 			  "gcn-gx-pe-finish", &gx_pe_finish_irq);
 	if (ret) {
 		pr_err("gcn-gx: failed to request PE finish IRQ %u: %d\n",
 		       gx_pe_finish_irq, ret);
-		goto err_irq_mapping;
+		goto err_hw;
 	}
+	gx_pe_finish_irq_requested = true;
 	pe_write(PE_REG_INTR_STATUS,
 		 PE_TOKEN_ENABLE | PE_FINISH_ENABLE |
 		 PE_TOKEN_BIT | PE_FINISH_BIT);
@@ -2770,8 +2851,9 @@ static int gcn_gx_init(void)
 	 * coalesced into one logical range.  Use the DTS-reserved region.
 	 */
 	gx_tex_raw = NULL;
-	gx_tex_buf = (void *)__va(GX_TEX_BUF_MEM1_PHYS);
-	gx_tex_buf_alt = (void *)__va(GX_TEX_BUF_ALT_MEM1_PHYS);
+	gx_tex_phys = texture_mem.start;
+	gx_tex_buf = (void *)__va(gx_tex_phys);
+	gx_tex_buf_alt = (void *)__va(gx_tex_phys + GX_TEX_BUF_SLOT_SIZE);
 	memset(gx_tex_buf, 0, GX_TEX_BUF_SIZE);
 	memset(gx_tex_buf_alt, 0, GX_TEX_BUF_SIZE);
 #if IS_ENABLED(CONFIG_FB_GAMECUBE_GX)
@@ -2840,7 +2922,8 @@ static int gcn_gx_init(void)
 	}
 
 	pr_info("gcn-gx: ready fifo=%08x tex=%08x/%08x irq=%u renderer=%s bias8=%d debug_capture=%u offscreen_probe=%u\n",
-		fifo_phys, GX_TEX_BUF_MEM1_PHYS, GX_TEX_BUF_ALT_MEM1_PHYS,
+		(u32)gx_fifo_phys, (u32)gx_tex_phys,
+		(u32)(gx_tex_phys + GX_TEX_BUF_SLOT_SIZE),
 		gx_pe_finish_irq, gx_renderer, gx_texel_bias_eighths,
 		gx_debug_capture, gx_offscreen_probe);
 	gx_accel_ready = true;
@@ -2853,22 +2936,17 @@ err_vfb_snapshot:
 	vfree(gx_xfb_snapshot);
 	gx_xfb_snapshot = NULL;
 err_snapshot:
-	free_irq(gx_pe_finish_irq, &gx_pe_finish_irq);
-	irq_dispose_mapping(gx_pe_finish_irq);
+err_hw:
+	cp_write(CP_REG_CTRL, 0);
+	if (gx_pe_finish_irq_requested) {
+		free_irq(gx_pe_finish_irq, &gx_pe_finish_irq);
+		gx_pe_finish_irq_requested = false;
+	}
 	gx_pe_finish_irq = 0;
-	goto err_hw;
-
-err_irq_mapping:
-	irq_dispose_mapping(gx_pe_finish_irq);
-	gx_pe_finish_irq = 0;
-
-err_fifo:
 	gx_fifo_buf_raw = NULL;
 	gx_fifo_buf = NULL;
-
-err_hw:
-	iounmap(hw_base);
-	hw_base = NULL;
+	gx_tex_buf = NULL;
+	gx_tex_buf_alt = NULL;
 	return ret;
 }
 
@@ -2890,23 +2968,22 @@ static void gcn_gx_exit(void)
 	gx_xfb_snapshot = NULL;
 	gx_wait_idle();
 	cp_write(CP_REG_CTRL, 0);
-	if (gx_pe_finish_irq) {
+	if (gx_pe_finish_irq_requested) {
 		pe_write(PE_REG_INTR_STATUS, PE_TOKEN_BIT | PE_FINISH_BIT);
 		free_irq(gx_pe_finish_irq, &gx_pe_finish_irq);
-		irq_dispose_mapping(gx_pe_finish_irq);
+		gx_pe_finish_irq_requested = false;
 		gx_pe_finish_irq = 0;
 	}
 
-	/* gx_tex_raw is NULL (tex_buf is a MEM1 reserve, not kmalloc'd) */
-	kfree(gx_tex_raw);
-	if (gx_fifo_buf_raw)
-		kfree(gx_fifo_buf_raw);
+	/* Texture and FIFO buffers are platform-owned MEM1 reservations. */
+	gx_tex_raw = NULL;
+	gx_tex_buf = NULL;
+	gx_tex_buf_alt = NULL;
 	gx_fifo_buf_raw = NULL;
 	gx_fifo_buf = NULL;
-	if (hw_base) {
-		iounmap(hw_base);
-		hw_base = NULL;
-	}
+	cp_regs = NULL;
+	pe_regs = NULL;
+	pi_regmap = NULL;
 }
 
 #if IS_ENABLED(CONFIG_FB_GAMECUBE_GX)
@@ -2918,11 +2995,11 @@ static const struct gcnfb_accel_ops gcn_gx_accel_ops = {
 };
 #endif
 
-static int __init gcn_gx_module_init(void)
+static int gcn_gx_probe(struct platform_device *pdev)
 {
 	int ret;
 
-	ret = gcn_gx_init();
+	ret = gcn_gx_init(pdev);
 	if (ret)
 		return ret;
 
@@ -2940,7 +3017,7 @@ static int __init gcn_gx_module_init(void)
 	return 0;
 }
 
-static void __exit gcn_gx_module_exit(void)
+static void gcn_gx_remove(struct platform_device *pdev)
 {
 	/*
 	 * Stop queued rendering before removing the callback table.  A callback
@@ -2958,8 +3035,21 @@ static void __exit gcn_gx_module_exit(void)
 	gcn_gx_exit();
 }
 
-module_init(gcn_gx_module_init);
-module_exit(gcn_gx_module_exit);
+static const struct of_device_id gcn_gx_of_match[] = {
+	{ .compatible = "nintendo,flipper-gx" },
+	{ }
+};
+MODULE_DEVICE_TABLE(of, gcn_gx_of_match);
+
+static struct platform_driver gcn_gx_driver = {
+	.probe = gcn_gx_probe,
+	.remove = gcn_gx_remove,
+	.driver = {
+		.name = "gcn-gx",
+		.of_match_table = gcn_gx_of_match,
+	},
+};
+module_platform_driver(gcn_gx_driver);
 
 MODULE_DESCRIPTION("Nintendo GameCube/Wii GX framebuffer accelerator");
 MODULE_AUTHOR("Bill Carson <anolisporcatus@gmail.com> and OpenAI");
