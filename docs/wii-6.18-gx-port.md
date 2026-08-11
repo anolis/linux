@@ -7807,3 +7807,33 @@ Interpret the result:
   progress callback;
 - solid: execution entered `MMU_init_hw()` but did not return from it;
 - heartbeat: Linux reached normal device probing and timer progress.
+
+Hardware result: the LED changed to solid on and remained on. All four
+diagnostic hashes remained unchanged, and the required marker did not appear
+in a fresh log. This proves early `MMU_init()` memory accounting completed and
+execution entered `MMU_init_hw()`, but that function did not return.
+
+## 2026-08-10: Stage hash-table allocation return marker
+
+- Test branch: `test/wii-mem2-fdt-in-mem1`
+- Test commit: `b8ac835a0`
+- Parent MMU-hardware-entry marker: `14e4b06d2`
+- `zImage` SHA-256:
+  `27b608123e835d9435adfb86bcb875de171bb6e24c31f88355ef650ca0080d85`
+- Instrumented `vmlinux` SHA-256:
+  `f9b10678e02a98d0ef99efa2fe442da076e7992640a70eb68f1bb9a826ca4704`
+- Required command-line marker: `wii_test=hash_alloc_return_led_14e4`
+
+Enter `MMU_init_hw()` with the LED solid, then clear it immediately after
+`memblock_alloc_or_panic()` returns from allocating and zeroing the aligned
+hash table. Keep the outer post-`MMU_init_hw` state clear as well, preventing
+a later marker from masking the result. Disassembly verifies that the internal
+clear precedes `_SDR1` calculation and `_printk`.
+
+Interpret the result:
+
+- solid: `MMU_init_hw()` entered but hash-table allocation or zeroing did not
+  return;
+- off: hash-table allocation returned; failure is in later `MMU_init_hw()`
+  state setup or beyond;
+- heartbeat: Linux reached normal device probing and timer progress.
