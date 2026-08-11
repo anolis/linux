@@ -8,7 +8,9 @@
  */
 
 #include <stddef.h>
+#include <libfdt.h>
 #include "stdio.h"
+#include "string.h"
 #include "types.h"
 #include "io.h"
 #include "ops.h"
@@ -24,6 +26,10 @@ BSS_STACK(8192);
 
 #define MEM2_TOP		(0x10000000 + 64*1024*1024)
 #define FIRMWARE_DEFAULT_SIZE	(12*1024*1024)
+
+/* Linux's initial BAT cannot reach MEM2; use the free pre-OHCI MEM1 gap. */
+#define WII_FDT_MEM1_ADDR	0x01480000
+#define WII_FDT_MEM1_SIZE	0x00080000
 
 
 struct mipc_infohdr {
@@ -132,6 +138,21 @@ out:
 	return;
 }
 
+static void wii_kernel_entry(unsigned long fdt_addr, void *vmlinux_addr)
+{
+	void *fdt_mem1 = (void *)WII_FDT_MEM1_ADDR;
+	int fdt_size = fdt_totalsize((void *)fdt_addr);
+
+	if (fdt_size <= 0 || fdt_size > WII_FDT_MEM1_SIZE)
+		fatal("Wii device tree exceeds MEM1 handoff buffer "
+		      "(size=%d, max=%u)\n", fdt_size, WII_FDT_MEM1_SIZE);
+
+	memcpy(fdt_mem1, (void *)fdt_addr, fdt_size);
+	flush_cache(fdt_mem1, fdt_size);
+
+	((kernel_entry_t)vmlinux_addr)((unsigned long)fdt_mem1, 0, NULL);
+}
+
 void platform_init(unsigned long r3, unsigned long r4, unsigned long r5)
 {
 	u32 heap_top = 24 * 1024 * 1024;
@@ -161,4 +182,5 @@ void platform_init(unsigned long r3, unsigned long r4, unsigned long r5)
 		console_ops.write = ug_console_write;
 
 	platform_ops.fixups = platform_fixups;
+	platform_ops.kentry = wii_kernel_entry;
 }
