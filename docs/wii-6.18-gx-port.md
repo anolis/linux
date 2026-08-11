@@ -8422,3 +8422,38 @@ optional regulatory database, and unrelated init fallback. Candidate
 `9a5848232` now provides the required synchronous completion contract: DRM
 does not publish an inactive XFB until the final EFB-to-XFB copy marker has
 completed.
+
+### Stage EFB-to-RGB565-texture round-trip probe
+
+- Test branch: `test/wii-gx-efb-texture-copy`
+- Candidate commit: `c6c288c78`
+- Unchanged running `zImage` SHA-256:
+  `3718f607e3d6e2aaae726fb7eb110b130f4e48ae7fd5022a720f0c2ca0b1d5cc`
+- Candidate `gcn-gx.ko` SHA-256:
+  `1c410f7371c456bdaa281f173be2c31fa707092e297e92d4310bb4d4494fc80f`
+
+Probe the remaining Wii-only prerequisite for a future render interface:
+offscreen EFB-to-texture copy followed by texture replay. This is isolated
+behind the read-only `offscreen_probe=1` module parameter; default DRM GX
+scanout is unchanged.
+
+On the first provider callback, fill the alternate reserved MEM1 texture slot
+with a sentinel, render the established direct-colour grid into EFB, copy EFB
+to the slot as tiled RGB565, and clear EFB to purple. Wait for both the raster
+and texture-copy PE finishes, invalidate the CPU cache, and require all 153600
+32-bit destination words at 640x480 to differ from the sentinel. Then bind the
+copied texture, replay it through the accepted texture renderer, copy it to the
+inactive XFB, and clear EFB to teal. The explicit clears prevent the original
+direct draw from creating a visual false positive.
+
+Load the checksum-pinned module with `offscreen_probe=1` and run the exact
+XRGB8888 page-flip fixture. Require `offscreen_copies=1`,
+`offscreen_changed_words=153600`, increasing `offscreen_replays`, and the exact
+counter invariant `pe_finishes = 2 * (offscreen_copies +
+offscreen_replays)`. Visually require the reconstructed grid with red
+top-left, green top-right, blue bottom-left, white bottom-right, and crisp
+black 32-pixel grid lines. Purple or teal output is a replay failure. Finally,
+unload the module and require immediate clean CPU-console fallback.
+
+Normal and `W=1` PowerPC module builds, strict checkpatch, module-parameter
+inspection, and `git diff --check` pass before deployment.
