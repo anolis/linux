@@ -36,6 +36,7 @@
 #include <asm/btext.h>
 #include <asm/tlb.h>
 #include <asm/sections.h>
+#include <asm/setup.h>
 #include <asm/hugetlb.h>
 #include <asm/kup.h>
 #include <asm/kasan.h>
@@ -106,6 +107,9 @@ void __init MMU_init(void)
 	if (ppc_md.progress)
 		ppc_md.progress("MMU:hw init", 0x300);
 	MMU_init_hw();
+#ifdef CONFIG_WII
+	wii_machine_init_led_set(true);
+#endif
 
 	/* Map in all of RAM starting at KERNELBASE */
 	if (ppc_md.progress)
