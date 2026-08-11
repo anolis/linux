@@ -7751,3 +7751,32 @@ Interpret the result:
 - solid: `MMU_init` returned successfully; the failure is in
   `MMU_init_hw_patch` or the subsequent MMU transition;
 - heartbeat: Linux reached normal device probing and timer progress.
+
+Hardware result: the LED remained off. All four diagnostic hashes remained
+unchanged, and the required marker did not appear in a fresh log. This proves
+that `MMU_init()` did not return. The failure is now localized inside that
+function, which performs memory accounting, hash/MMU hardware setup,
+MEM1/MEM2 linear mapping, and final MMU feature setup.
+
+## 2026-08-10: Stage MMU_init_hw return marker
+
+- Test branch: `test/wii-mem2-fdt-in-mem1`
+- Test commit: `4727b64f3`
+- Parent MMU-return marker: `69ae02d71`
+- `zImage` SHA-256:
+  `8ef44f4dc1581859e01d3c6c182f83d82fa676b76921fef69e5b017334c5632b`
+- Instrumented `vmlinux` SHA-256:
+  `892d657e56d6650beddc127f8e498fc6596952d119c1be3c1efd146cf8c77b24`
+- Required command-line marker: `wii_test=mmu_hw_return_led_69ae`
+
+Assert the slot LED inside `MMU_init()` immediately after `MMU_init_hw()` and
+before `mapin_ram()`. Disassembly verifies the call-marker-call sequence.
+This brackets early memory accounting and hash-table/MMU hardware setup from
+the later MEM1/MEM2 linear mapping.
+
+Interpret the result:
+
+- off: failure occurred before the post-`MMU_init_hw` marker, in early memory
+  accounting or `MMU_init_hw()` itself;
+- solid: `MMU_init_hw()` returned; failure is in `mapin_ram()` or later;
+- heartbeat: Linux reached normal device probing and timer progress.
