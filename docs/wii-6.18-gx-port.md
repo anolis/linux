@@ -8500,3 +8500,53 @@ MEM1 in native tiled RGB565 layout, invalidate and rebind that GPU-produced
 texture, and sample it into a later visible frame with deterministic
 completion fences. A render UAPI can now be designed from a demonstrated
 round trip rather than an assumed copy path.
+
+### Stage GX platform-resource ownership
+
+- Test branch: `test/wii-gx-resource-model`
+- Candidate commit: `58ecee803`
+- Candidate `zImage` SHA-256:
+  `0b6558f289ad809d7a79d18da6c1e98d12685f1f91e1edb9c88e15d79f8a82e7`
+- Candidate `gcn-gx.ko` SHA-256:
+  `815162479537fe0b5f90ee814221f5b9728cb24dcadafbffd8622e58c918f1eb`
+- Embedded `wii.dtb` SHA-256:
+  `94acfda6083844dc3a14f643d2bcb9b1b3e1250c5e7337cc1774869c269d6a6f`
+
+Replace the bring-up driver's anonymous GX reservations, fixed MEM1
+addresses, broad `ioremap(0x0c000000, 0x9000)`, and raw hwirq mapping with a
+named platform-resource contract. The unchanged physical ranges are now
+described as reserved-memory nodes. GX receives separate CP and PE windows,
+the PE finish interrupt, named FIFO and texture regions, and a phandle to the
+shared big-endian PI syscon. VI receives an explicit XFB memory reference.
+
+The module now binds through platform probe/remove. It rejects missing,
+`no-map`, undersized, misaligned, overlapping, or non-MEM1 FIFO and texture
+regions before hardware initialization. FIFO and texture addresses are
+derived from DT; no operational hard-coded GX buffer address remains. PI
+FIFO access uses the shared regmap instead of remapping the full PI block,
+while CP and PE are the only MMIO windows claimed directly by GX. Rendering
+commands, PE fences, provider callbacks, XFB selection, and CPU fallback are
+unchanged.
+
+Host validation passed a full PowerPC `zImage` and modules build with `-j16`,
+Wii DT compilation and decompilation, changed-line checkpatch, `git diff
+--check`, module OF-alias inspection, and embedded-DT string inspection. The
+DT YAML parses successfully. `dt_binding_check` could not run because the
+host lacks `dt-doc-validate`; install `dtschema` before treating schema
+validation as complete.
+
+This test must deploy both checksum-pinned artifacts because the old DT has
+no GX platform node. After cold boot, first verify the named reserved-memory
+regions and `nintendo,hollywood-gx` platform device without loading the
+provider. CPU DRM scanout must remain clear and responsive. Then load the
+matching module and require the discovered addresses to remain FIFO
+`0x01684000` and textures `0x01300000`/`0x013c0000`, with the PE IRQ mapped
+and no resource, regmap, overlap, timeout, or fault message.
+
+Run short RGB565 and XRGB8888 fixtures and require the exact two-PE-finishes
+per generated-frame invariant, completed flips, advancing VI interrupts, and
+crisp output. Repeat the accepted `offscreen_probe=1` round trip and require
+one copy, all 153600 words changed, visible replay, and the same completion
+invariant. Explicitly terminate each holding client, unload the module, and
+confirm immediate clean CPU-console fallback. Do not add the MEM1 allocator
+or any render UAPI until this ownership-only conversion passes.
