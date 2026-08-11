@@ -8303,3 +8303,35 @@ Its fault audit contains only the known recoverable OHCI alignment warning,
 missing optional regulatory database, and unrelated init fallback. No GX/DRM
 timeout, FIFO stall, oops, panic, or machine check appears. Complete the
 required second boot without redeploying before accepting XRGB8888 support.
+
+Second-boot result: passed; accept modular GX XRGB8888 scanout. The Wii
+rebooted without redeployment under a new boot ID and the same build `#4`.
+Both `/tmp` artifacts were restaged and independently matched their pinned
+checksums. With no GX module loaded, the XRGB8888 CPU baseline completed 60
+flips while the VI IRQ advanced from 3235 to 3627.
+
+The module loaded from fresh zero counters and the GX fixture completed 80
+XRGB8888 flips. `xrgb8888_frames` reached 81, total `frames` reached 85,
+`pe_finishes` reached 170, and the VI IRQ advanced from 3627 to 4101. The
+expected XRGB8888 activation message appeared and the user confirmed that the
+complete output matched the CPU baseline.
+
+Unloading the module restored CPU conversion without rebinding DRM. The
+fallback fixture completed 40 flips while the VI IRQ advanced from 4101 to
+4422, with correct output confirmed by the user. Reloading the exact module
+then completed a final 40-flip GX run, reaching 41 XRGB8888 frames, 45 total
+frames, and 90 PE finishes while the VI IRQ advanced from 4423 to 4739. The
+user again classified the output as correct.
+
+The complete 321-line second-boot log is preserved at
+`/tmp/wii-dmesg-drm-gx-xrgb8888-boot2-322475ecd.txt` with SHA-256
+`6ff8684649fc403c80de86bb6c15813f410b260c382c612e082c482b45a77743`.
+Its fault audit contains only the known recoverable OHCI alignment warning,
+missing optional regulatory database, and unrelated init fallback. No GX,
+DRM, FIFO, PE, VI, oops, panic, or machine-check fault appears.
+
+Accept candidate `322475ecd`. The modular provider now accelerates both DRM
+RGB565 and XRGB8888 shadow buffers through the established tiled-RGB565 GX
+renderer while native DRM remains the sole display owner. Both formats retain
+CPU conversion as a safe absent-provider and error fallback, and the module
+can be unloaded and reloaded without interrupting the active DRM console.
