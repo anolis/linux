@@ -7973,3 +7973,56 @@ Its only severe-pattern match is the same nonfatal OHCI coherent-DMA alignment
 warning already observed in the diagnostic boot. The clean integration test
 therefore validates both production fixes without relying on any diagnostic
 kernel instrumentation.
+
+## 2026-08-11: Retry native DRM boot ownership after MEM2 fixes
+
+- Test branch: `test/wii-native-drm-boot-after-mem2-fix`
+- Base integration commit: `b85c5cd90`
+- `zImage` and `dtbImage.wii` SHA-256:
+  `1fe4f3d4f9532f9819d99f4848371169ca289dc2b392aa2881f7d950b0ebbd19`
+- `vmlinux` SHA-256:
+  `a226acdd9ae7c9e7ab080d6168d3538656ed6c872c7f824f4bb864b258ed2608`
+- `vmlinux.unstripped` SHA-256:
+  `cef9bf3cf7f06b74848fb85ac8d772662290fc0bea0d8c7e5ce7f2c4e3993e27`
+- Wii DTB SHA-256:
+  `b7c266c28f6b64da9923d6225506b8c65f55a188d029aea8fbabac25b10cc4b9`
+- Validated rollback `zImage` SHA-256:
+  `cac1dfecea0e9aeaf10d3692a704944c6476a272c27cf219f2cf8b3ce2efe767`
+
+Retry the native DRM boot-owner milestone without changing graphics driver
+source. Build DRM core, KMS helpers, shmem, client setup, fbdev emulation, and
+GCN VI into the kernel. Disable legacy `gcn-vifb` and its GX accelerator, and
+remove both the legacy video argument and `gcn_drm` module blacklist from the
+embedded command line.
+
+This is the first native-owner image containing both production boot fixes:
+the finalized FDT is copied into MEM1 before kernel entry, and Book3S hash
+sizing uses installed memory rather than the MEM1-to-MEM2 physical span. The
+previous native-owner and built-in-DRM tests predated those fixes and therefore
+did not reach a valid graphics verdict.
+
+The complete `-j16 zImage modules` build passes. Static audit confirms
+`gcn_drm_probe`, `drm_client_setup`, and the shmem fbdev probe are linked while
+`gcn_vifb_probe` is absent. The kernel physical end is `0x01288990`, below the
+relocated GX texture boundary at `0x01300000`. The wrapper starts at
+`0x10010000` in MEM2. The final DT retains the texture, FIFO, XFB, OHCI, and
+AVE-phandle state and embeds only the production DRM boot command line.
+
+Cold-boot acceptance procedure:
+
+1. Deploy and independently verify the exact image checksum. Retain the
+   currently validated clean legacy image as rollback and leave the FAT boot
+   partition unmounted before reboot.
+2. Require the display to transition to an updating DRM fbcon with a blinking
+   cursor. Reject a permanently static frame, recurring blur, repeated columns,
+   incorrect colors, or loss of keyboard response.
+3. Over SSH, require built-in `gcn-vi` to own `c002000.video`, `card0` to
+   exist, `/proc/fb` to identify `gcn-vidrmfb`, AVE register `0x62` to read
+   two, and no legacy `gcn-vifb`, `gcn_gx`, or userspace mirror process.
+4. Generate new tty output after SSH arrives and require it to appear on the
+   display, proving native fbdev dirty updates still reach the XFB. Audit the
+   full kernel log for faults separately from the known nonfatal OHCI
+   coherent-DMA alignment warning.
+5. Reboot once without redeploying and repeat the ownership, update, color,
+   input, networking, and fault gates before accepting native DRM as the boot
+   display owner.
