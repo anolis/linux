@@ -8530,10 +8530,11 @@ unchanged.
 
 Host validation passed a full PowerPC `zImage` and modules build with `-j16`,
 Wii DT compilation and decompilation, changed-line checkpatch, `git diff
---check`, module OF-alias inspection, and embedded-DT string inspection. The
-DT YAML parses successfully. `dt_binding_check` could not run because the
-host lacks `dt-doc-validate`; install `dtschema` before treating schema
-validation as complete.
+--check`, module OF-alias inspection, and embedded-DT string inspection. A
+temporary `dtschema` environment then completed both `dt_binding_check` for
+`nintendo,flipper-gx.yaml` and the filtered `dtbs_check` with no error. Only
+the optional `yamllint` style pass was skipped because that package is not
+installed.
 
 This test must deploy both checksum-pinned artifacts because the old DT has
 no GX platform node. After cold boot, first verify the named reserved-memory
