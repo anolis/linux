@@ -7837,3 +7837,33 @@ Interpret the result:
 - off: hash-table allocation returned; failure is in later `MMU_init_hw()`
   state setup or beyond;
 - heartbeat: Linux reached normal device probing and timer progress.
+
+Hardware result: the LED remained solid on. All four diagnostic hashes
+remained unchanged, and the required marker did not appear in a fresh log.
+The combined `memblock_alloc_or_panic()` operation therefore did not return.
+That helper combines physical-range selection with zeroing through the
+returned virtual address, so those operations must be separated next.
+
+## 2026-08-11: Stage raw hash-allocation return marker
+
+- Test branch: `test/wii-mem2-fdt-in-mem1`
+- Test commit: `a80c0e286`
+- Parent combined-allocation marker: `b8ac835a0`
+- `zImage` SHA-256:
+  `7471b68e41c7bf634c79f597b9f62b40852ac1fc99c0d589395f0230ae63cab2`
+- Instrumented `vmlinux` SHA-256:
+  `378cf3e32d5a4d88fa06f54cb3b851b4b568c504670163fe1cca483e0de1b216`
+- Required command-line marker: `wii_test=hash_raw_return_led_b8ac`
+
+Split `memblock_alloc_or_panic()` into the same raw allocation policy, an
+equivalent explicit panic if it returns NULL, and explicit `memset` zeroing.
+Clear the slot LED after the non-NULL check and immediately before `memset`.
+Disassembly verifies the NULL check, clear, and zeroing call in exact order.
+
+Interpret the result:
+
+- solid: raw physical allocation did not return successfully, or returned
+  NULL and entered panic before the clear;
+- off: raw allocation returned a virtual address; failure is in zeroing that
+  address or later `MMU_init_hw()` work;
+- heartbeat: Linux reached normal device probing and timer progress.
