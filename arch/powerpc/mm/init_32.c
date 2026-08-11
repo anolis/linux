@@ -106,6 +106,9 @@ void __init MMU_init(void)
 	/* Initialize the MMU hardware */
 	if (ppc_md.progress)
 		ppc_md.progress("MMU:hw init", 0x300);
+#ifdef CONFIG_WII
+	wii_machine_init_led_set(true);
+#endif
 	MMU_init_hw();
 #ifdef CONFIG_WII
 	wii_machine_init_led_set(true);
