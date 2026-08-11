@@ -8193,3 +8193,31 @@ graphics timeout, FIFO stall, oops, panic, or machine check occurred.
 Complete one reboot without redeploying. Restage only the exact module because
 `/tmp` is cleared at boot, then repeat CPU baseline, load, labeled GX updates,
 counter/IRQ/fault checks, unload fallback, and reload visual validation.
+
+Second-boot result: passed; accept the modular RGB565 GX scanout backend. The
+unchanged kernel again booted as build `#2` with native `gcn-vidrmfb` and no GX
+module loaded. Two CPU baseline updates completed while the VI IRQ advanced
+from 2981 to 3043. The restaged module independently matched
+`f6cb3f01...846c7` before loading.
+
+Three initial GX updates reached 34 frames and 68 PE finishes while the VI IRQ
+advanced to 3250. The user confirmed those labels were clear and identical to
+the CPU baseline. Continuous rendering then reached 426 frames and 852 PE
+finishes. Module removal restored a clear CPU fallback update without changing
+DRM ownership; reloading reached 22 frames and at least 44 PE finishes while
+the VI IRQ advanced from 5712 to 5837. The user confirmed the final reload
+labels were also clear.
+
+The complete 313-line second-boot log is preserved at
+`/tmp/wii-dmesg-drm-gx-copy-state-boot2-d77c4f7f1.txt` with SHA-256
+`41d0fe595018c9b1d0811fd5a3e71afd663b4f925e4e40208ca00d3f08c76c57`.
+Its audit again contains only the known recoverable OHCI alignment warning,
+missing optional regulatory database, and unrelated init fallback. No GX,
+DRM, FIFO, PE, VI, oops, panic, or machine-check fault appears.
+
+Accept commit `d77c4f7f1` on top of the provider implementation in
+`654cb3718`. Native DRM remains the sole display owner; the module accelerates
+RGB565 dirty updates into inactive XFBs and can be loaded or unloaded without
+blanking or rebinding. XRGB8888 intentionally remains on CPU conversion and is
+the next format-integration milestone, not a gap in this accepted RGB565
+result.
