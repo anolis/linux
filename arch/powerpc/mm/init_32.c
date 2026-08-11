@@ -111,7 +111,7 @@ void __init MMU_init(void)
 #endif
 	MMU_init_hw();
 #ifdef CONFIG_WII
-	wii_machine_init_led_set(true);
+	wii_machine_init_led_set(false);
 #endif
 
 	/* Map in all of RAM starting at KERNELBASE */

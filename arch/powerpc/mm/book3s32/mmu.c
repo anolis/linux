@@ -27,6 +27,7 @@
 #include <asm/machdep.h>
 #include <asm/text-patching.h>
 #include <asm/sections.h>
+#include <asm/setup.h>
 
 #include <mm/mmu_decl.h>
 
@@ -378,6 +379,9 @@ void __init MMU_init_hw(void)
 	 */
 	if ( ppc_md.progress ) ppc_md.progress("hash:find piece", 0x322);
 	Hash = memblock_alloc_or_panic(Hash_size, Hash_size);
+#ifdef CONFIG_WII
+	wii_machine_init_led_set(false);
+#endif
 	_SDR1 = __pa(Hash) | SDR1_LOW_BITS;
 
 	pr_info("Total memory = %lldMB; using %ldkB for hash table\n",
