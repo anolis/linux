@@ -170,6 +170,23 @@ module_param_named(debug_capture, gx_debug_capture, bool, 0444);
 MODULE_PARM_DESC(debug_capture,
 		 "Allocate debugfs VFB/XFB capture buffers (default: false)");
 
+static bool gx_offscreen_probe;
+static bool gx_offscreen_texture_ready;
+static u32 gx_offscreen_copies;
+static u32 gx_offscreen_replays;
+static u32 gx_offscreen_changed_words;
+module_param_named(offscreen_probe, gx_offscreen_probe, bool, 0444);
+MODULE_PARM_DESC(offscreen_probe,
+		 "Probe EFB-to-RGB565-texture copy and visible replay");
+module_param_named(offscreen_copies, gx_offscreen_copies, uint, 0444);
+MODULE_PARM_DESC(offscreen_copies, "Completed EFB-to-texture probe copies");
+module_param_named(offscreen_replays, gx_offscreen_replays, uint, 0444);
+MODULE_PARM_DESC(offscreen_replays, "Completed offscreen texture replays");
+module_param_named(offscreen_changed_words, gx_offscreen_changed_words, uint,
+		   0444);
+MODULE_PARM_DESC(offscreen_changed_words,
+		 "Probe destination words changed from the sentinel value");
+
 static char *gx_texture_source = "console";
 module_param_named(texture_source, gx_texture_source, charp, 0444);
 MODULE_PARM_DESC(texture_source, "RGB565 texture source: console, pattern, or probe");
@@ -1521,17 +1538,45 @@ static void gx_copy_efb_to_xfb(u32 xfb_phys, u16 width, u16 height, bool clear)
 	/* BP 0x4b: dest physical address (right-shifted 5) */
 	gx_load_bp_reg((BP_DISP_COPY_ADDR << 24) | ((xfb_phys >> 5) & 0xffffff));
 
-	/* BP 0x52: copy control — gamma 1.0, optional clear, execute */
+	/* BP 0x52: copy control -- gamma 1.0, optional clear, XFB target. */
 	ctrl = (BP_DISP_COPY_CTRL << 24) |
 	       (GX_GM_1_0 << COPY_CTRL_GAMMA_SHIFT) |
 	       (clear ? COPY_CTRL_CLEAR : 0) |
-	       COPY_CTRL_EXECUTE;
+	       COPY_CTRL_TO_XFB;
 	gx_load_bp_reg(ctrl);
 
 	/*
 	 * BP 0x45 = 2: PE draw-done trigger (libogc GX_DrawDone/GX_SetDrawDone).
 	 * Queued behind the copy command and observed through the PE finish IRQ.
 	 */
+	gx_load_bp_reg(0x45000002);
+}
+
+static void gx_copy_efb_to_rgb565_texture(void *dest, u16 width, u16 height,
+					  bool clear)
+{
+	u32 ctrl;
+
+	if (clear) {
+		gx_load_bp_reg(0x4000000F);
+		gx_load_bp_reg(0x41000018);
+	}
+
+	/* GX_SetTexCopySrc(0, 0, width, height). */
+	gx_load_bp_reg((BP_DISP_COPY_TL << 24) | 0);
+	gx_load_bp_reg((BP_DISP_COPY_WH << 24) |
+		       (((u32)(height - 1) & 0x3ff) << 10) |
+		       ((u32)(width - 1) & 0x3ff));
+
+	/* RGB565 uses 4x4 tiles; texture-copy stride is tiles, not bytes. */
+	gx_load_bp_reg((BP_DISP_COPY_DST << 24) | DIV_ROUND_UP(width, 4));
+	gx_load_bp_reg((BP_DISP_COPY_ADDR << 24) |
+		       ((virt_to_phys(dest) >> 5) & 0x00ffffff));
+
+	/* GX_SetTexCopyDst(..., GX_TF_RGB565, false), then GX_CopyTex(). */
+	ctrl = (BP_DISP_COPY_CTRL << 24) | BIT(16) | (4U << 4) |
+	       (clear ? COPY_CTRL_CLEAR : 0);
+	gx_load_bp_reg(ctrl);
 	gx_load_bp_reg(0x45000002);
 }
 
@@ -2381,6 +2426,123 @@ static void gcn_gx_blit_fb_rgb888(const void *vfb, u32 xfb_phys,
 #endif
 
 #if IS_ENABLED(CONFIG_DRM_GCN_GX)
+static long gx_wait_for_pe_finishes(u32 baseline, u32 required)
+{
+	return wait_event_timeout(gx_pe_finish_wait,
+				  (u32)(READ_ONCE(gx_pe_finish_count) - baseline) >=
+				  required,
+				  msecs_to_jiffies(50));
+}
+
+static int gx_drm_offscreen_capture(u16 width, u16 height)
+{
+	const u32 sentinel = 0xa55aa55a;
+	u32 finish_count;
+	u32 changed = 0;
+	u32 *dest = gx_tex_buf_alt;
+	size_t bytes = (size_t)width * height * sizeof(u16);
+	size_t words = bytes / sizeof(*dest);
+	size_t i;
+	long completed;
+	int ret;
+
+	for (i = 0; i < words; i++)
+		dest[i] = sentinel;
+	flush_dcache_range((unsigned long)dest,
+			   (unsigned long)dest + bytes);
+
+	finish_count = READ_ONCE(gx_pe_finish_count);
+	fifo_pos = 0;
+	gx_load_libogc_init_preamble();
+	gx_setup_display_copy_state();
+	gx_setup_vertex_color_state(width, height);
+	gx_draw_direct_grid(width, height);
+	gx_load_bp_reg(0x45000002);
+	for (i = 0; i < 32; i++)
+		gx_wr8(0);
+
+	/* A cleared EFB prevents the direct draw from masquerading as replay. */
+	gx_set_copy_clear_rgb(0x80, 0x00, 0x80);
+	gx_copy_efb_to_rgb565_texture(dest, width, height, true);
+	ret = gx_submit_cmds("offscreen-copy");
+	if (ret)
+		return ret;
+
+	completed = gx_wait_for_pe_finishes(finish_count,
+					    GX_DRM_FRAME_PE_FINISHES);
+	if (!completed) {
+		pr_warn("gcn-gx: offscreen texture copy timed out waiting for final PE finish\n");
+		return -ETIMEDOUT;
+	}
+
+	invalidate_dcache_range((unsigned long)dest,
+				(unsigned long)dest + bytes);
+	for (i = 0; i < words; i++) {
+		if (dest[i] != sentinel)
+			changed++;
+	}
+	WRITE_ONCE(gx_offscreen_changed_words, changed);
+	if (changed != words) {
+		pr_warn("gcn-gx: offscreen texture copy changed %u/%zu words\n",
+			changed, words);
+		return -EIO;
+	}
+
+	WRITE_ONCE(gx_offscreen_copies,
+		   READ_ONCE(gx_offscreen_copies) + 1);
+	WRITE_ONCE(gx_offscreen_texture_ready, true);
+	pr_info("gcn-gx: offscreen RGB565 texture copy complete changed=%u/%zu\n",
+		changed, words);
+	return 0;
+}
+
+static int gx_drm_offscreen_replay(u32 xfb_phys, u16 width, u16 height)
+{
+	u32 finish_count = READ_ONCE(gx_pe_finish_count);
+	long completed;
+	int ret;
+	int i;
+
+	fifo_pos = 0;
+	gx_setup_rgb565_texture_state(width, height);
+	gx_setup_texture_rgb565(gx_tex_buf_alt, width, height);
+	gx_draw_color_quad(width, height, 0xff, 0x00, 0x00);
+	gx_load_bp_reg(0x45000002);
+	for (i = 0; i < 32; i++)
+		gx_wr8(0);
+	gx_set_copy_clear_rgb(0x00, 0x80, 0x80);
+	gx_copy_efb_to_xfb(xfb_phys, width, height, true);
+	ret = gx_submit_cmds("offscreen-replay");
+	if (ret)
+		return ret;
+
+	completed = gx_wait_for_pe_finishes(finish_count,
+					    GX_DRM_FRAME_PE_FINISHES);
+	if (!completed) {
+		pr_warn_ratelimited("gcn-gx: offscreen replay timed out waiting for final PE finish\n");
+		return -ETIMEDOUT;
+	}
+
+	WRITE_ONCE(gx_live_texture_frame,
+		   READ_ONCE(gx_live_texture_frame) + 1);
+	WRITE_ONCE(gx_offscreen_replays,
+		   READ_ONCE(gx_offscreen_replays) + 1);
+	return 0;
+}
+
+static int gx_drm_offscreen_probe(u32 xfb_phys, u16 width, u16 height)
+{
+	int ret;
+
+	if (!READ_ONCE(gx_offscreen_texture_ready)) {
+		ret = gx_drm_offscreen_capture(width, height);
+		if (ret)
+			return ret;
+	}
+
+	return gx_drm_offscreen_replay(xfb_phys, width, height);
+}
+
 static int gcn_gx_drm_blit(const void *src, u32 src_pitch, u32 xfb_phys,
 			   u16 width, u16 height, enum gx_vfb_format format)
 {
@@ -2407,6 +2569,11 @@ static int gcn_gx_drm_blit(const void *src, u32 src_pitch, u32 xfb_phys,
 		return -EOPNOTSUPP;
 
 	mutex_lock(&gx_submit_lock);
+	if (gx_offscreen_probe) {
+		ret = gx_drm_offscreen_probe(xfb_phys, width, height);
+		goto out_unlock;
+	}
+
 	finish_count = READ_ONCE(gx_pe_finish_count);
 	ret = gx_submit_generated(src, xfb_phys, width, height, "drm",
 				  src_pitch, format);
@@ -2415,15 +2582,15 @@ static int gcn_gx_drm_blit(const void *src, u32 src_pitch, u32 xfb_phys,
 		 * Generated frames signal once after rasterization and again after
 		 * the EFB-to-XFB copy.  Do not publish the page at the first marker.
 		 */
-		completed = wait_event_timeout(gx_pe_finish_wait,
-					       (u32)(READ_ONCE(gx_pe_finish_count) -
-					       finish_count) >= GX_DRM_FRAME_PE_FINISHES,
-					       msecs_to_jiffies(50));
+		completed = gx_wait_for_pe_finishes(finish_count,
+						    GX_DRM_FRAME_PE_FINISHES);
 		if (!completed) {
 			pr_warn_ratelimited("gcn-gx: DRM frame timed out waiting for final PE finish\n");
 			ret = -ETIMEDOUT;
 		}
 	}
+
+out_unlock:
 	mutex_unlock(&gx_submit_lock);
 
 	return ret;
@@ -2625,6 +2792,10 @@ static int gcn_gx_init(void)
 	gx_rgb888_flush_total_ns = 0;
 	gx_rgb888_flush_max_ns = 0;
 	gx_rgb888_timing_frames = 0;
+	gx_offscreen_texture_ready = false;
+	gx_offscreen_copies = 0;
+	gx_offscreen_replays = 0;
+	gx_offscreen_changed_words = 0;
 	gx_xfb_snapshot_size = 0;
 	gx_vfb_snapshot_size = 0;
 	gx_xfb_snapshot_width = 0;
@@ -2668,10 +2839,10 @@ static int gcn_gx_init(void)
 				   &gx_xfb_snapshot_phys);
 	}
 
-	pr_info("gcn-gx: ready fifo=%08x tex=%08x/%08x irq=%u renderer=%s bias8=%d debug_capture=%u\n",
+	pr_info("gcn-gx: ready fifo=%08x tex=%08x/%08x irq=%u renderer=%s bias8=%d debug_capture=%u offscreen_probe=%u\n",
 		fifo_phys, GX_TEX_BUF_MEM1_PHYS, GX_TEX_BUF_ALT_MEM1_PHYS,
 		gx_pe_finish_irq, gx_renderer, gx_texel_bias_eighths,
-		gx_debug_capture);
+		gx_debug_capture, gx_offscreen_probe);
 	gx_accel_ready = true;
 	return 0;
 

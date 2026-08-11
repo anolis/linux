@@ -95,7 +95,7 @@
 #define COPY_CTRL_YSCALE	BIT(10)
 #define COPY_CTRL_CLEAR		BIT(11)
 #define COPY_CTRL_FRAME2FIELD	BIT(12)
-#define COPY_CTRL_EXECUTE	BIT(14)	/* triggers the copy */
+#define COPY_CTRL_TO_XFB	BIT(14)	/* select YUYV XFB instead of texture copy */
 
 /* GX_GM_1_0 gamma (no correction) */
 #define GX_GM_1_0		0
