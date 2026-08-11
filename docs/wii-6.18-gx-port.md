@@ -8168,3 +8168,28 @@ without timeout, then compare character edges directly with the visible CPU
 control labels. A clear match supports the missing-state diagnosis; unchanged
 blur rules it out and requires an XFB-level comparison before changing texel
 coordinates.
+
+First-boot result: passed. The checksum-pinned retry rendered three comparison
+labels while reaching 35 frames and 70 PE finishes. The VI IRQ continued to
+advance, no GX timeout/fallback or kernel fault appeared, and the user judged
+the GX text identical to the CPU control text and therefore visually perfect.
+This confirms the missing display-copy initialization caused the first
+candidate's edge blur.
+
+The corrected module then ran continuously to 446 frames and 892 PE finishes.
+It unregistered cleanly, the same DRM console rendered a labeled CPU fallback
+update, and the VI IRQ remained live. Reloading the same module rendered two
+new GX labels, reached 24 frames and 48 PE finishes from fresh module state,
+and again looked perfect to the user. DRM retained `gcn-vidrmfb` ownership
+throughout.
+
+The complete 321-line first-boot log is preserved at
+`/tmp/wii-dmesg-drm-gx-copy-state-boot1-d77c4f7f1.txt` with SHA-256
+`c09b3e3968f980e19dd410eb00eb1d2a11de487776db94717c1a7659911cb091`.
+Its fault audit contains only the known recoverable OHCI alignment warning,
+missing optional regulatory database, and unrelated boot-init fallback. No
+graphics timeout, FIFO stall, oops, panic, or machine check occurred.
+
+Complete one reboot without redeploying. Restage only the exact module because
+`/tmp` is cleared at boot, then repeat CPU baseline, load, labeled GX updates,
+counter/IRQ/fault checks, unload fallback, and reload visual validation.
