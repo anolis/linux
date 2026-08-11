@@ -7867,3 +7867,46 @@ Interpret the result:
 - off: raw allocation returned a virtual address; failure is in zeroing that
   address or later `MMU_init_hw()` work;
 - heartbeat: Linux reached normal device probing and timer progress.
+
+Hardware result: the LED remained solid on. All four diagnostic hashes
+remained unchanged, and the required marker did not appear in a fresh log.
+The raw allocator did not reach the non-NULL return marker. Static layout
+analysis explains the failure: the linked kernel ends at physical
+`0x0127d000`, and the remaining 24 MiB MEM1 space is fragmented by the GX,
+XFB, FIFO, OHCI, and copied-FDT reservations. No free 1 MiB-aligned 1 MiB
+extent remains below the early allocation limit.
+
+The 1 MiB request is itself incorrect for the Wii. Generic `MMU_init()` sets
+`total_memory` to `memblock_end_of_DRAM() - memstart_addr`, which counts the
+232 MiB physical hole between MEM1 and MEM2 and reports a 320 MiB span. The
+Wii has 88 MiB of installed RAM. The Book3S hash sizing formula rounds 320 MiB
+to a 1 MiB hash, while 88 MiB requires a 256 KiB hash.
+
+## 2026-08-11: Stage installed-RAM hash sizing fix
+
+- Test branch: `test/wii-mem2-fdt-in-mem1`
+- Test commit: `b38e89a03`
+- Parent raw-allocation marker: `a80c0e286`
+- `zImage` SHA-256:
+  `dec02e32ffcfc157049bc108207ec80afa83599a6238721abab4512ff601f2ef`
+- Instrumented `vmlinux` SHA-256:
+  `1f661f0af353a66b8cf50487e4fa91b07b109e7ab14b05277d4841db4c8a6131`
+- Required command-line marker: `wii_test=wii_hash_actual_ram_a80c`
+
+On Wii, retain `total_lowmem` as the physical span consumed by the modern
+per-range mapping code, but derive `total_memory` from
+`memblock_phys_mem_size()`. This reports the actual 24 MiB MEM1 plus 64 MiB
+MEM2 rather than including their hole. Restore the standard
+`memblock_alloc_or_panic()` call after the diagnostic split.
+
+Remove the pre-`MMU_init_hw()` assertion and assert the slot LED only after
+that function returns. Disassembly verifies the actual-memory query, standard
+allocator, and post-call-only assertion.
+
+Interpret the result:
+
+- off: correcting hash size was insufficient; `MMU_init_hw()` still did not
+  return;
+- solid: the corrected 256 KiB hash allocation allowed `MMU_init_hw()` to
+  return; failure, if any, is in `mapin_ram()` or later;
+- heartbeat: Linux reached normal device probing and timer progress.
