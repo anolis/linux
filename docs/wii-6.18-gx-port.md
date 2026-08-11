@@ -8369,3 +8369,31 @@ This closes sustained mixed-format scanout and in-flight provider lifecycle as
 hardware risks for the accepted backend. Further Wii-only work should probe
 offscreen EFB-to-texture copy/readback needed by a future render interface,
 not repeat the now-stable scanout path.
+
+### Stage final XFB-copy PE fence
+
+- Test branch: `test/wii-drm-gx-copy-fence`
+- Candidate commit: `9a5848232`
+- Unchanged running `zImage` SHA-256:
+  `3718f607e3d6e2aaae726fb7eb110b130f4e48ae7fd5022a720f0c2ca0b1d5cc`
+- Candidate `gcn-gx.ko` SHA-256:
+  `482f7a2768d77bd8acd8fd04d1daf2bf32f18b7ec1e56c69e4c33965c4248bb4`
+
+Hardware counters show that each generated DRM frame emits two PE-finish
+markers: the explicit draw fence before the display copy and the fence queued
+after EFB-to-XFB copy control. The accepted callback waited only for a counter
+change, so it could return at the draw marker and let DRM publish the page
+before the final copy marker. Stress happened to remain visually clean, but
+that timing is not a valid completion contract.
+
+Wait for a wrap-safe counter delta of two while retaining the existing 50 ms
+timeout and CPU fallback. No GX command, raster state, copy state, DRM page
+selection, or VI ownership changes. Normal and `W=1` module builds, strict
+checkpatch, and `git diff --check` pass.
+
+Live-load the pinned module against the unchanged accepted kernel. Run the
+same deterministic XRGB8888 and RGB565 page-flip fixtures. For each isolated
+run, require `pe_finishes` to equal exactly twice the number of submitted GX
+frames, all requested flips to complete, VI IRQs to advance, output to remain
+crisp, and no final-finish timeout or CPU fallback. Unload and reload once to
+confirm fresh counter behavior before acceptance.
