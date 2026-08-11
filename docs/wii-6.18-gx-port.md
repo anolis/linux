@@ -8397,3 +8397,28 @@ run, require `pe_finishes` to equal exactly twice the number of submitted GX
 frames, all requested flips to complete, VI IRQs to advance, output to remain
 crisp, and no final-finish timeout or CPU fallback. Unload and reload once to
 confirm fresh counter behavior before acceptance.
+
+Hardware result: passed; accept the final XFB-copy fence. The XRGB8888 run
+completed all 300 requested flips while total GX frames advanced by 302,
+XRGB8888 frames advanced by 301, PE finishes advanced by exactly 604, and VI
+IRQs advanced by 346. The following RGB565 run completed all 300 flips while
+total GX frames advanced by 301, PE finishes advanced by exactly 602, and VI
+IRQs advanced by 314. Both formats therefore met the exact two-PE-finishes per
+generated-frame invariant, including their initial modeset submissions. The
+user observed the complete mixed-format test and reported that it ran
+perfectly.
+
+Remove and reload the exact candidate module to reset all provider counters,
+then run another 60-flip XRGB8888 fixture. The fresh instance reached 63 total
+frames, 61 XRGB8888 frames, and exactly 126 PE finishes. All requested flips
+completed and no timeout, fallback, FIFO, DRM, oops, panic, or machine-check
+fault appeared.
+
+The final 388-line kernel log, including the fresh-module result, is preserved
+at `/tmp/wii-dmesg-drm-gx-copy-fence-9a5848232.txt` with SHA-256
+`f455b6f3c69e95c6b45b695acec16bea82e6568a02bc55204c742c2dd6d5c157`.
+Its audit contains only the known recoverable OHCI alignment warning, missing
+optional regulatory database, and unrelated init fallback. Candidate
+`9a5848232` now provides the required synchronous completion contract: DRM
+does not publish an inactive XFB until the final EFB-to-XFB copy marker has
+completed.
