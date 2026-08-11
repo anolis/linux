@@ -27,7 +27,6 @@
 #include <asm/machdep.h>
 #include <asm/text-patching.h>
 #include <asm/sections.h>
-#include <asm/setup.h>
 
 #include <mm/mmu_decl.h>
 
@@ -378,13 +377,7 @@ void __init MMU_init_hw(void)
 	 * Find some memory for the hash table.
 	 */
 	if ( ppc_md.progress ) ppc_md.progress("hash:find piece", 0x322);
-	Hash = memblock_alloc_raw(Hash_size, Hash_size);
-	if (!Hash)
-		panic("MMU_init_hw: Failed to allocate %lu bytes\n", Hash_size);
-#ifdef CONFIG_WII
-	wii_machine_init_led_set(false);
-#endif
-	memset(Hash, 0, Hash_size);
+	Hash = memblock_alloc_or_panic(Hash_size, Hash_size);
 	_SDR1 = __pa(Hash) | SDR1_LOW_BITS;
 
 	pr_info("Total memory = %lldMB; using %ldkB for hash table\n",

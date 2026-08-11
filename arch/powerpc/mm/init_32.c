@@ -84,7 +84,13 @@ void __init MMU_init(void)
 	if (ppc_md.progress)
 		ppc_md.progress("MMU:enter", 0x111);
 
-	total_lowmem = total_memory = memblock_end_of_DRAM() - memstart_addr;
+	total_lowmem = memblock_end_of_DRAM() - memstart_addr;
+#ifdef CONFIG_WII
+	/* Do not count the MEM1-to-MEM2 physical hole as installed RAM. */
+	total_memory = memblock_phys_mem_size();
+#else
+	total_memory = total_lowmem;
+#endif
 	lowmem_end_addr = memstart_addr + total_lowmem;
 
 #ifdef CONFIG_PPC_85xx
@@ -106,12 +112,9 @@ void __init MMU_init(void)
 	/* Initialize the MMU hardware */
 	if (ppc_md.progress)
 		ppc_md.progress("MMU:hw init", 0x300);
-#ifdef CONFIG_WII
-	wii_machine_init_led_set(true);
-#endif
 	MMU_init_hw();
 #ifdef CONFIG_WII
-	wii_machine_init_led_set(false);
+	wii_machine_init_led_set(true);
 #endif
 
 	/* Map in all of RAM starting at KERNELBASE */
