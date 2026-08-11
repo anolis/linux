@@ -8123,3 +8123,26 @@ Hardware acceptance procedure:
 5. Reload the same module and repeat the update and counter checks. A second
    boot without redeployment must repeat the baseline, load, unload, and
    reload lifecycle before this integration is accepted.
+
+First-boot result: kernel ownership, synchronization, and lifecycle pass, but
+visual quality rejects candidate `654cb3718`. The new kernel booted as build
+`#2` with native `gcn-vidrmfb`, built-in `gcn-vi`, no loaded GX module, and no
+legacy framebuffer. Two CPU-rendered tty updates completed while the VI IRQ
+advanced from 3239 to 3301.
+
+The checksum-pinned module loaded and registered without changing DRM
+ownership. Across three labeled updates, `frames` advanced from 2 to 37,
+`pe_finishes` from 3 to 74, and the VI IRQ from 4039 to 4223. No PE timeout,
+fallback error, FIFO stall, or kernel fault appeared. The user reported that
+the text was mostly correct but had visible blur around character edges.
+
+Removing `gcn_gx` cleanly unregistered the provider. Two same-boot CPU control
+updates then rendered while the VI IRQ advanced from 7420 to 7544, and the
+user classified the CPU text as clearer than GX. This controlled comparison
+proves a GX-path quality regression rather than general VI/display blur.
+
+Do not change the nearest sampler or the pixel-exact `-2/8` texel bias first.
+The direct DRM entry omitted `gx_setup_display_copy_state()`, whereas the
+validated legacy diagnostic programmed that EFB-to-XFB copy/filter state
+before the first live frame. Test only that initialization gap next, using the
+same kernel and same-boot CPU control.
