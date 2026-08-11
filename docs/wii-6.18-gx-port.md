@@ -8046,3 +8046,28 @@ Its only severe-pattern match is the existing recoverable OHCI coherent-DMA
 alignment warning. No panic, oops, machine check, graphics timeout, or DRM
 fault appears. Keyboard input is not yet explicitly classified. Complete the
 required no-redeployment reboot before accepting boot ownership.
+
+Second-boot result: accepted without redeployment. The same kernel build and
+production command line again returned on SSH with `gcn-vidrmfb`, `card0`, the
+connected 640x480 composite connector, and built-in `gcn-vi` ownership. The
+driver again programmed NTSC 480i, enabled and verified AVE `0x62=0x02`, and
+registered fbcon. No GCN/DRM module or userspace mirror was present.
+
+The VI IRQ count advanced from 2255 to 2316 during a two-second sample. A new
+second-boot heading, color row, and separately timed dirty-update marker all
+appeared; the user classified the complete display as looking great. The
+physical USB keyboard was not connected to the Wii, so input is explicitly
+unavailable rather than passed or failed in this run.
+
+The complete second-boot dmesg also contains 307 lines and is preserved at
+`/tmp/wii-dmesg-native-drm-boot2-15c880333.txt` with SHA-256
+`d168339fba4c17baf97d1a6c7b6ac671e3785eb5c9f1ffb13fd43ad74025a2fd`.
+Its fault audit again finds only the known recoverable OHCI alignment warning.
+
+Accept native GCN DRM as the Wii boot display owner. Two consecutive boots of
+the checksum-pinned image produced deterministic driver ownership, AVE state,
+live framebuffer updates, correct visuals, advancing vblank interrupts,
+working networking/SSH, and no graphics fault. Keep the prior clean legacy
+image on the FAT partition as an independently checksum-verified rollback.
+Recheck keyboard input when the keyboard is physically available; its absence
+does not qualify the accepted graphics result.
