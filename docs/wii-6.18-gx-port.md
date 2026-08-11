@@ -8146,3 +8146,25 @@ The direct DRM entry omitted `gx_setup_display_copy_state()`, whereas the
 validated legacy diagnostic programmed that EFB-to-XFB copy/filter state
 before the first live frame. Test only that initialization gap next, using the
 same kernel and same-boot CPU control.
+
+### Display-copy initialization retry
+
+- Candidate commit: `d77c4f7f1`
+- Unchanged `zImage` SHA-256:
+  `d2b351254cbb013fa6c12d7b90e8945974bdfcd6863194a21cd21237b2a823e3`
+- Candidate `gcn-gx.ko` SHA-256:
+  `f6cb3f01e089eab52dc58250ab8053b1378444e9c1ce5c9a5770156f622846c7`
+
+On the first generated frame only, append
+`gx_setup_display_copy_state()` immediately after the libogc initialization
+preamble. This restores the validated copy-filter, Y-scale, EFB format, field,
+and destination-alpha state before the DRM provider's first EFB-to-XFB copy.
+No texture sampler, coordinate, primitive, synchronization, DRM, or VI state
+changed.
+
+Load this module from the existing CPU-control state and render the same-size
+GX labels. Require the frame and PE-finish counters plus VI IRQ to advance
+without timeout, then compare character edges directly with the visible CPU
+control labels. A clear match supports the missing-state diagnosis; unchanged
+blur rules it out and requires an XFB-level comparison before changing texel
+coordinates.
