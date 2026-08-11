@@ -8335,3 +8335,37 @@ RGB565 and XRGB8888 shadow buffers through the established tiled-RGB565 GX
 renderer while native DRM remains the sole display owner. Both formats retain
 CPU conversion as a safe absent-provider and error fallback, and the module
 can be unloaded and reloaded without interrupting the active DRM console.
+
+### Post-acceptance mixed-format and live-lifecycle stress
+
+Run two additional checksum-pinned mixed-format sequences on the accepted
+second boot. Each sequence submitted 600 XRGB8888 page flips immediately
+followed by 600 RGB565 page flips at a 16 ms client delay. The first sequence
+advanced total GX frames from 4403 to 5614, XRGB8888 frames from 41 to 642,
+PE finishes from 8806 to 11228, and VI IRQs from 31368 to 32674. The repeat
+advanced total frames from 10776 to 11987, XRGB8888 frames from 642 to 1243,
+PE finishes from 21552 to 23974, and VI IRQs from 64226 to 65533. Both clients
+reported all 1200 requested flips. The user observed the repeat directly and
+classified both formats and the transition as visually crisp and sharp.
+
+Exercise provider synchronization under an active client rather than between
+fixtures. Start one 1200-flip XRGB8888 stream, remove `gcn_gx` after four
+seconds, leave CPU fallback active for four seconds, then reload the exact
+module without stopping page flips. Unregistration and registration both
+completed, the client reported all 1200 flips, and VI IRQs advanced from
+134958 to 136383. The fresh module completed 1030 XRGB8888 frames and 2066 PE
+finishes after reload. The user saw no blank, frozen frame, corruption, or
+transition artifact and classified the complete test as perfect.
+
+The authoritative 369-line post-stress kernel log was snapshotted on the Wii,
+retrieved independently, and preserved at
+`/tmp/wii-dmesg-drm-gx-postaccept-stress-322475ecd.txt` with SHA-256
+`f2959d24ef2e40958adccb88afb4a9a9f712a28506a7ea628370d5d98a6fdf45`.
+Its audit contains only the known recoverable OHCI alignment warning, missing
+optional regulatory database, and unrelated init fallback. No GX, DRM, FIFO,
+PE, VI, oops, panic, or machine-check fault appears.
+
+This closes sustained mixed-format scanout and in-flight provider lifecycle as
+hardware risks for the accepted backend. Further Wii-only work should probe
+offscreen EFB-to-texture copy/readback needed by a future render interface,
+not repeat the now-stable scanout path.
