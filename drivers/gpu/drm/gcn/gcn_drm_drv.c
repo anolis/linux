@@ -131,7 +131,8 @@ struct gcn_drm {
 	unsigned int pending_page;
 	bool flip_pending;
 	bool ave_restore_needed;
-	u64 gx_frames;
+	u64 gx_rgb565_frames;
+	u64 gx_xrgb8888_frames;
 };
 
 static bool program_mode = true;
@@ -152,7 +153,8 @@ int gcn_drm_register_accel(const struct gcn_drm_accel_ops *ops)
 {
 	int ret = 0;
 
-	if (!ops || !ops->name || !ops->blit_rgb565)
+	if (!ops || !ops->name ||
+	    (!ops->blit_rgb565 && !ops->blit_xrgb8888))
 		return -EINVAL;
 
 	mutex_lock(&gcn_drm_accel_lock);
@@ -188,9 +190,24 @@ static int gcn_drm_accel_rgb565(const void *src, u32 src_pitch,
 
 	/* Unregister holds this mutex until every in-flight call returns. */
 	mutex_lock(&gcn_drm_accel_lock);
-	if (gcn_drm_accel)
+	if (gcn_drm_accel && gcn_drm_accel->blit_rgb565)
 		ret = gcn_drm_accel->blit_rgb565(src, src_pitch, xfb_phys,
 						 width, height);
+	mutex_unlock(&gcn_drm_accel_lock);
+
+	return ret;
+}
+
+static int gcn_drm_accel_xrgb8888(const void *src, u32 src_pitch,
+				  u32 xfb_phys, u16 width, u16 height)
+{
+	int ret = -ENODEV;
+
+	/* Unregister holds this mutex until every in-flight call returns. */
+	mutex_lock(&gcn_drm_accel_lock);
+	if (gcn_drm_accel && gcn_drm_accel->blit_xrgb8888)
+		ret = gcn_drm_accel->blit_xrgb8888(src, src_pitch, xfb_phys,
+						   width, height);
 	mutex_unlock(&gcn_drm_accel_lock);
 
 	return ret;
@@ -440,23 +457,41 @@ static int gcn_drm_convert(struct gcn_drm *gcn,
 	if (ret)
 		return ret;
 
-	if (fb->format->format == DRM_FORMAT_RGB565) {
+	switch (fb->format->format) {
+	case DRM_FORMAT_RGB565:
 		ret = gcn_drm_accel_rgb565(shadow->data[0].vaddr,
 					   fb->pitches[0],
 					   gcn->xfb_phys +
 					   page * GCN_DRM_XFB_PAGE_SIZE,
 					   GCN_DRM_WIDTH, GCN_DRM_HEIGHT);
 		if (!ret) {
-			if (!gcn->gx_frames++)
+			if (!gcn->gx_rgb565_frames++)
 				drm_info(&gcn->drm,
-					 "GX scanout accelerator active\n");
+					 "GX RGB565 scanout accelerator active\n");
 			goto out_end_access;
 		}
-		if (ret != -ENODEV)
-			drm_err_ratelimited(&gcn->drm,
-					    "GX scanout failed (%d); using CPU conversion\n",
-					    ret);
+		break;
+	case DRM_FORMAT_XRGB8888:
+		ret = gcn_drm_accel_xrgb8888(shadow->data[0].vaddr,
+					     fb->pitches[0],
+					     gcn->xfb_phys +
+					     page * GCN_DRM_XFB_PAGE_SIZE,
+					     GCN_DRM_WIDTH, GCN_DRM_HEIGHT);
+		if (!ret) {
+			if (!gcn->gx_xrgb8888_frames++)
+				drm_info(&gcn->drm,
+					 "GX XRGB8888 scanout accelerator active\n");
+			goto out_end_access;
+		}
+		break;
+	default:
+		ret = -EINVAL;
+		goto out_end_access;
 	}
+	if (ret != -ENODEV)
+		drm_err_ratelimited(&gcn->drm,
+				    "GX scanout failed (%d); using CPU conversion\n",
+				    ret);
 
 	ret = 0;
 

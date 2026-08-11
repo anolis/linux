@@ -152,6 +152,10 @@ MODULE_PARM_DESC(frames, "Number of submitted live texture frames");
 module_param_named(pe_finishes, gx_pe_finish_count, uint, 0444);
 MODULE_PARM_DESC(pe_finishes, "Number of completed PE finish interrupts");
 
+module_param_named(xrgb8888_frames, gx_rgb888_timing_frames, uint, 0444);
+MODULE_PARM_DESC(xrgb8888_frames,
+		 "Number of submitted XRGB8888 texture frames");
+
 #if IS_ENABLED(CONFIG_FB_GAMECUBE_GX)
 static const struct gcnfb_accel_ops gcn_gx_accel_ops;
 #endif
@@ -2376,15 +2380,23 @@ static void gcn_gx_blit_fb_rgb888(const void *vfb, u32 xfb_phys,
 #endif
 
 #if IS_ENABLED(CONFIG_DRM_GCN_GX)
-static int gcn_gx_drm_blit_rgb565(const void *src, u32 src_pitch,
-				  u32 xfb_phys, u16 width, u16 height)
+static int gcn_gx_drm_blit(const void *src, u32 src_pitch, u32 xfb_phys,
+			   u16 width, u16 height, enum gx_vfb_format format)
 {
+	u32 bytes_per_pixel;
 	u32 finish_count;
 	long completed;
 	int ret;
 
+	if (format == GX_VFB_RGB565)
+		bytes_per_pixel = sizeof(u16);
+	else if (format == GX_VFB_XRGB8888)
+		bytes_per_pixel = sizeof(u32);
+	else
+		return -EINVAL;
+
 	if (!src || !width || !height || (width & 3) || (height & 3) ||
-	    src_pitch < width * sizeof(u16) || (xfb_phys & 0x1f))
+	    src_pitch < width * bytes_per_pixel || (xfb_phys & 0x1f))
 		return -EINVAL;
 	if ((u32)width * height * sizeof(u16) > GX_TEX_BUF_SIZE)
 		return -E2BIG;
@@ -2396,7 +2408,7 @@ static int gcn_gx_drm_blit_rgb565(const void *src, u32 src_pitch,
 	mutex_lock(&gx_submit_lock);
 	finish_count = READ_ONCE(gx_pe_finish_count);
 	ret = gx_submit_generated(src, xfb_phys, width, height, "drm",
-				  src_pitch, GX_VFB_RGB565);
+				  src_pitch, format);
 	if (!ret) {
 		completed = wait_event_timeout(gx_pe_finish_wait,
 					       READ_ONCE(gx_pe_finish_count) != finish_count,
@@ -2411,9 +2423,24 @@ static int gcn_gx_drm_blit_rgb565(const void *src, u32 src_pitch,
 	return ret;
 }
 
+static int gcn_gx_drm_blit_rgb565(const void *src, u32 src_pitch,
+				  u32 xfb_phys, u16 width, u16 height)
+{
+	return gcn_gx_drm_blit(src, src_pitch, xfb_phys, width, height,
+			       GX_VFB_RGB565);
+}
+
+static int gcn_gx_drm_blit_xrgb8888(const void *src, u32 src_pitch,
+				    u32 xfb_phys, u16 width, u16 height)
+{
+	return gcn_gx_drm_blit(src, src_pitch, xfb_phys, width, height,
+			       GX_VFB_XRGB8888);
+}
+
 static const struct gcn_drm_accel_ops gcn_gx_drm_accel_ops = {
 	.name = "gcn-gx",
 	.blit_rgb565 = gcn_gx_drm_blit_rgb565,
+	.blit_xrgb8888 = gcn_gx_drm_blit_xrgb8888,
 };
 #endif
 

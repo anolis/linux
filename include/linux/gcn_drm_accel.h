@@ -8,6 +8,8 @@ struct gcn_drm_accel_ops {
 	const char *name;
 	int (*blit_rgb565)(const void *src, u32 src_pitch, u32 xfb_phys,
 			   u16 width, u16 height);
+	int (*blit_xrgb8888)(const void *src, u32 src_pitch, u32 xfb_phys,
+			     u16 width, u16 height);
 };
 
 int gcn_drm_register_accel(const struct gcn_drm_accel_ops *ops);
