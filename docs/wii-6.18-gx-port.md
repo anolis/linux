@@ -8026,3 +8026,23 @@ Cold-boot acceptance procedure:
 5. Reboot once without redeploying and repeat the ownership, update, color,
    input, networking, and fault gates before accepting native DRM as the boot
    display owner.
+
+First cold-boot result: kernel-side ownership and visual output pass. The Wii
+booted `6.18.40-wii+ #1` with the exact production command line and returned
+on SSH. `/proc/fb` identifies `gcn-vidrmfb`; `card0` and the connected
+640x480 composite connector exist; and `c002000.video` is bound to built-in
+`gcn-vi`. No GCN/DRM module or userspace framebuffer mirror is present.
+
+Probe programmed NTSC 480i, wrote and verified AVE `0x62=0x02`, installed the
+VI IRQ, registered DRM, and switched fbcon at 1.44 seconds. The live VI IRQ
+count continued advancing. Two separately timed `/dev/tty0` writes produced a
+new native-owner heading, labeled color samples, and a second-frame dirty
+update marker. The user classified the colors as correct.
+
+The complete first-boot dmesg contains 307 lines and is preserved at
+`/tmp/wii-dmesg-native-drm-boot1-15c880333.txt` with SHA-256
+`567cf0d06d67767d713ab79a4363c5e83c17d846996faba6d59abd56cb299cb8`.
+Its only severe-pattern match is the existing recoverable OHCI coherent-DMA
+alignment warning. No panic, oops, machine check, graphics timeout, or DRM
+fault appears. Keyboard input is not yet explicitly classified. Complete the
+required no-redeployment reboot before accepting boot ownership.
