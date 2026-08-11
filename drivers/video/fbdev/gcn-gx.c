@@ -85,6 +85,7 @@ static DECLARE_WAIT_QUEUE_HEAD(gx_pe_finish_wait);
 static DEFINE_MUTEX(gx_submit_lock);
 
 #define GX_PE_FINISH_HWIRQ	10
+#define GX_DRM_FRAME_PE_FINISHES	2
 
 enum gx_finish_diag_phase {
 	GX_DIAG_SEED,
@@ -2410,11 +2411,16 @@ static int gcn_gx_drm_blit(const void *src, u32 src_pitch, u32 xfb_phys,
 	ret = gx_submit_generated(src, xfb_phys, width, height, "drm",
 				  src_pitch, format);
 	if (!ret) {
+		/*
+		 * Generated frames signal once after rasterization and again after
+		 * the EFB-to-XFB copy.  Do not publish the page at the first marker.
+		 */
 		completed = wait_event_timeout(gx_pe_finish_wait,
-					       READ_ONCE(gx_pe_finish_count) != finish_count,
+					       (u32)(READ_ONCE(gx_pe_finish_count) -
+					       finish_count) >= GX_DRM_FRAME_PE_FINISHES,
 					       msecs_to_jiffies(50));
 		if (!completed) {
-			pr_warn_ratelimited("gcn-gx: DRM frame timed out waiting for PE finish\n");
+			pr_warn_ratelimited("gcn-gx: DRM frame timed out waiting for final PE finish\n");
 			ret = -ETIMEDOUT;
 		}
 	}
