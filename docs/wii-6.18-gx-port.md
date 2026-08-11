@@ -7723,3 +7723,31 @@ Interpret the result:
 - off: `__save_cpu_setup` returned successfully; the failure is in `MMU_init`
   or the subsequent MMU transition;
 - heartbeat: Linux reached normal device probing and timer progress.
+
+Hardware result: the LED changed to off and remained off. All four diagnostic
+hashes remained unchanged, and the required marker did not appear in a fresh
+log. This proves that `__save_cpu_setup` returned successfully. The unresolved
+path now begins at `MMU_init()`.
+
+## 2026-08-10: Stage MMU_init return marker
+
+- Test branch: `test/wii-mem2-fdt-in-mem1`
+- Test commit: `69ae02d71`
+- Parent CPU-setup marker: `e3739443d`
+- `zImage` SHA-256:
+  `74f7a0ca7406f4fe4f9d99452f959383759b623ca5c975d9388e8655cbfac0b5`
+- Instrumented `vmlinux` SHA-256:
+  `c5ec64efcc513c6c5b6cf14f5c582518e0edb59289d190c432d27ba4b87d84d5`
+- Required command-line marker: `wii_test=mmu_init_return_led_e373`
+
+Keep the post-`__save_cpu_setup` clear, then assert the slot LED immediately
+after `bl MMU_init` and before `bl MMU_init_hw_patch`. Disassembly verifies
+the exact off-call-on-call sequence.
+
+Interpret the result:
+
+- off: `__save_cpu_setup` returned but execution did not pass the marker after
+  `MMU_init`;
+- solid: `MMU_init` returned successfully; the failure is in
+  `MMU_init_hw_patch` or the subsequent MMU transition;
+- heartbeat: Linux reached normal device probing and timer progress.
