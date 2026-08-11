@@ -8221,3 +8221,55 @@ RGB565 dirty updates into inactive XFBs and can be loaded or unloaded without
 blanking or rebinding. XRGB8888 intentionally remains on CPU conversion and is
 the next format-integration milestone, not a gap in this accepted RGB565
 result.
+
+## 2026-08-11: Stage modular GX XRGB8888 scanout
+
+- Test branch: `test/wii-drm-gx-xrgb8888`
+- Candidate commit: `322475ecd`
+- `zImage` and `dtbImage.wii` SHA-256:
+  `3718f607e3d6e2aaae726fb7eb110b130f4e48ae7fd5022a720f0c2ca0b1d5cc`
+- `vmlinux` SHA-256:
+  `a2f93e82b9f41d17513cd0fd090cc389038ab97db6a2f558382fc100ebff6bec`
+- `vmlinux.unstripped` SHA-256:
+  `2a6834b2039329b1bfbfff3bbd3fb926f1f6b49cc92b9a7831e1ec72522d9394`
+- `gcn-gx.ko` SHA-256:
+  `d05708de7d5c1a610564d3203bab249141818a20357484b025fd26de7290d21f`
+
+Extend the optional DRM scanout-provider interface with an XRGB8888 callback.
+The GX module routes it through the existing packed-XRGB8888-to-tiled-RGB565
+conversion, generated texture renderer, synchronous PE-finish wait, and
+inactive-XFB display copy. DRM retains sole ownership of VI programming,
+vblank, and page flips. The accepted CPU XRGB8888-to-YUYV converter remains
+the fallback when the module is absent or a GX callback returns an error.
+
+The provider callbacks remain optional per format, while registration requires
+at least one usable callback. DRM logs the first successful GX frame for each
+format independently. The module exposes read-only `xrgb8888_frames` alongside
+the existing total `frames` and `pe_finishes` counters, providing an immediate
+positive control without relying on visual classification alone.
+
+The complete `ARCH=powerpc CROSS_COMPILE=powerpc-linux-gnu- make zImage
+modules -j16` build passes. Separate `W=1` builds of `gcn-gx.ko` and the
+built-in DRM object pass. Strict diff checkpatch, `git diff --check`, module
+parameter inspection, and undefined-symbol audit also pass. The module retains
+only the intended DRM provider register/unregister dependencies and no legacy
+`gcnfb` dependency.
+
+Hardware acceptance procedure:
+
+1. Deploy and independently verify the exact kernel and module checksums. Keep
+   the accepted modular-RGB565 image as rollback and prevent automatic module
+   loading.
+2. Boot without GX loaded. Run the deterministic `wii-drm-test` XRGB8888
+   fixture and require correct quadrants, grid, checkerboard, moving marker,
+   dirty updates, VI IRQ progress, and no fault using CPU conversion.
+3. Load the pinned module and rerun the exact XRGB8888 fixture. Require
+   `GX XRGB8888 scanout accelerator active`, increasing `frames`,
+   `xrgb8888_frames`, and `pe_finishes`, continued VI IRQ progress, and no
+   timeout or fallback error. Visually compare the complete frame directly
+   with the CPU baseline.
+4. Unload the module and rerun the fixture. Require immediate, clean CPU
+   fallback without blanking, stale output, ownership change, or kernel fault.
+   Reload the same module and repeat the counter and visual checks.
+5. Reboot once without redeploying and repeat the baseline/load/unload/reload
+   lifecycle. Do not accept the XRGB8888 path from a single boot.
