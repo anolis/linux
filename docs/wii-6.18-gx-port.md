@@ -8273,3 +8273,33 @@ Hardware acceptance procedure:
    Reload the same module and repeat the counter and visual checks.
 5. Reboot once without redeploying and repeat the baseline/load/unload/reload
    lifecycle. Do not accept the XRGB8888 path from a single boot.
+
+First-boot result: passed. The checksum-pinned kernel booted as build `#4`
+with native `gcn-vidrmfb`, no loaded GX module, and advancing VI interrupts.
+The unchanged deterministic test client independently matched its established
+SHA-256 `d2aa7acc2fc097fb695d06b318543725c01ed39c5c6b53745a07849229430b50`.
+Its CPU baseline completed 80 XRGB8888 page flips while the VI IRQ advanced
+from 224618 to 225089. The user classified the complete pattern as correct.
+
+The pinned GX module loaded from zero counters and registered without changing
+DRM ownership. The exact XRGB8888 fixture then completed 120 flips.
+`xrgb8888_frames` advanced from 0 to 121, total `frames` reached 125,
+`pe_finishes` reached 250, and the VI IRQ advanced from 225089 to 225727. The
+kernel logged both the expected RGB565 console activation and the first
+`GX XRGB8888 scanout accelerator active` positive control. The user judged the
+GX pattern correct against the same-boot CPU baseline.
+
+Module removal cleanly unregistered the provider. The identical CPU fallback
+fixture completed 60 flips while the VI IRQ advanced from 225727 to 226123.
+Reloading the same module reset its counters and completed another 60-flip
+XRGB8888 run, reaching 61 XRGB8888 frames, 65 total frames, and 130 PE
+finishes while the VI IRQ advanced from 226123 to 226516. The user classified
+the fallback and final reload output as correct.
+
+The complete 377-line first-boot log is preserved at
+`/tmp/wii-dmesg-drm-gx-xrgb8888-boot1-322475ecd.txt` with SHA-256
+`ce4ec29c101f3a4c0aaa182626cf97a1299ef764f099306039ac2e04ad770005`.
+Its fault audit contains only the known recoverable OHCI alignment warning,
+missing optional regulatory database, and unrelated init fallback. No GX/DRM
+timeout, FIFO stall, oops, panic, or machine check appears. Complete the
+required second boot without redeploying before accepting XRGB8888 support.
