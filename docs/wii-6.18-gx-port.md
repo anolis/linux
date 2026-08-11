@@ -8071,3 +8071,55 @@ working networking/SSH, and no graphics fault. Keep the prior clean legacy
 image on the FAT partition as an independently checksum-verified rollback.
 Recheck keyboard input when the keyboard is physically available; its absence
 does not qualify the accepted graphics result.
+
+## 2026-08-11: Stage modular GX acceleration behind native DRM
+
+- Test branch: `test/wii-drm-gx-rgb565`
+- Candidate commit: `654cb3718`
+- `zImage` and `dtbImage.wii` SHA-256:
+  `d2b351254cbb013fa6c12d7b90e8945974bdfcd6863194a21cd21237b2a823e3`
+- `vmlinux` SHA-256:
+  `bfba1fe0332fe7a539293207ca28fde58ab64d3ec80746397a6134f13cc22403`
+- `vmlinux.unstripped` SHA-256:
+  `be1e49b653ab830d329384312d6e55f7b933d1ae9968b84652de8d82fa15ba4e`
+- `gcn-gx.ko` SHA-256:
+  `56d14c28df67393dde8ad303460ddae29d847bbd7584f624e7b8ee9cf83ae421`
+
+Connect the proven GX renderer to native DRM without transferring VI
+ownership. DRM continues to own the Video Interface interrupt, vblank, and
+double-buffered page flips. The optional `gcn-gx` module registers a
+mutex-protected scanout provider, tiles the preferred RGB565 shadow buffer,
+renders it through GX, waits for the PE finish interrupt, and writes the
+inactive physical XFB. Only after successful completion does the existing DRM
+path mark that page pending for the next vblank.
+
+The accepted CPU RGB-to-YUYV converter remains the fallback when the module is
+absent, when registration or rendering fails, and for XRGB8888. Unregistering
+the provider waits for an in-flight call before module text can disappear, so
+module removal must restore CPU conversion without unbinding DRM or changing
+the live console owner. Source pitch is now explicit in GX texture tiling.
+Read-only `frames` and `pe_finishes` module parameters provide independent
+repeat-update observability.
+
+The complete `ARCH=powerpc CROSS_COMPILE=powerpc-linux-gnu- make zImage
+modules -j16` build, a `W=1` module build, strict diff checkpatch, `git diff
+--check`, and module-symbol audit pass. `gcn-gx.ko` references the two intended
+DRM provider symbols and no legacy `gcnfb` symbol.
+
+Hardware acceptance procedure:
+
+1. Deploy and independently verify the exact kernel and module checksums.
+   Retain the accepted native-DRM image as rollback and prevent any stale GX
+   module from loading automatically.
+2. Boot without GX loaded. Require the accepted native DRM console, correct
+   colors, live dirty updates, advancing VI IRQs, SSH, and a clean fault audit.
+3. Load the pinned `gcn-gx.ko`, generate several distinct tty updates, and
+   require `GX scanout accelerator active`, increasing `frames` and
+   `pe_finishes`, continued VI IRQ progress, and no GX timeout or fallback
+   error. Visually require correct colors and complete, stable updates.
+4. Remove `gcn_gx`, generate another distinct tty update, and require the same
+   DRM console to remain live through CPU conversion with no blank, ownership
+   change, or kernel fault.
+5. Reload the same module and repeat the update and counter checks. A second
+   boot without redeployment must repeat the baseline, load, unload, and
+   reload lifecycle before this integration is accepted.
