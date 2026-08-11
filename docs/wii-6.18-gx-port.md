@@ -7878,9 +7878,10 @@ extent remains below the early allocation limit.
 
 The 1 MiB request is itself incorrect for the Wii. Generic `MMU_init()` sets
 `total_memory` to `memblock_end_of_DRAM() - memstart_addr`, which counts the
-232 MiB physical hole between MEM1 and MEM2 and reports a 320 MiB span. The
-Wii has 88 MiB of installed RAM. The Book3S hash sizing formula rounds 320 MiB
-to a 1 MiB hash, while 88 MiB requires a 256 KiB hash.
+physical hole between MEM1 and MEM2 and reports a 320 MiB span. The tested
+mini configuration exposes 80 MiB to Linux: 24 MiB of MEM1 plus 56 MiB of
+MEM2 after mini's reservation. The Book3S hash sizing formula rounds the
+fictitious 320 MiB span to a 1 MiB hash, while 80 MiB requires a 256 KiB hash.
 
 ## 2026-08-11: Stage installed-RAM hash sizing fix
 
@@ -7895,8 +7896,8 @@ to a 1 MiB hash, while 88 MiB requires a 256 KiB hash.
 
 On Wii, retain `total_lowmem` as the physical span consumed by the modern
 per-range mapping code, but derive `total_memory` from
-`memblock_phys_mem_size()`. This reports the actual 24 MiB MEM1 plus 64 MiB
-MEM2 rather than including their hole. Restore the standard
+`memblock_phys_mem_size()`. This reports the actual memory ranges exposed by
+mini rather than including their hole. Restore the standard
 `memblock_alloc_or_panic()` call after the diagnostic split.
 
 Remove the pre-`MMU_init_hw()` assertion and assert the slot LED only after
@@ -7929,3 +7930,30 @@ an alignment exception occurs in `memset()` from
 `dma_alloc_from_dev_coherent()`, after which both OHCI controllers continue
 initializing and USB functions. Track this independently; it did not block
 boot, networking, or SSH and is not part of the MMU hash failure.
+
+## 2026-08-11: Stage clean MEM2 boot integration candidate
+
+- Integration branch: `fix/wii-6.18-mem2-boot`
+- Integration commit: `e0d61d4c4`
+- Validated diagnostic commit: `b38e89a03`
+- Clean `zImage` SHA-256:
+  `cac1dfecea0e9aeaf10d3692a704944c6476a272c27cf219f2cf8b3ce2efe767`
+- Clean `vmlinux` SHA-256:
+  `f870a8fb03e09847a11ab23b658b21a4392903f04acadc8ec8d676d78e404b08`
+- Preserved image:
+  `/tmp/zImage-clean-mem2-boot-cac1dfecea0e.ngx`
+
+Reduce the validated diagnostic branch to its two production changes. Copy
+and flush the finalized FDT into the 512 KiB MEM1 handoff buffer at
+`0x01480000`, then pass that address in `r3` when entering the kernel. On Wii,
+derive `total_memory` from `memblock_phys_mem_size()` while retaining the
+existing physical span in `total_lowmem` for sparse-bank mapping.
+
+The clean source contains no slot-LED instrumentation, `wii_test` boot marker,
+temporary reservation change, or diagnostic initramfs. Its embedded bootargs
+are the normal feature-branch bootargs. Source audit and `git diff --check`
+pass, and a clean `-j16` cross-build produced the checksums above.
+
+Hardware validation is pending. Success requires a normal boot without a test
+marker, followed by SSH verification of the running kernel, 80 MiB memory
+accounting, root filesystem, SD/SDIO, b43 association, and network reachability.
