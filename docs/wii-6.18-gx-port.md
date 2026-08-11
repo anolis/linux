@@ -8457,3 +8457,46 @@ unload the module and require immediate clean CPU-console fallback.
 
 Normal and `W=1` PowerPC module builds, strict checkpatch, module-parameter
 inspection, and `git diff --check` pass before deployment.
+
+Hardware result: passed; accept EFB-to-RGB565-texture copy and replay. The
+checksum-pinned module loaded with `offscreen_probe=1` and completed one
+offscreen copy followed by 130 visible replays. All 153600 destination words
+changed from the sentinel. Total PE finishes reached exactly 262, satisfying
+`2 * (1 copy + 130 replays)`, while total visible frames reached 130 and VI
+interrupts continued advancing. The 120-flip XRGB8888 client completed every
+requested flip. No copy, replay, FIFO, completion, DRM, oops, panic, or
+machine-check fault appeared. The user observed a crisp four-quadrant grid,
+confirming that the texture replay reconstructed the original EFB draw after
+the copy operation had cleared EFB to purple.
+
+The first unload check correctly removed the module and unregistered the
+provider, but fbcon did not become visible because the test client still held
+DRM master. This is intentional client behavior: `wii-drm-test` pauses after
+its requested flips so the final frame remains inspectable until it receives a
+signal. After terminating that client, no DRM holder remained, VI interrupts
+advanced from 177622 to 177758, output returned to active `tty1`, and the user
+confirmed that the CPU console was visible. Treat explicit client termination
+as part of future fallback tests; do not attribute a held final frame to GX
+unregistration.
+
+Reload the same candidate without `offscreen_probe` for a default-path
+regression. All 80 requested XRGB8888 flips completed. Offscreen counters
+remained zero, total frames reached 83, XRGB8888 frames reached 81, and PE
+finishes reached exactly 166. VI interrupts reached 180996 with no fault. The
+user classified the normal fixture as correct and crisp. Explicitly terminate
+the holding client, unload the module, and confirm no DRM holder remains; VI
+interrupts then reached 181133 and CPU output resumed.
+
+The independently retrieved 407-line offscreen-test log is preserved at
+`/tmp/wii-dmesg-gx-efb-texture-copy-c6c288c78.txt` with SHA-256
+`379cb1e8871715626d3a998db95c2a94c1c6748d111780f2d2696c966cf0149a`.
+Its fault audit is clean apart from the already documented boot-environment
+warnings. The default regression was audited live before shutdown and also
+contained no GX, DRM, FIFO, completion, oops, panic, or machine-check fault.
+
+Candidate `c6c288c78` establishes the hardware capability needed for future
+offscreen rendering: GX can render into EFB, copy the result into reserved
+MEM1 in native tiled RGB565 layout, invalidate and rebind that GPU-produced
+texture, and sample it into a later visible frame with deterministic
+completion fences. A render UAPI can now be designed from a demonstrated
+round trip rather than an assumed copy path.
