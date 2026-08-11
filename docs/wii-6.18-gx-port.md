@@ -7954,6 +7954,22 @@ temporary reservation change, or diagnostic initramfs. Its embedded bootargs
 are the normal feature-branch bootargs. Source audit and `git diff --check`
 pass, and a clean `-j16` cross-build produced the checksums above.
 
-Hardware validation is pending. Success requires a normal boot without a test
-marker, followed by SSH verification of the running kernel, 80 MiB memory
-accounting, root filesystem, SD/SDIO, b43 association, and network reachability.
+Hardware result: validated. Before reboot, the staged file and active boot
+filename both matched the recorded clean SHA-256. The previous diagnostic
+image was retained as `zImage.ngx.diag-b38e89a03` with its independently
+verified checksum.
+
+The Wii booted `6.18.40-wii+ #1` with the normal production command line and
+no `wii_test` marker. SSH verification found `Memory: 50624K/81920K
+available`, PID 1 running, the ext3 root mounted, both SD controllers
+initialized, the root card enumerated, b43 firmware loaded, `wlan0`
+associated, and OpenSSH reachable at `10.3.10.12`. Two-packet tests to both
+the gateway and host completed without loss.
+
+The complete clean live `dmesg` capture contains 304 lines and is preserved at
+`/tmp/wii-dmesg-clean-mem2-e0d61d4c4.txt` with SHA-256
+`b21b51c572f67485537b9202b97f552e050f66b0647dbcdcdc0fca4e25fddd7a`.
+Its only severe-pattern match is the same nonfatal OHCI coherent-DMA alignment
+warning already observed in the diagnostic boot. The clean integration test
+therefore validates both production fixes without relying on any diagnostic
+kernel instrumentation.
