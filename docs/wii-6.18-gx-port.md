@@ -7694,3 +7694,32 @@ Interpret the result:
 - solid: control returned to `start_here`; the failure is in
   `__save_cpu_setup` or the subsequent MMU transition;
 - heartbeat: Linux reached normal device probing and timer progress.
+
+Hardware result: the LED changed to solid on and remained on. All four
+diagnostic hashes remained unchanged, and the required marker did not appear
+in a fresh log. This proves that `machine_init()` returned to `start_here` and
+the immediately following Book3S assembly marker executed. The failure is in
+`__save_cpu_setup` or the subsequent MMU initialization and transition.
+
+## 2026-08-10: Stage __save_cpu_setup return marker
+
+- Test branch: `test/wii-mem2-fdt-in-mem1`
+- Test commit: `e3739443d`
+- Parent assembly-return marker: `1674539e2`
+- `zImage` SHA-256:
+  `dea360f87324c2e31cfd92f185a7c47aa7862220c6f4f40362cfc2335aac088f`
+- Instrumented `vmlinux` SHA-256:
+  `91ca273d1f7a52081dcf574e5be3a1039654eff407862503684d9ecaad8e5a91`
+- Required command-line marker: `wii_test=save_cpu_return_led_1674`
+
+Keep the post-`machine_init()` assertion, then clear the slot LED immediately
+after `bl __save_cpu_setup` and before `bl MMU_init`. Disassembly verifies the
+exact on-call-off-call sequence.
+
+Interpret the result:
+
+- solid: execution returned from `machine_init()` but did not pass the marker
+  after `__save_cpu_setup`;
+- off: `__save_cpu_setup` returned successfully; the failure is in `MMU_init`
+  or the subsequent MMU transition;
+- heartbeat: Linux reached normal device probing and timer progress.
