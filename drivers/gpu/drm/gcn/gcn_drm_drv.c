@@ -5,10 +5,12 @@
  */
 
 #include <linux/delay.h>
+#include <linux/gcn_drm_accel.h>
 #include <linux/i2c.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
 #include <linux/module.h>
+#include <linux/mutex.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
 
@@ -129,6 +131,7 @@ struct gcn_drm {
 	unsigned int pending_page;
 	bool flip_pending;
 	bool ave_restore_needed;
+	u64 gx_frames;
 };
 
 static bool program_mode = true;
@@ -142,6 +145,56 @@ static const u32 gcn_drm_vi_filter[] = {
 };
 
 static atomic_t gcn_drm_vi_write_sequence = ATOMIC_INIT(0);
+static DEFINE_MUTEX(gcn_drm_accel_lock);
+static const struct gcn_drm_accel_ops *gcn_drm_accel;
+
+int gcn_drm_register_accel(const struct gcn_drm_accel_ops *ops)
+{
+	int ret = 0;
+
+	if (!ops || !ops->name || !ops->blit_rgb565)
+		return -EINVAL;
+
+	mutex_lock(&gcn_drm_accel_lock);
+	if (gcn_drm_accel)
+		ret = -EBUSY;
+	else
+		gcn_drm_accel = ops;
+	mutex_unlock(&gcn_drm_accel_lock);
+
+	if (!ret)
+		pr_info("gcn-drm: registered scanout accelerator %s\n",
+			ops->name);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(gcn_drm_register_accel);
+
+void gcn_drm_unregister_accel(const struct gcn_drm_accel_ops *ops)
+{
+	mutex_lock(&gcn_drm_accel_lock);
+	if (gcn_drm_accel == ops)
+		gcn_drm_accel = NULL;
+	mutex_unlock(&gcn_drm_accel_lock);
+
+	pr_info("gcn-drm: unregistered scanout accelerator %s\n",
+		ops ? ops->name : "unknown");
+}
+EXPORT_SYMBOL_GPL(gcn_drm_unregister_accel);
+
+static int gcn_drm_accel_rgb565(const void *src, u32 src_pitch,
+				u32 xfb_phys, u16 width, u16 height)
+{
+	int ret = -ENODEV;
+
+	/* Unregister holds this mutex until every in-flight call returns. */
+	mutex_lock(&gcn_drm_accel_lock);
+	if (gcn_drm_accel)
+		ret = gcn_drm_accel->blit_rgb565(src, src_pitch, xfb_phys,
+						 width, height);
+	mutex_unlock(&gcn_drm_accel_lock);
+
+	return ret;
+}
 
 static __always_inline void gcn_drm_vi_write16(struct gcn_drm *gcn,
 					       u8 offset, u16 value)
@@ -386,6 +439,26 @@ static int gcn_drm_convert(struct gcn_drm *gcn,
 	ret = drm_gem_fb_begin_cpu_access(fb, DMA_FROM_DEVICE);
 	if (ret)
 		return ret;
+
+	if (fb->format->format == DRM_FORMAT_RGB565) {
+		ret = gcn_drm_accel_rgb565(shadow->data[0].vaddr,
+					   fb->pitches[0],
+					   gcn->xfb_phys +
+					   page * GCN_DRM_XFB_PAGE_SIZE,
+					   GCN_DRM_WIDTH, GCN_DRM_HEIGHT);
+		if (!ret) {
+			if (!gcn->gx_frames++)
+				drm_info(&gcn->drm,
+					 "GX scanout accelerator active\n");
+			goto out_end_access;
+		}
+		if (ret != -ENODEV)
+			drm_err_ratelimited(&gcn->drm,
+					    "GX scanout failed (%d); using CPU conversion\n",
+					    ret);
+	}
+
+	ret = 0;
 
 	for (y = 0; y < GCN_DRM_HEIGHT; y++) {
 		const u8 *src = shadow->data[0].vaddr + y * fb->pitches[0];

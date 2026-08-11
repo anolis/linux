@@ -116,6 +116,7 @@ obj-$(CONFIG_FB_OPENCORES)	  += ocfb.o
 obj-$(CONFIG_FB_SM712)		  += sm712fb.o
 obj-$(CONFIG_FB_GAMECUBE)	  += gcnfb.o
 obj-$(CONFIG_FB_GAMECUBE_GX)	  += gcn-gx.o
+obj-$(CONFIG_DRM_GCN_GX)	  += gcn-gx.o
 
 # Platform or fallback drivers go here
 obj-$(CONFIG_FB_UVESA)            += uvesafb.o

@@ -39,7 +39,9 @@
 #include <linux/irqdomain.h>
 #include <linux/ktime.h>
 #include <linux/math64.h>
+#include <linux/mutex.h>
 #include <linux/string.h>
+#include <linux/wait.h>
 #include <linux/workqueue.h>
 #include <linux/debugfs.h>
 #include <linux/fs.h>
@@ -49,7 +51,12 @@
 #include <asm/page.h>
 
 #include "gcn-gx.h"
+#if IS_ENABLED(CONFIG_FB_GAMECUBE_GX)
 #include "gcnfb-accel.h"
+#endif
+#if IS_ENABLED(CONFIG_DRM_GCN_GX)
+#include <linux/gcn_drm_accel.h>
+#endif
 
 static void __iomem *hw_base;		/* 0x0C000000, size GX_HW_MAP_SIZE */
 static u16 __iomem *cp_regs;		/* hw_base + 0x0000 */
@@ -74,6 +81,8 @@ static void *gx_tex_buf_alt;
 static u16 gx_expected_token;
 static unsigned int gx_pe_finish_irq;
 static u32 gx_pe_finish_count;
+static DECLARE_WAIT_QUEUE_HEAD(gx_pe_finish_wait);
+static DEFINE_MUTEX(gx_submit_lock);
 
 #define GX_PE_FINISH_HWIRQ	10
 
@@ -105,7 +114,9 @@ struct gx_frame_work {
 };
 
 static struct gx_frame_work gx_frame_work;
+#if IS_ENABLED(CONFIG_FB_GAMECUBE_GX)
 static DEFINE_SPINLOCK(gx_frame_work_lock);
+#endif
 static u32 gx_live_texture_frame;
 static u32 gx_frame_ready_xfb;
 static const void *gx_frame_ready_vfb;
@@ -135,7 +146,15 @@ static char *gx_renderer = "generated";
 module_param_named(renderer, gx_renderer, charp, 0444);
 MODULE_PARM_DESC(renderer, "Framebuffer command path: generated, reference, or direct");
 
+module_param_named(frames, gx_live_texture_frame, uint, 0444);
+MODULE_PARM_DESC(frames, "Number of submitted live texture frames");
+
+module_param_named(pe_finishes, gx_pe_finish_count, uint, 0444);
+MODULE_PARM_DESC(pe_finishes, "Number of completed PE finish interrupts");
+
+#if IS_ENABLED(CONFIG_FB_GAMECUBE_GX)
 static const struct gcnfb_accel_ops gcn_gx_accel_ops;
+#endif
 
 static unsigned int gx_hold_frame;
 module_param_named(hold_frame, gx_hold_frame, uint, 0444);
@@ -210,6 +229,7 @@ static irqreturn_t gx_pe_finish_handler(int irq, void *data)
 	pe_write(PE_REG_INTR_STATUS, (status & 0x0003) | PE_FINISH_BIT);
 	count = READ_ONCE(gx_pe_finish_count) + 1;
 	WRITE_ONCE(gx_pe_finish_count, count);
+	wake_up_all(&gx_pe_finish_wait);
 
 	return IRQ_HANDLED;
 }
@@ -551,7 +571,8 @@ static int gx_fifo_init(void)
  * tiled left-to-right then top-to-bottom. Within a block, pixels are
  * row-major (4 pixels × 2 bytes = 8 bytes/row, 4 rows per block).
  */
-static void gx_tile_rgb565(const u16 *src, u16 *dst, u32 width, u32 height)
+static void gx_tile_rgb565(const u16 *src, u16 *dst, u32 width, u32 height,
+			   u32 src_pitch)
 {
 	u32 bw = width >> 2;	/* blocks wide */
 	u32 bh = height >> 2;	/* blocks tall */
@@ -562,7 +583,9 @@ static void gx_tile_rgb565(const u16 *src, u16 *dst, u32 width, u32 height)
 			u16 *tile = dst + (ty * bw + tx) * 16;
 
 			for (row = 0; row < 4; row++) {
-				const u16 *sl = src + (ty * 4 + row) * width + tx * 4;
+				const u16 *sl = (const u16 *)
+					((const u8 *)src +
+					 (ty * 4 + row) * src_pitch) + tx * 4;
 
 				tile[row * 4 + 0] = sl[0];
 				tile[row * 4 + 1] = sl[1];
@@ -653,19 +676,21 @@ static void gx_fill_probe_rgb565(u16 *dst, u32 width, u32 height)
 	}
 }
 
-static void gx_tile_rgb888(const u32 *src, u16 *dst, u32 width, u32 height);
+static void gx_tile_rgb888(const u32 *src, u16 *dst, u32 width, u32 height,
+			   u32 src_pitch);
 
 static void gx_prepare_texture(const void *vfb, u16 *dst, u32 width,
-			       u32 height, enum gx_vfb_format format)
+			       u32 height, u32 src_pitch,
+			       enum gx_vfb_format format)
 {
 	if (gx_use_pattern)
 		gx_fill_reference_rgb565(dst, width, height);
 	else if (gx_use_probe)
 		gx_fill_probe_rgb565(dst, width, height);
 	else if (format == GX_VFB_XRGB8888)
-		gx_tile_rgb888(vfb, dst, width, height);
+		gx_tile_rgb888(vfb, dst, width, height, src_pitch);
 	else
-		gx_tile_rgb565((const u16 *)vfb, dst, width, height);
+		gx_tile_rgb565((const u16 *)vfb, dst, width, height, src_pitch);
 }
 
 static void __maybe_unused gx_invert_rgb565_texture(u16 *buf, u32 width,
@@ -683,7 +708,8 @@ static void __maybe_unused gx_invert_rgb565_texture(u16 *buf, u32 width,
  * Converts to RGB565 during tiling to avoid the complex GX_TF_RGBA8
  * interleaved block layout. Minor quality loss (5-6-5 truncation).
  */
-static void gx_tile_rgb888(const u32 *src, u16 *dst, u32 width, u32 height)
+static void gx_tile_rgb888(const u32 *src, u16 *dst, u32 width, u32 height,
+			   u32 src_pitch)
 {
 	u32 bw = width >> 2;
 	u32 bh = height >> 2;
@@ -694,7 +720,9 @@ static void gx_tile_rgb888(const u32 *src, u16 *dst, u32 width, u32 height)
 			u16 *tile = dst + (ty * bw + tx) * 16;
 
 			for (row = 0; row < 4; row++) {
-				const u32 *sl = src + (ty * 4 + row) * width + tx * 4;
+				const u32 *sl = (const u32 *)
+					((const u8 *)src +
+					 (ty * 4 + row) * src_pitch) + tx * 4;
 				int col;
 
 				for (col = 0; col < 4; col++) {
@@ -1615,7 +1643,7 @@ static void gx_capture_vfb(const void *vfb, u16 width, u16 height)
  * The setup functions write commands into CPU cache; without the flush
  * the GP's DMA bus reads stale zeros from physical RAM.
  */
-static void gx_submit_cmds(const char *phase)
+static int gx_submit_cmds(const char *phase)
 {
 	static bool logged_first_slow;
 	static bool logged_first_stall;
@@ -1627,6 +1655,7 @@ static void gx_submit_cmds(const char *phase)
 	u16 pe_status, pe_token;
 	int pe_timeout;
 	int timeout;
+	int ret = 0;
 
 	/* End every submission with a unique, directly readable PE marker. */
 	gx_expected_token++;
@@ -1681,15 +1710,16 @@ static void gx_submit_cmds(const char *phase)
 	} while (--pe_timeout);
 	token_seen = (pe_status & PE_TOKEN_BIT) || pe_token == gx_expected_token;
 
-	if (pe_status & (PE_TOKEN_BIT | PE_FINISH_BIT)) {
-		/* Preserve enable bits and acknowledge only asserted status. */
+	if (pe_status & PE_TOKEN_BIT) {
+		/* Leave finish asserted for the PE IRQ completion handler. */
 		pe_write(PE_REG_INTR_STATUS,
 			 (pe_status & 0x0003) |
-			 (pe_status & (PE_TOKEN_BIT | PE_FINISH_BIT)));
+			 PE_TOKEN_BIT);
 	}
 	if (!token_seen) {
 		pr_warn_once("gcn-gx: PE token positive control timed out (PE=%04x token=%04x expected=%04x)\n",
 			     pe_status, pe_token, gx_expected_token);
+		ret = -ETIMEDOUT;
 	}
 	/* Read back RD after delay: confirms GP consumed commands */
 	cp_rd = ((u32)cp_read(CP_REG_RD_HI) << 16) |
@@ -1743,6 +1773,8 @@ static void gx_submit_cmds(const char *phase)
 			fifo[dump + 12], fifo[dump + 13], fifo[dump + 14], fifo[dump + 15]);
 		logged_first_stall = true;
 	}
+	if (cp_rd != cp_wt)
+		ret = -ETIMEDOUT;
 
 	cp_write(CP_REG_CTRL, 0);
 
@@ -1759,10 +1791,14 @@ static void gx_submit_cmds(const char *phase)
 
 		while (t-- && !(cp_read(CP_REG_STATUS) & 0x0008))
 			udelay(10);
-		if (!(cp_read(CP_REG_STATUS) & 0x0008))
+		if (!(cp_read(CP_REG_STATUS) & 0x0008)) {
 			pr_warn_once("gcn-gx: pipeline did not go idle after submit (SR=0x%04x)\n",
 				     cp_read(CP_REG_STATUS));
+			ret = -ETIMEDOUT;
+		}
 	}
+
+	return ret;
 }
 
 /*
@@ -1982,14 +2018,14 @@ static void gx_load_reference_texture_frame(void *tile_buf, u32 xfb_phys,
 
 static void gx_submit_reference(const void *vfb, u32 xfb_phys,
 				u16 width, u16 height, const char *phase,
-				enum gx_vfb_format format)
+				u32 src_pitch, enum gx_vfb_format format)
 {
 	u32 live_frame = gx_live_texture_frame++;
 	void *tex_buf = (live_frame & 1) ?
 		gx_tex_buf_alt : gx_tex_buf;
 	u32 pixel_count = (u32)width * height;
 
-	gx_prepare_texture(vfb, tex_buf, width, height, format);
+	gx_prepare_texture(vfb, tex_buf, width, height, src_pitch, format);
 	flush_dcache_range((unsigned long)tex_buf,
 			   (unsigned long)tex_buf +
 			   pixel_count * sizeof(u16));
@@ -2005,9 +2041,9 @@ static void gx_submit_reference(const void *vfb, u32 xfb_phys,
 	gx_submit_cmds(phase);
 }
 
-static void gx_submit_generated(const void *vfb, u32 xfb_phys,
-				u16 width, u16 height, const char *phase,
-				enum gx_vfb_format format)
+static int gx_submit_generated(const void *vfb, u32 xfb_phys,
+			       u16 width, u16 height, const char *phase,
+			       u32 src_pitch, enum gx_vfb_format format)
 {
 	u32 live_frame = gx_live_texture_frame++;
 	void *tex_buf = (live_frame & 1) ?
@@ -2024,7 +2060,7 @@ static void gx_submit_generated(const void *vfb, u32 xfb_phys,
 		gx_capture_vfb(vfb, width, height);
 	else
 		tile_start = ktime_get_ns();
-	gx_prepare_texture(vfb, tex_buf, width, height, format);
+	gx_prepare_texture(vfb, tex_buf, width, height, src_pitch, format);
 	if (format == GX_VFB_XRGB8888)
 		tile_end = ktime_get_ns();
 	flush_dcache_range((unsigned long)tex_buf,
@@ -2075,7 +2111,7 @@ static void gx_submit_generated(const void *vfb, u32 xfb_phys,
 	else
 		gx_set_copy_clear_rgb(0x00, 0x80, 0x80);
 	gx_copy_efb_to_xfb(xfb_phys, width, height, true);
-	gx_submit_cmds(phase);
+	return gx_submit_cmds(phase);
 }
 
 static void gx_submit_direct_pattern(u32 xfb_phys, u16 width, u16 height,
@@ -2104,12 +2140,16 @@ static void gx_submit_selected(const void *vfb, u32 xfb_phys,
 			       u16 width, u16 height, const char *phase,
 			       enum gx_vfb_format format)
 {
+	u32 src_pitch = width * (format == GX_VFB_RGB565 ? 2 : 4);
+
 	if (gx_use_direct)
 		gx_submit_direct_pattern(xfb_phys, width, height, phase);
 	else if (gx_use_reference)
-		gx_submit_reference(vfb, xfb_phys, width, height, phase, format);
+		gx_submit_reference(vfb, xfb_phys, width, height, phase,
+				    src_pitch, format);
 	else
-		gx_submit_generated(vfb, xfb_phys, width, height, phase, format);
+		gx_submit_generated(vfb, xfb_phys, width, height, phase,
+				    src_pitch, format);
 }
 
 /*
@@ -2118,9 +2158,9 @@ static void gx_submit_selected(const void *vfb, u32 xfb_phys,
  * Validate the real PE-finish IRQ with known copies, then continuously submit
  * a tiled RGB565 texture frame from process context.
  */
-static bool gx_process_frame(const void *vfb, u32 xfb_phys,
-			     u16 width, u16 height,
-			     enum gx_vfb_format format)
+static bool __maybe_unused gx_process_frame(const void *vfb, u32 xfb_phys,
+					    u16 width, u16 height,
+					    enum gx_vfb_format format)
 {
 	u32 finish_count;
 	bool submitted = false;
@@ -2198,6 +2238,7 @@ static bool gx_process_frame(const void *vfb, u32 xfb_phys,
 	return submitted;
 }
 
+#if IS_ENABLED(CONFIG_FB_GAMECUBE_GX)
 static void gx_frame_workfn(struct work_struct *work)
 {
 	const void *vfb;
@@ -2225,7 +2266,9 @@ static void gx_frame_workfn(struct work_struct *work)
 		return;
 	}
 
+	mutex_lock(&gx_submit_lock);
 	submitted = gx_process_frame(vfb, xfb_phys, width, height, format);
+	mutex_unlock(&gx_submit_lock);
 	/* gx_process_frame() has finished all CPU reads from this VFB page. */
 	gcnfb_accel_source_consumed(&gcn_gx_accel_ops, vfb, source_generation);
 
@@ -2328,6 +2371,49 @@ static void gcn_gx_blit_fb_rgb888(const void *vfb, u32 xfb_phys,
 	gcn_gx_queue_frame(vfb, xfb_phys, width, height, GX_VFB_XRGB8888,
 			   source_generation);
 }
+#endif
+
+#if IS_ENABLED(CONFIG_DRM_GCN_GX)
+static int gcn_gx_drm_blit_rgb565(const void *src, u32 src_pitch,
+				  u32 xfb_phys, u16 width, u16 height)
+{
+	u32 finish_count;
+	long completed;
+	int ret;
+
+	if (!src || !width || !height || (width & 3) || (height & 3) ||
+	    src_pitch < width * sizeof(u16) || (xfb_phys & 0x1f))
+		return -EINVAL;
+	if ((u32)width * height * sizeof(u16) > GX_TEX_BUF_SIZE)
+		return -E2BIG;
+	if (!READ_ONCE(gx_accel_ready))
+		return -ENODEV;
+	if (gx_use_reference || gx_use_direct || gx_use_pattern || gx_use_probe)
+		return -EOPNOTSUPP;
+
+	mutex_lock(&gx_submit_lock);
+	finish_count = READ_ONCE(gx_pe_finish_count);
+	ret = gx_submit_generated(src, xfb_phys, width, height, "drm",
+				  src_pitch, GX_VFB_RGB565);
+	if (!ret) {
+		completed = wait_event_timeout(gx_pe_finish_wait,
+					       READ_ONCE(gx_pe_finish_count) != finish_count,
+					       msecs_to_jiffies(50));
+		if (!completed) {
+			pr_warn_ratelimited("gcn-gx: DRM frame timed out waiting for PE finish\n");
+			ret = -ETIMEDOUT;
+		}
+	}
+	mutex_unlock(&gx_submit_lock);
+
+	return ret;
+}
+
+static const struct gcn_drm_accel_ops gcn_gx_drm_accel_ops = {
+	.name = "gcn-gx",
+	.blit_rgb565 = gcn_gx_drm_blit_rgb565,
+};
+#endif
 
 /* ------------------------------------------------------------------ */
 /* Module lifecycle                                                     */
@@ -2486,7 +2572,9 @@ static int gcn_gx_init(void)
 	gx_tex_buf_alt = (void *)__va(GX_TEX_BUF_ALT_MEM1_PHYS);
 	memset(gx_tex_buf, 0, GX_TEX_BUF_SIZE);
 	memset(gx_tex_buf_alt, 0, GX_TEX_BUF_SIZE);
+#if IS_ENABLED(CONFIG_FB_GAMECUBE_GX)
 	INIT_WORK(&gx_frame_work.work, gx_frame_workfn);
+#endif
 	gx_frame_work.vfb = NULL;
 	gx_frame_work.format = GX_VFB_RGB565;
 	gx_frame_work.source_generation = 0;
@@ -2581,7 +2669,9 @@ err_hw:
 static void gcn_gx_exit(void)
 {
 	WRITE_ONCE(gx_accel_ready, false);
+#if IS_ENABLED(CONFIG_FB_GAMECUBE_GX)
 	cancel_work_sync(&gx_frame_work.work);
+#endif
 	debugfs_remove_recursive(gx_debugfs_dir);
 	gx_debugfs_dir = NULL;
 	gx_xfb_debugfs_file = NULL;
@@ -2613,12 +2703,14 @@ static void gcn_gx_exit(void)
 	}
 }
 
+#if IS_ENABLED(CONFIG_FB_GAMECUBE_GX)
 static const struct gcnfb_accel_ops gcn_gx_accel_ops = {
 	.name = "gcn-gx",
 	.take_completed = gcn_gx_take_completed,
 	.blit_rgb565 = gcn_gx_blit_fb_rgb565,
 	.blit_rgb888 = gcn_gx_blit_fb_rgb888,
 };
+#endif
 
 static int __init gcn_gx_module_init(void)
 {
@@ -2628,7 +2720,11 @@ static int __init gcn_gx_module_init(void)
 	if (ret)
 		return ret;
 
+#if IS_ENABLED(CONFIG_DRM_GCN_GX)
+	ret = gcn_drm_register_accel(&gcn_gx_drm_accel_ops);
+#else
 	ret = gcnfb_register_accel(&gcn_gx_accel_ops);
+#endif
 	if (ret) {
 		pr_err("gcn-gx: failed to register accelerator: %d\n", ret);
 		gcn_gx_exit();
@@ -2647,8 +2743,12 @@ static void __exit gcn_gx_module_exit(void)
 	 * synchronize_rcu() in unregister then drains all direct IRQ callbacks.
 	 */
 	WRITE_ONCE(gx_accel_ready, false);
+#if IS_ENABLED(CONFIG_FB_GAMECUBE_GX)
 	cancel_work_sync(&gx_frame_work.work);
 	gcnfb_unregister_accel(&gcn_gx_accel_ops);
+#else
+	gcn_drm_unregister_accel(&gcn_gx_drm_accel_ops);
+#endif
 	gcn_gx_exit();
 }
 
