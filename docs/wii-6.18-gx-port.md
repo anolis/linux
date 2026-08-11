@@ -7910,3 +7910,22 @@ Interpret the result:
 - solid: the corrected 256 KiB hash allocation allowed `MMU_init_hw()` to
   return; failure, if any, is in `mapin_ram()` or later;
 - heartbeat: Linux reached normal device probing and timer progress.
+
+Hardware result: successful boot through PID 1 and the remote test loop. SSH
+verified the running kernel as `6.18.40-wii+` with the exact command-line
+marker `wii_test=wii_hash_actual_ram_a80c`. The root filesystem mounted,
+`/init-diag.sh` ran, SD and SDIO initialized, b43 associated, gateway and host
+pings passed, and OpenSSH became reachable at `10.3.10.12`.
+
+The running kernel reports `Memory: 55348K/81920K available`, confirming that
+the fictitious 320 MiB span is no longer used as installed-memory capacity.
+The complete live `dmesg` capture contains 277 lines and has SHA-256
+`57e87fc421ebbb8c9d0262791342590f78379ef6f19ad4d73be96525c015b17e`.
+This is a validated positive control for both the MEM1 FDT relocation and the
+installed-RAM Book3S hash-sizing fix.
+
+A separate nonfatal warning remains during OHCI coherent-DMA initialization:
+an alignment exception occurs in `memset()` from
+`dma_alloc_from_dev_coherent()`, after which both OHCI controllers continue
+initializing and USB functions. Track this independently; it did not block
+boot, networking, or SSH and is not part of the MMU hash failure.
