@@ -9086,3 +9086,183 @@ master. The final 360-line hardware log is preserved at
 `f5a1b569a821446491c1e1514515d6f704b921bc45d1c8b12ef44d0c8e160f74`.
 Its exact GX/DRM timeout, overlap, failure, oops, panic, and machine-check audit
 is empty.
+
+### Stage bounded RGB565 rectangle fill
+
+- Test branch: test/wii-gx-rect-fill
+
+Add `DRM_GCN_RENDER_OP_FILL_RECT_RGB565` and advertise it independently with
+`DRM_GCN_FEATURE_FILL_RECT_RGB565`. Preserve the version-1 32-byte submit ABI
+by packing RGB565 colour plus 10-bit `x`, `y`, `width - 1`, and `height - 1`
+fields into the existing 64-bit operation data. The high eight bits remain
+reserved and must be zero. This represents the complete Wii EFB coordinate
+range while accepting no pointers, physical addresses, register values, or
+raw command bytes.
+
+Submission validation rejects source handles and reserved bits before object
+lookup, then decodes the rectangle and validates nonempty dimensions and
+overflow-safe bounds against the actual destination GEM dimensions. The DRM
+path locks only the destination reservation object and publishes successful
+completion through its write fence and optional binary syncobj exactly as for
+full-surface fill.
+
+The GX provider restores the tiled destination into EFB, waits behind a PE
+marker, overlays the accepted direct-colour pixel-space rectangle, emits a
+second marker, and copies the complete EFB back into the same destination
+before a third marker. One serialized FIFO and three ordered PE completions
+make the in-place read/modify/write explicit. Broadway cache maintenance wraps
+the operation, and pixels outside the requested rectangle must survive
+byte-exactly.
+
+KUnit validates packed-field decode, reserved bits, a 73 by 61 interior
+rectangle, an out-of-bounds edge, and the final valid one-pixel coordinate.
+The static smoke client retains every prior control, rejects malformed
+rectangle requests, seeds a known green destination, fills odd interior bounds
+red, and checks every pixel in true 4 by 4 tiled order. It then fills only
+pixel `(255,255)` blue and again verifies all 65536 pixels, proving inclusive
+edge handling and preservation of both the previous rectangle and untouched
+background.
+
+Hardware acceptance requires checksum-pinned artifacts, provider-absent
+control, unchanged OF/FDT ownership hashes, exact client readback, three PE
+finishes per accepted rectangle operation after accounting for concurrent
+scanout, unchanged pool capacity, clean unload/reload, normal RGB565 and
+XRGB8888 scanout, the accepted offscreen replay/full-frame hash, and CPU
+fallback. Reject any changed outside pixel, edge error, timeout, leak, oops,
+panic, or machine check.
+
+Candidate artifacts:
+
+- `dtbImage.wii` / `zImage` SHA-256:
+  `9a170d1464a151dbfdfad0d25fa6c8f66a0984ac8b6d09b8fb31c60d28253008`
+- `gcn-gx.ko` SHA-256:
+  `c68210be9b53d3c43f19af21232270c5dfc6ad9172152e61782fdbac01fa1958`
+- static `wii-gcn-render-test` SHA-256:
+  `99b89dd8dd836ee376aa0242b22e77b2bdb5c47768a08de1a209e5dafde682cf`
+
+Host validation passed strict `checkpatch.pl`, `git diff --check`, focused
+PowerPC `W=1` compilation, native and static PowerPC clients against exported
+UAPI headers, all ten focused GCN allocator/render KUnit tests under UML, and
+a clean full `zImage modules` build with `-j16`. The first sandboxed UML launch
+correctly diagnosed denied `ptrace`; the identical compiled UML kernel ran all
+ten tests successfully with the required host permission.
+
+Hardware result for commit `b8bbc578c`: rejected for the extreme one-pixel
+edge case. The checksum-pinned kernel, module, and client passed provider
+absence, ownership hashes, all prior copy/full-fill controls, and the complete
+73 by 61 interior rectangle check. Every one of its 65536 tiled destination
+pixels matched: the requested area was red and every outside green pixel was
+preserved byte-exactly. This validates packed decode, DRM bounds, destination
+restore, general rectangle rasterization, and in-place copyback.
+
+The subsequent one-pixel quad spanning `(255,255)` through `(256,256)` timed
+out waiting for its third PE completion. The machine remained alive, pool
+capacity returned to `524288/0/524288`, and OF/FDT hashes remained unchanged.
+Reject the candidate because a valid representable rectangle must not stall.
+Replace narrow rectangle geometry with the GX scissor applied to the proven
+full-surface direct-colour quad, then repeat the exact same all-pixel client.
+
+Corrected candidate: retain the successful destination restore and copyback,
+but program BP scissor top-left/bottom-right from the validated rectangle and
+draw the proven full-surface direct-colour quad. This keeps raster geometry
+nondegenerate for one-pixel rectangles while the pixel engine clips writes to
+the exact inclusive bounds. The unchanged smoke client is the independent
+oracle for scissor field order, offsets, inclusivity, and outside preservation.
+
+Corrected candidate artifacts:
+
+- `dtbImage.wii` / `zImage` SHA-256:
+  `e3e1e3cfb389fd9657cabe958639f7608f1b813300840bed52c5bd0993ced2ee`
+- `gcn-gx.ko` SHA-256:
+  `bca645cbba0dd692d082c6d59768dea5b5e158f0627cbbfeeb6a6ce4fc888a1f`
+- unchanged static client SHA-256:
+  `99b89dd8dd836ee376aa0242b22e77b2bdb5c47768a08de1a209e5dafde682cf`
+
+The correction passes strict `checkpatch.pl`, `git diff --check`, focused
+PowerPC `W=1` GX compilation, and full `zImage modules` link/modpost with
+`-j16`. The UAPI, DRM validation, KUnit, and smoke-client sources are unchanged
+from the first candidate and retain their previously passed host gates.
+
+Corrected hardware result for commit `f1cffd0fc`: rejected as a completion
+accounting failure. The checksum-pinned corrected module was loaded twice on
+the unchanged candidate kernel. Both runs reached the valid bottom-right
+one-pixel operation and then timed out waiting for three PE finish IRQ handler
+invocations. The Wii remained alive and reachable, and the preceding interior
+rectangle continued to pass its complete 65536-pixel oracle.
+
+The final unique PE token is emitted after all three ordered `BP 0x45` fences
+and was already accepted by `gx_submit_cmds()`, so FIFO and downstream PE
+execution reached the end of the command stream. PE finish status is a
+level-triggered event, however: three nearby finish writes may remain one
+asserted status bit until the interrupt handler acknowledges it and therefore
+cannot be treated as three countable completion events. The slower interior
+draw happened to permit three handler invocations; the fast scissored
+one-pixel draw reliably exposed the invalid counting assumption.
+
+Keep the scissor correction and all three ordered hardware fences, but require
+only one observed PE finish IRQ after submission. Retain the final unique token
+as the proof that the complete stream, including destination copyback, reached
+the PE. Repeat the unchanged all-pixel client; its destination readback remains
+the independent proof that the final copy actually completed.
+
+Hardware result for completion correction commit `a9efb5f78`: accepted for the
+bounded-fill render ABI. On fresh boot ID
+`c6ca3ddf-c0fc-460b-bd32-8b40be1e5dfb`, the Wii verified module SHA-256
+`065c33a4df9e8356bb7737bb055309025c856c8a28a1c42c0c40706f5f9f2e70`
+and unchanged static client SHA-256
+`99b89dd8dd836ee376aa0242b22e77b2bdb5c47768a08de1a209e5dafde682cf`.
+Provider-absent discovery passed before load.
+
+The unchanged client copied all 65536 tiled RGB565 pixels byte-exactly, filled
+the complete surface byte-exactly across four colours, filled the 73 by 61
+interior rectangle with every outside pixel preserved, and filled only the
+bottom-right pixel while preserving the complete prior surface. MEM1 capacity
+was `524288/0/524288` both before and after the test.
+
+One concurrent scanout frame and the render operations nominally emitted 20
+finish writes, while the global counter advanced by 19. This is direct positive
+evidence for exactly one coalesced level-triggered finish event. All operations
+nonetheless passed their complete memory oracle after their unique final PE
+tokens, validating the corrected completion rule without weakening copyback
+verification. The exact GX/DRM timeout, stall, failure, oops, panic, and machine
+check audit was empty.
+
+The module unloaded cleanly, provider-absent discovery passed again under CPU
+fallback, and the Wii was forcibly powered off after its initramfs `poweroff`
+wrapper failed to determine a runlevel. Broader RGB565/XRGB8888 visual and
+offscreen-capture regression tests remain intentionally deferred because this
+session was limited to the pending corrected rectangle test.
+
+Deferred regression acceptance completed on fresh boot ID
+`5103c2b5-ae5f-4e8c-9812-8e6dcf9254f3`. The Wii again verified the accepted
+module and render-client hashes, plus visual fixture SHA-256
+`d2aa7acc2fc097fb695d06b318543725c01ed39c5c6b53745a07849229430b50`.
+The bounded fixture wrapper explicitly terminated each exact client PID after
+its completion line so the final inspection frame could not hold DRM master.
+
+The RGB565 fixture completed its initial frame and 40 page flips while GX
+advanced exactly 41 frames and 82 PE finishes. The XRGB8888 fixture likewise
+advanced exactly 41 frames and 82 PE finishes, including 41 XRGB8888
+conversions. Both therefore preserve the accepted two-finishes-per-generated-
+frame invariant, and neither left a client holder or fault signature.
+
+An independent module load with `offscreen_probe=1 debug_capture=1` completed
+one EFB-to-tiled-RGB565 copy, changed all 153600 destination words, and replayed
+the result 43 times. Its counter was exactly
+`88 = 2 * (1 copy + 43 replays)`. The 614400-byte post-token XFB capture had
+SHA-256
+`2c488feb9b32a2510a6912f85c8187e021e0fe3d7b228f8431395502b57cd075`,
+byte-identical to the accepted crisp four-quadrant reference; no separate
+living-room visual judgment was required.
+
+Before and after the complete regression cycle, the live GX OF-property
+manifest remained
+`cfc9a93ba4135f31d45faf7fdb2d8615b2304080163b7348a590e6df7ea197a0`
+and the packed FDT remained
+`e76a396b09be52f0a5ea3bd3cc5a58ed5af6bc59597fe039e0a420030556c51b`.
+Final module unload restored provider absence and completed 20 XRGB8888 CPU
+fallback flips. No process retained DRM master. The final 341-line log is
+preserved at `/tmp/wii-dmesg-gx-rect-fill-a9efb5f78-final.txt`, SHA-256
+`6c957a6cbc8959b6cc95daba8d6fc51d4fccda4b203f2877e41bffed38961c07`;
+its exact GX/DRM timeout, stall, failure, oops, panic, and machine-check audit
+is empty. The bounded RGB565 rectangle-fill stage is fully accepted.

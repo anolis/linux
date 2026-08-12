@@ -64,6 +64,39 @@ static void gcn_drm_render_validates_fill_submit(struct kunit *test)
 	KUNIT_EXPECT_EQ(test, gcn_drm_render_validate_submit(&args), -EINVAL);
 }
 
+static void gcn_drm_render_validates_rect_fill_submit(struct kunit *test)
+{
+	struct gcn_drm_render_rect rect;
+	struct drm_gcn_submit args = {
+		.ctx_id = 1,
+		.op = DRM_GCN_RENDER_OP_FILL_RECT_RGB565,
+		.dst_handle = 2,
+		.data = DRM_GCN_RECT_DATA(0x5aa5, 13, 17, 73, 61),
+	};
+
+	KUNIT_EXPECT_EQ(test, gcn_drm_render_validate_submit(&args), 0);
+	KUNIT_EXPECT_EQ(test,
+			gcn_drm_render_validate_rect(args.data, 256, 256), 0);
+	gcn_drm_render_decode_rect(args.data, &rect);
+	KUNIT_EXPECT_EQ(test, rect.color, (u16)0x5aa5);
+	KUNIT_EXPECT_EQ(test, rect.x, (u16)13);
+	KUNIT_EXPECT_EQ(test, rect.y, (u16)17);
+	KUNIT_EXPECT_EQ(test, rect.width, (u16)73);
+	KUNIT_EXPECT_EQ(test, rect.height, (u16)61);
+
+	args.data |= 1ULL << 63;
+	KUNIT_EXPECT_EQ(test, gcn_drm_render_validate_submit(&args), -EINVAL);
+	args.data = DRM_GCN_RECT_DATA(0x5aa5, 255, 255, 2, 1);
+	KUNIT_EXPECT_EQ(test,
+			gcn_drm_render_validate_rect(args.data, 256, 256),
+			-EINVAL);
+	args.data = DRM_GCN_RECT_DATA(0x5aa5, 255, 255, 1, 1);
+	KUNIT_EXPECT_EQ(test,
+			gcn_drm_render_validate_rect(args.data, 256, 256), 0);
+	args.src_handle = 1;
+	KUNIT_EXPECT_EQ(test, gcn_drm_render_validate_submit(&args), -EINVAL);
+}
+
 static void gcn_drm_render_accepts_tiled_rgb565(struct kunit *test)
 {
 	struct drm_gcn_gem_create args = {
@@ -134,6 +167,7 @@ static struct kunit_case gcn_drm_render_test_cases[] = {
 	KUNIT_CASE(gcn_drm_render_converts_absolute_timeouts),
 	KUNIT_CASE(gcn_drm_render_validates_copy_submit),
 	KUNIT_CASE(gcn_drm_render_validates_fill_submit),
+	KUNIT_CASE(gcn_drm_render_validates_rect_fill_submit),
 	{}
 };
 

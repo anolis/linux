@@ -33,6 +33,9 @@ struct gcn_drm_accel_ops {
 			     u16 width, u16 height);
 	int (*fill_rgb565)(void *dst_allocation, u16 width, u16 height,
 			   u16 color);
+	int (*fill_rect_rgb565)(void *dst_allocation, u16 width, u16 height,
+				u16 x, u16 y, u16 rect_width,
+				u16 rect_height, u16 color);
 };
 
 int gcn_drm_register_accel(const struct gcn_drm_accel_ops *ops);

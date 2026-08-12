@@ -310,6 +310,7 @@ static int gcn_drm_ioctl_submit(struct drm_device *drm, void *data,
 	struct dma_fence *fence = NULL;
 	struct gcn_drm_bo *src = NULL;
 	struct gcn_drm_bo *dst;
+	struct gcn_drm_render_rect rect;
 	struct drm_exec exec;
 	int ret;
 
@@ -345,6 +346,13 @@ static int gcn_drm_ioctl_submit(struct drm_device *drm, void *data,
 	    dst->layout != DRM_GCN_GEM_LAYOUT_TILED_4X4) {
 		ret = -EINVAL;
 		goto out_put;
+	}
+	if (args->op == DRM_GCN_RENDER_OP_FILL_RECT_RGB565) {
+		ret = gcn_drm_render_validate_rect(args->data, dst->width,
+						   dst->height);
+		if (ret)
+			goto out_put;
+		gcn_drm_render_decode_rect(args->data, &rect);
 	}
 	if (src_gem) {
 		src = to_gcn_drm_bo(src_gem);
@@ -382,10 +390,15 @@ static int gcn_drm_ioctl_submit(struct drm_device *drm, void *data,
 		ret = gcn_drm_provider_copy(src->provider, src->allocation,
 					    dst->allocation, src->width,
 					    src->height);
-	else
+	else if (args->op == DRM_GCN_RENDER_OP_FILL_RGB565)
 		ret = gcn_drm_provider_fill(dst->provider, dst->allocation,
 					    dst->width, dst->height,
 					    (u16)args->data);
+	else
+		ret = gcn_drm_provider_fill_rect(dst->provider, dst->allocation,
+						 dst->width, dst->height,
+						 rect.x, rect.y, rect.width,
+						 rect.height, rect.color);
 	if (ret)
 		goto out_exec;
 
