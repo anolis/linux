@@ -9183,4 +9183,24 @@ PowerPC `W=1` GX compilation, and full `zImage modules` link/modpost with
 `-j16`. The UAPI, DRM validation, KUnit, and smoke-client sources are unchanged
 from the first candidate and retain their previously passed host gates.
 
-Corrected hardware result: pending.
+Corrected hardware result for commit `f1cffd0fc`: rejected as a completion
+accounting failure. The checksum-pinned corrected module was loaded twice on
+the unchanged candidate kernel. Both runs reached the valid bottom-right
+one-pixel operation and then timed out waiting for three PE finish IRQ handler
+invocations. The Wii remained alive and reachable, and the preceding interior
+rectangle continued to pass its complete 65536-pixel oracle.
+
+The final unique PE token is emitted after all three ordered `BP 0x45` fences
+and was already accepted by `gx_submit_cmds()`, so FIFO and downstream PE
+execution reached the end of the command stream. PE finish status is a
+level-triggered event, however: three nearby finish writes may remain one
+asserted status bit until the interrupt handler acknowledges it and therefore
+cannot be treated as three countable completion events. The slower interior
+draw happened to permit three handler invocations; the fast scissored
+one-pixel draw reliably exposed the invalid counting assumption.
+
+Keep the scissor correction and all three ordered hardware fences, but require
+only one observed PE finish IRQ after submission. Retain the final unique token
+as the proof that the complete stream, including destination copyback, reached
+the PE. Repeat the unchanged all-pixel client; its destination readback remains
+the independent proof that the final copy actually completed.
