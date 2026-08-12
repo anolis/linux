@@ -37,7 +37,11 @@
 		};
 
 		gx_texture: texture@1300000 {
-			reg = <0x01300000 0x00200000>;
+			reg = <0x01300000 0x00180000>;
+		};
+
+		gx_render: render@1600000 {
+			reg = <0x01600000 0x00080000>;
 		};
 
 		gx_fifo: fifo@1684000 {
@@ -118,8 +122,8 @@
 			      <0x0c001000 0x10>;
 			reg-names = "cp", "pe";
 			interrupts = <10>;
-			memory-region = <&gx_fifo>, <&gx_texture>;
-			memory-region-names = "fifo", "texture";
+			memory-region = <&gx_fifo>, <&gx_texture>, <&gx_render>;
+			memory-region-names = "fifo", "texture", "render";
 			nintendo,processor-interface = <&PI0>;
 		};
 

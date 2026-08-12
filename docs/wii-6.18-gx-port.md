@@ -8846,6 +8846,10 @@ so no chunk repair was required.
   d2a372bee427705ba002cf91b2e476e3bcc71536f3ab8c7cea64a309aaa6c773
 - Candidate static wii-gcn-render-test SHA-256:
   c9458810f42030034d7d791c9e435ca31d397d81d16fd52a53ae8c47e3348d4a
+- Corrected ownership candidate dtbImage.wii SHA-256:
+  7469f7bdd3f5e83f0d395d41e3b78da8731af8ab6a4a02e2e2405e0fda232482
+- Corrected ownership candidate gcn-gx.ko SHA-256:
+  811e6165314587befbea16d726f06e1ecbb3c0ba648784319da17dc26ce9bfa8
 
 Add the first userspace rendering operation without exposing raw FIFO bytes,
 GX register values, or physical addresses. `DRM_IOCTL_GCN_SUBMIT` accepts a
@@ -8898,3 +8902,35 @@ RGB565, offscreen replay, module-unload, and CPU-fallback regressions before
 accepting the stage.
 
 Hardware result: pending.
+
+The first hardware run of commit `4c709fb2381941f0533aab311ebed7a912b14d87`
+is rejected despite the smoke client's byte-exact result. The test allocated
+its source object at physical `0x01480000`, which is also where the boot
+wrapper places the packed FDT. Writing the source's repeating `f8 1f` texels
+deterministically replaced live Open Firmware property storage with those
+same bytes. After the test, the GPU node's `compatible`, `reg`, `interrupts`,
+`memory-region`, and name-list properties all contained the source pattern;
+module reload consequently failed because the platform device no longer had
+valid resources. The bounded diagnostic is preserved at
+`/tmp/wii-gx-submit-corruption-live-4c709fb23.txt`, 1826 bytes, SHA-256
+`28c29945de6fe19af223dd347edd35639e0f4f30b37669b38ef82d96221c235d`.
+
+The collision came from the previously accepted allocator layout, not from
+the typed command itself. Expanding `gx_texture` from 1536 KiB to 2 MiB made
+the nominal userspace spare range `0x01480000..0x014fffff`, overlapping the
+wrapper FDT and early device-tree allocations. Correct the ownership model by
+restoring the texture reservation to exactly two internal 768 KiB workspaces
+at `0x01300000..0x0147ffff` and adding an independent 512 KiB `gx_render`
+reservation at `0x01600000..0x0167ffff`. That range ends below the existing
+FIFO at `0x01684000`, and remains disjoint from the OHCI no-map pool beginning
+at `0x01500000` and XFB beginning at `0x01698000`.
+
+The GX probe now requires all three named reservations, rejects any pairwise
+overlap, requires the render aperture to be exactly 512 KiB, assigns the two
+internal workspaces directly from the texture reservation, and initializes
+the userspace `drm_mm` only over the render aperture. UAPI total/used/free
+accounting therefore starts at `524288/0/524288`; four 131072-byte objects
+still consume the pool exactly. Hardware re-acceptance must additionally hash
+all live GPU OF properties before and after submission, then unload and reload
+the GX module successfully. No result from the rejected image is evidence of
+render correctness until those ownership checks pass.
