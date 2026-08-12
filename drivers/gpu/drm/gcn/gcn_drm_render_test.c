@@ -14,8 +14,29 @@ static void gcn_drm_render_uapi_layout(struct kunit *test)
 	KUNIT_EXPECT_EQ(test, sizeof(struct drm_gcn_ctx_create), 8U);
 	KUNIT_EXPECT_EQ(test, sizeof(struct drm_gcn_ctx_free), 8U);
 	KUNIT_EXPECT_EQ(test, sizeof(struct drm_gcn_wait), 16U);
-	KUNIT_EXPECT_EQ(test, DRM_GCN_NUM_IOCTLS, 6);
+	KUNIT_EXPECT_EQ(test, sizeof(struct drm_gcn_submit), 32U);
+	KUNIT_EXPECT_EQ(test, DRM_GCN_NUM_IOCTLS, 7);
 	KUNIT_EXPECT_EQ(test, DRM_GCN_PARAM_FEATURES, 9);
+}
+
+static void gcn_drm_render_validates_typed_submit(struct kunit *test)
+{
+	struct drm_gcn_submit args = {
+		.ctx_id = 1,
+		.op = DRM_GCN_RENDER_OP_COPY_RGB565,
+		.src_handle = 1,
+		.dst_handle = 2,
+	};
+
+	KUNIT_EXPECT_EQ(test, gcn_drm_render_validate_submit(&args), 0);
+	args.flags = 1;
+	KUNIT_EXPECT_EQ(test, gcn_drm_render_validate_submit(&args), -EINVAL);
+	args.flags = 0;
+	args.dst_handle = args.src_handle;
+	KUNIT_EXPECT_EQ(test, gcn_drm_render_validate_submit(&args), -EINVAL);
+	args.dst_handle = 2;
+	args.op = 0;
+	KUNIT_EXPECT_EQ(test, gcn_drm_render_validate_submit(&args), -EINVAL);
 }
 
 static void gcn_drm_render_accepts_tiled_rgb565(struct kunit *test)
@@ -86,6 +107,7 @@ static struct kunit_case gcn_drm_render_test_cases[] = {
 	KUNIT_CASE(gcn_drm_render_accepts_tiled_rgb565),
 	KUNIT_CASE(gcn_drm_render_rejects_invalid_objects),
 	KUNIT_CASE(gcn_drm_render_converts_absolute_timeouts),
+	KUNIT_CASE(gcn_drm_render_validates_typed_submit),
 	{}
 };
 

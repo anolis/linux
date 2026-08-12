@@ -55,6 +55,18 @@ static int create_bo(int fd, struct drm_gcn_gem_create *args)
 	return ioctl(fd, DRM_IOCTL_GCN_GEM_CREATE, args);
 }
 
+static void *map_bo(int fd, const struct drm_gcn_gem_create *bo)
+{
+	struct drm_gcn_gem_mmap args = {
+		.handle = bo->handle,
+	};
+
+	if (ioctl(fd, DRM_IOCTL_GCN_GEM_MMAP, &args))
+		return MAP_FAILED;
+	return mmap(NULL, bo->size, PROT_READ | PROT_WRITE, MAP_SHARED, fd,
+		    args.offset);
+}
+
 static int close_bo(int fd, uint32_t handle)
 {
 	struct drm_gem_close args = {
@@ -79,6 +91,12 @@ static void test_provider_absent(int fd)
 {
 	struct drm_gcn_gem_create bo;
 	struct drm_gcn_ctx_create ctx = {};
+	struct drm_gcn_submit submit = {
+		.ctx_id = 1,
+		.op = DRM_GCN_RENDER_OP_COPY_RGB565,
+		.src_handle = 1,
+		.dst_handle = 2,
+	};
 	uint64_t value;
 
 	errno = 0;
@@ -91,6 +109,9 @@ static void test_provider_absent(int fd)
 	errno = 0;
 	if (!ioctl(fd, DRM_IOCTL_GCN_CTX_CREATE, &ctx) || errno != ENODEV)
 		fail("CTX_CREATE without provider should return ENODEV");
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_SUBMIT, &submit) || errno != ENOENT)
+		fail("SUBMIT without context should return ENOENT");
 }
 
 static void test_contexts(int fd, int other_fd)
@@ -215,6 +236,124 @@ static void test_syncobj(int fd)
 	destroy.pad = 0;
 	if (ioctl(fd, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy))
 		fail("destroy core DRM sync object");
+}
+
+static void test_submit(int fd, int other_fd)
+{
+	struct drm_syncobj_create sync = {};
+	struct drm_syncobj_destroy destroy;
+	struct drm_gcn_ctx_create ctx = {};
+	struct drm_gcn_ctx_free free_ctx;
+	struct drm_gcn_gem_create src;
+	struct drm_gcn_gem_create dst;
+	struct drm_gcn_submit submit;
+	struct drm_gcn_wait wait_args;
+	struct drm_syncobj_wait sync_wait;
+	uint32_t sync_handle;
+	uint16_t *src_map = MAP_FAILED;
+	uint16_t *dst_map = MAP_FAILED;
+	size_t pixels;
+	size_t i;
+
+	if (create_bo(fd, &src) || create_bo(fd, &dst)) {
+		fail("create render-copy objects");
+		return;
+	}
+	src_map = map_bo(fd, &src);
+	dst_map = map_bo(fd, &dst);
+	if (src_map == MAP_FAILED || dst_map == MAP_FAILED) {
+		fail("map render-copy objects");
+		goto out;
+	}
+	pixels = TEST_WIDTH * TEST_HEIGHT;
+	for (i = 0; i < pixels; i++) {
+		src_map[i] = 0xf81f;
+		dst_map[i] = 0x07e0;
+	}
+
+	if (ioctl(fd, DRM_IOCTL_GCN_CTX_CREATE, &ctx)) {
+		fail("create submit context");
+		goto out;
+	}
+	if (ioctl(fd, DRM_IOCTL_SYNCOBJ_CREATE, &sync)) {
+		fail("create submit syncobj");
+		goto out_ctx;
+	}
+
+	memset(&submit, 0, sizeof(submit));
+	submit.ctx_id = ctx.id;
+	submit.op = DRM_GCN_RENDER_OP_COPY_RGB565;
+	submit.src_handle = src.handle;
+	submit.dst_handle = dst.handle;
+	submit.out_syncobj = sync.handle;
+
+	submit.ctx_id++;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_SUBMIT, &submit) || errno != ENOENT)
+		fail("submit with unknown context should return ENOENT");
+	submit.ctx_id = ctx.id;
+	submit.dst_handle = src.handle;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_SUBMIT, &submit) || errno != EINVAL)
+		fail("submit with aliased objects should return EINVAL");
+	submit.dst_handle = dst.handle;
+	submit.src_handle = 0x7fffffffU;
+	errno = 0;
+	if (!ioctl(other_fd, DRM_IOCTL_GCN_SUBMIT, &submit) || errno != ENOENT)
+		fail("submit context must be isolated to its DRM file");
+	submit.src_handle = src.handle;
+
+	if (ioctl(fd, DRM_IOCTL_GCN_SUBMIT, &submit)) {
+		fail("submit RGB565 texture copy");
+		goto out_sync;
+	}
+
+	wait_args.handle = dst.handle;
+	wait_args.flags = DRM_GCN_WAIT_WRITE;
+	wait_args.timeout_ns = monotonic_ns() + 1000000000ULL;
+	if (ioctl(fd, DRM_IOCTL_GCN_WAIT, &wait_args))
+		fail("wait for render-copy destination");
+
+	sync_handle = sync.handle;
+	memset(&sync_wait, 0, sizeof(sync_wait));
+	sync_wait.handles = (uintptr_t)&sync_handle;
+	sync_wait.timeout_nsec = (int64_t)(monotonic_ns() + 1000000000ULL);
+	sync_wait.count_handles = 1;
+	if (ioctl(fd, DRM_IOCTL_SYNCOBJ_WAIT, &sync_wait))
+		fail("wait for render-copy syncobj");
+
+	for (i = 0; i < pixels; i++) {
+		if (dst_map[i] != 0xf81f) {
+			fprintf(stderr,
+				"FAIL: render-copy mismatch at %zu: got=0x%04x expected=0xf81f\n",
+				i, dst_map[i]);
+			failures++;
+			break;
+		}
+	}
+	if (i == pixels)
+		printf("SUBMIT: copied %zu tiled RGB565 pixels byte-exactly\n",
+		       pixels);
+
+out_sync:
+	destroy.handle = sync.handle;
+	destroy.pad = 0;
+	if (ioctl(fd, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy))
+		fail("destroy submit syncobj");
+out_ctx:
+	free_ctx.id = ctx.id;
+	free_ctx.pad = 0;
+	if (ioctl(fd, DRM_IOCTL_GCN_CTX_FREE, &free_ctx))
+		fail("free submit context");
+out:
+	if (dst_map != MAP_FAILED && munmap(dst_map, dst.size))
+		fail("unmap render-copy destination");
+	if (src_map != MAP_FAILED && munmap(src_map, src.size))
+		fail("unmap render-copy source");
+	if (close_bo(fd, dst.handle))
+		fail("close render-copy destination");
+	if (close_bo(fd, src.handle))
+		fail("close render-copy source");
 }
 
 static int hold_mapping(const char *node)
@@ -411,6 +550,11 @@ int main(int argc, char **argv)
 				fail_value("provider EFB height", max_height, 576);
 		}
 		test_provider(fd, other_fd, free_bytes);
+		if (features & DRM_GCN_FEATURE_SUBMIT_RGB565)
+			test_submit(fd, other_fd);
+		else
+			fail_value("RGB565 submit feature", features,
+				   DRM_GCN_FEATURE_SUBMIT_RGB565);
 	}
 
 	close(other_fd);

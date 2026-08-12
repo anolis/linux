@@ -85,7 +85,6 @@ enum gx_mem1_access {
 };
 
 struct gx_mem1_buffer {
-	struct drm_mm_node node;
 	void *cpu_addr;
 	phys_addr_t phys_addr;
 	size_t size;
@@ -109,11 +108,11 @@ static unsigned int gx_mem1_total_bytes;
 static unsigned int gx_mem1_used_bytes;
 static unsigned int gx_mem1_free_bytes;
 module_param_named(mem1_total_bytes, gx_mem1_total_bytes, uint, 0444);
-MODULE_PARM_DESC(mem1_total_bytes, "Total bytes in the bounded GX MEM1 pool");
+MODULE_PARM_DESC(mem1_total_bytes, "Total bytes in the GX render-object pool");
 module_param_named(mem1_used_bytes, gx_mem1_used_bytes, uint, 0444);
-MODULE_PARM_DESC(mem1_used_bytes, "Bytes allocated for internal GX workspaces");
+MODULE_PARM_DESC(mem1_used_bytes, "Bytes allocated from the GX render-object pool");
 module_param_named(mem1_free_bytes, gx_mem1_free_bytes, uint, 0444);
-MODULE_PARM_DESC(mem1_free_bytes, "Unallocated bytes in the GX MEM1 pool");
+MODULE_PARM_DESC(mem1_free_bytes, "Unallocated bytes in the GX render-object pool");
 #endif
 
 /* Byte offset of the next GX command byte within gx_fifo_buf.
@@ -2688,6 +2687,7 @@ static int gcn_gx_drm_mem1_info(struct gcn_drm_mem1_info *info)
 	info->max_height = 576;
 	info->formats = DRM_GCN_FORMAT_RGB565;
 	info->layouts = DRM_GCN_LAYOUT_TILED_4X4;
+	info->features = DRM_GCN_FEATURE_SUBMIT_RGB565;
 	mutex_unlock(&gx_mem1_lock);
 	return 0;
 }
@@ -2773,6 +2773,65 @@ static int gcn_gx_drm_mem1_mmap(void *allocation,
 			       vma->vm_page_prot);
 }
 
+static int gcn_gx_drm_submit_rgb565(void *src_allocation,
+				    void *dst_allocation,
+				    u16 width, u16 height)
+{
+	struct gx_mem1_allocation *src = src_allocation;
+	struct gx_mem1_allocation *dst = dst_allocation;
+	u32 finish_count;
+	size_t bytes;
+	long completed;
+	int ret;
+	int i;
+
+	if (!src || !dst || src == dst || !width || !height ||
+	    (width & 3) || (height & 3))
+		return -EINVAL;
+	bytes = (size_t)width * height * sizeof(u16);
+	if (bytes > src->size || bytes > dst->size)
+		return -E2BIG;
+	if (!READ_ONCE(gx_accel_ready))
+		return -ENODEV;
+
+	mutex_lock(&gx_submit_lock);
+	flush_dcache_range((unsigned long)src->cpu_addr,
+			   (unsigned long)src->cpu_addr + bytes);
+	flush_dcache_range((unsigned long)dst->cpu_addr,
+			   (unsigned long)dst->cpu_addr + bytes);
+
+	finish_count = READ_ONCE(gx_pe_finish_count);
+	fifo_pos = 0;
+	gx_load_libogc_init_preamble();
+	gx_setup_display_copy_state();
+	gx_setup_rgb565_texture_state(width, height);
+	gx_setup_texture_rgb565(src->cpu_addr, width, height);
+	gx_draw_color_quad(width, height, 0xff, 0xff, 0xff);
+	gx_load_bp_reg(0x45000002);
+	for (i = 0; i < 32; i++)
+		gx_wr8(0);
+	gx_set_copy_clear_rgb(0x00, 0x00, 0x00);
+	gx_copy_efb_to_rgb565_texture(dst->cpu_addr, width, height, true);
+	ret = gx_submit_cmds("render-copy");
+	if (ret)
+		goto out_unlock;
+
+	completed = gx_wait_for_pe_finishes(finish_count,
+					    GX_DRM_FRAME_PE_FINISHES);
+	if (!completed) {
+		pr_warn_ratelimited("gcn-gx: render copy timed out waiting for final PE finish\n");
+		ret = -ETIMEDOUT;
+		goto out_unlock;
+	}
+
+	invalidate_dcache_range((unsigned long)dst->cpu_addr,
+				(unsigned long)dst->cpu_addr + bytes);
+
+out_unlock:
+	mutex_unlock(&gx_submit_lock);
+	return ret;
+}
+
 static const struct gcn_drm_accel_ops gcn_gx_drm_accel_ops = {
 	.name = "gcn-gx",
 	.owner = THIS_MODULE,
@@ -2782,6 +2841,7 @@ static const struct gcn_drm_accel_ops gcn_gx_drm_accel_ops = {
 	.mem1_alloc = gcn_gx_drm_mem1_alloc,
 	.mem1_free = gcn_gx_drm_mem1_free,
 	.mem1_mmap = gcn_gx_drm_mem1_mmap,
+	.submit_rgb565 = gcn_gx_drm_submit_rgb565,
 };
 #endif
 
@@ -2790,6 +2850,7 @@ static const struct gcn_drm_accel_ops gcn_gx_drm_accel_ops = {
 /* ------------------------------------------------------------------ */
 
 #define GX_MEM_ALIGNMENT	32
+#define GX_RENDER_POOL_SIZE	(512 * 1024)
 
 #if IS_ENABLED(CONFIG_DRM_GCN_GX)
 static void gx_mem1_free_workspaces_locked(void)
@@ -2799,11 +2860,9 @@ static void gx_mem1_free_workspaces_locked(void)
 	if (!gx_mem1_allocator.initialized || gx_mem1_user_allocations)
 		return;
 
-	for (i = ARRAY_SIZE(gx_tex_workspace) - 1; i >= 0; i--) {
-		gcn_gx_mem1_remove(&gx_tex_workspace[i].node);
+	for (i = ARRAY_SIZE(gx_tex_workspace) - 1; i >= 0; i--)
 		memset(&gx_tex_workspace[i], 0,
 		       sizeof(gx_tex_workspace[i]));
-	}
 
 	gcn_gx_mem1_allocator_fini(&gx_mem1_allocator);
 	gx_mem1_total_bytes = 0;
@@ -2819,16 +2878,15 @@ static void gx_mem1_free_workspaces(void)
 	mutex_unlock(&gx_mem1_lock);
 }
 
-static int gx_mem1_alloc_workspaces(struct device *dev,
-				    const struct resource *mem)
+static int gx_mem1_alloc_workspaces(const struct resource *texture_mem,
+				    const struct resource *render_mem)
 {
-	u64 pool_size = resource_size(mem);
-	u64 expected_start = mem->start;
-	u64 spare;
+	u64 render_size = resource_size(render_mem);
 	int i;
 	int ret;
 
-	if (pool_size < 2 * GX_TEX_BUF_SLOT_SIZE || pool_size > UINT_MAX)
+	if (resource_size(texture_mem) != 2 * GX_TEX_BUF_SLOT_SIZE ||
+	    render_size > UINT_MAX)
 		return -EINVAL;
 
 	mutex_lock(&gx_mem1_lock);
@@ -2840,8 +2898,9 @@ static int gx_mem1_alloc_workspaces(struct device *dev,
 	memset(gx_tex_workspace, 0, sizeof(gx_tex_workspace));
 	gx_mem1_shutdown = false;
 	gx_mem1_user_allocations = 0;
-	ret = gcn_gx_mem1_allocator_init(&gx_mem1_allocator, mem->start,
-					 pool_size, GX_MEM_ALIGNMENT);
+	ret = gcn_gx_mem1_allocator_init(&gx_mem1_allocator,
+					 render_mem->start, render_size,
+					 GX_MEM_ALIGNMENT);
 	if (ret) {
 		mutex_unlock(&gx_mem1_lock);
 		return ret;
@@ -2850,40 +2909,22 @@ static int gx_mem1_alloc_workspaces(struct device *dev,
 	for (i = 0; i < ARRAY_SIZE(gx_tex_workspace); i++) {
 		struct gx_mem1_buffer *buffer = &gx_tex_workspace[i];
 
-		ret = gcn_gx_mem1_insert(&gx_mem1_allocator, &buffer->node,
-					 GX_TEX_BUF_SLOT_SIZE,
-					 GX_MEM_ALIGNMENT);
-		if (ret)
-			goto err_free;
-		if (buffer->node.start != expected_start ||
-		    !gcn_gx_mem1_contains(&gx_mem1_allocator, &buffer->node)) {
-			ret = -EINVAL;
-			goto err_free;
-		}
-
-		buffer->cpu_addr = (void *)__va(buffer->node.start);
-		buffer->phys_addr = buffer->node.start;
+		buffer->phys_addr = texture_mem->start +
+					    i * GX_TEX_BUF_SLOT_SIZE;
+		buffer->cpu_addr = (void *)__va(buffer->phys_addr);
 		buffer->size = GX_TEX_BUF_SLOT_SIZE;
 		buffer->layout = GX_MEM1_LAYOUT_TILED_RGB565;
 		buffer->access = GX_MEM1_ACCESS_IDLE;
-		expected_start += GX_TEX_BUF_SLOT_SIZE;
 	}
 
-	spare = pool_size - 2 * GX_TEX_BUF_SLOT_SIZE;
-	gx_mem1_total_bytes = pool_size;
-	gx_mem1_used_bytes = 2 * GX_TEX_BUF_SLOT_SIZE;
-	gx_mem1_free_bytes = spare;
+	gx_mem1_total_bytes = render_size;
+	gx_mem1_used_bytes = 0;
+	gx_mem1_free_bytes = render_size;
 	gx_tex_phys = gx_tex_workspace[0].phys_addr;
 	gx_tex_buf = gx_tex_workspace[0].cpu_addr;
 	gx_tex_buf_alt = gx_tex_workspace[1].cpu_addr;
 	mutex_unlock(&gx_mem1_lock);
 	return 0;
-err_free:
-	dev_err(dev, "invalid GX MEM1 allocator layout: %d\n", ret);
-	gx_mem1_shutdown = true;
-	gx_mem1_free_workspaces_locked();
-	mutex_unlock(&gx_mem1_lock);
-	return ret;
 }
 #endif
 
@@ -2943,6 +2984,9 @@ static int gcn_gx_init(struct platform_device *pdev)
 {
 	struct resource fifo_mem;
 	struct resource texture_mem;
+#if IS_ENABLED(CONFIG_DRM_GCN_GX)
+	struct resource render_mem;
+#endif
 	int irq;
 	int ret;
 
@@ -3057,6 +3101,20 @@ static int gcn_gx_init(struct platform_device *pdev)
 	if (gx_resources_overlap(&fifo_mem, &texture_mem))
 		return dev_err_probe(&pdev->dev, -EINVAL,
 				     "FIFO and texture memory overlap\n");
+#if IS_ENABLED(CONFIG_DRM_GCN_GX)
+	ret = gx_get_reserved_region(pdev, "render", GX_RENDER_POOL_SIZE,
+				     &render_mem);
+	if (ret)
+		return dev_err_probe(&pdev->dev, ret,
+				     "invalid render memory region\n");
+	if (resource_size(&render_mem) != GX_RENDER_POOL_SIZE)
+		return dev_err_probe(&pdev->dev, -EINVAL,
+				     "render memory region has unexpected size\n");
+	if (gx_resources_overlap(&fifo_mem, &render_mem) ||
+	    gx_resources_overlap(&texture_mem, &render_mem))
+		return dev_err_probe(&pdev->dev, -EINVAL,
+				     "GX reserved memory regions overlap\n");
+#endif
 
 	irq = platform_get_irq(pdev, 0);
 	if (irq < 0)
@@ -3108,7 +3166,7 @@ static int gcn_gx_init(struct platform_device *pdev)
 	 */
 	gx_tex_raw = NULL;
 #if IS_ENABLED(CONFIG_DRM_GCN_GX)
-	ret = gx_mem1_alloc_workspaces(&pdev->dev, &texture_mem);
+	ret = gx_mem1_alloc_workspaces(&texture_mem, &render_mem);
 	if (ret)
 		goto err_hw;
 #else

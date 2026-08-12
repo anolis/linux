@@ -18,6 +18,9 @@ void gcn_drm_provider_free(const struct gcn_drm_accel_ops *provider,
 			   void *allocation);
 int gcn_drm_provider_mmap(const struct gcn_drm_accel_ops *provider,
 			  void *allocation, struct vm_area_struct *vma);
+int gcn_drm_provider_copy(const struct gcn_drm_accel_ops *provider,
+			  void *src_allocation, void *dst_allocation,
+			  u16 width, u16 height);
 
 int gcn_drm_render_open(struct drm_device *drm, struct drm_file *file);
 void gcn_drm_render_postclose(struct drm_device *drm, struct drm_file *file);

@@ -8836,3 +8836,149 @@ seven UML KUnit assertions, static host and PowerPC userspace builds with
 commit `496d2e2ab` also validates the new whole-file transfer path: both the
 6.56 MiB rollback download and candidate upload passed first-stream SHA-256,
 so no chunk repair was required.
+
+### Stage typed RGB565 render submission
+
+- Test branch: test/wii-gx-render-submit
+- Candidate dtbImage.wii SHA-256:
+  f65ed6ee9fbf4efa578f4c384b3f45accf86e1bbe0c29fe51f95f997699588fb
+- Candidate gcn-gx.ko SHA-256:
+  d2a372bee427705ba002cf91b2e476e3bcc71536f3ab8c7cea64a309aaa6c773
+- Candidate static wii-gcn-render-test SHA-256:
+  c9458810f42030034d7d791c9e435ca31d397d81d16fd52a53ae8c47e3348d4a
+- Corrected ownership candidate dtbImage.wii SHA-256:
+  7469f7bdd3f5e83f0d395d41e3b78da8731af8ab6a4a02e2e2405e0fda232482
+- Corrected ownership candidate gcn-gx.ko SHA-256:
+  811e6165314587befbea16d726f06e1ecbb3c0ba648784319da17dc26ce9bfa8
+
+Add the first userspace rendering operation without exposing raw FIFO bytes,
+GX register values, or physical addresses. `DRM_IOCTL_GCN_SUBMIT` accepts a
+per-file context ID, the typed `DRM_GCN_RENDER_OP_COPY_RGB565` operation, two
+driver-owned MEM1 GEM handles, and an optional binary syncobj. Source and
+destination must be distinct tiled-RGB565 objects from the same live provider
+with identical dimensions. Unknown contexts, operations, flags, padding,
+handles, foreign-file objects, aliasing, or mismatched metadata are rejected
+before hardware access.
+
+The DRM ioctl resolves opaque allocations, locks both reservation objects with
+`drm_exec`, and invokes one provider callback. The GX module flushes Broadway
+source and destination cache lines, serializes against scanout with the
+existing submit mutex, restores the known-good libogc-derived state, samples
+the source with nearest filtering, draws a full-size textured quad into EFB,
+and copies EFB into the destination as tiled RGB565. Separate BP 0x45 markers
+fence rasterization and texture copy; successful return requires both PE finish
+IRQs. The destination cache is invalidated before returning to userspace.
+
+Hardware execution remains synchronous in this stage. After the provider has
+completed, the ioctl attaches an already-signaled private fence to the source
+as a read dependency and destination as a write dependency, and replaces the
+optional binary syncobj with the same completion. This gives the existing WAIT
+ioctl and syncobj API correct observable semantics without claiming an
+asynchronous scheduler that the driver does not yet implement.
+
+The static fixture creates two 256 by 256 objects, writes a nonzero uniform
+RGB565 source and a distinct destination sentinel, validates unknown-context,
+aliased-handle, and cross-file rejection, submits through a real context,
+waits through both destination reservation and binary syncobj paths, and
+requires all 65536 destination texels to match byte-exactly. Existing provider
+absence, context isolation, mmap/readback, allocator exhaustion, capacity
+recovery, idle wait, and PRIME rejection tests remain enabled.
+
+Host validation passes patch-scoped strict checkpatch, `git diff --check`,
+fresh exported-UAPI native and static PowerPC clients with `-Wall -Wextra
+-Werror`, focused PowerPC `W=1` objects, all eight UML KUnit assertions, and a
+full `wii_defconfig` `zImage modules` build with `-j16`. The first full link
+correctly exposed a missing `DRM_EXEC` configuration dependency; `DRM_GCN` now
+selects that standard helper and final link/modpost pass.
+
+Hardware acceptance must first boot the checksum-pinned kernel with GX absent
+and rerun the provider-absent fixture. Then load the matching module and require
+the new submit feature bit, all pre-existing smoke assertions, both negative
+submit controls, a successful typed submission, successful reservation and
+syncobj waits, and byte-exact destination readback. Record PE finish deltas and
+reject any FIFO/token/finish timeout, stale readback, capacity leak, module
+lifetime failure, oops, panic, or machine check. Finally rerun visible XRGB8888,
+RGB565, offscreen replay, module-unload, and CPU-fallback regressions before
+accepting the stage.
+
+Hardware result for the original candidate: rejected; corrected candidate
+accepted below.
+
+The first hardware run of commit `4c709fb2381941f0533aab311ebed7a912b14d87`
+is rejected despite the smoke client's byte-exact result. The test allocated
+its source object at physical `0x01480000`, which is also where the boot
+wrapper places the packed FDT. Writing the source's repeating `f8 1f` texels
+deterministically replaced live Open Firmware property storage with those
+same bytes. After the test, the GPU node's `compatible`, `reg`, `interrupts`,
+`memory-region`, and name-list properties all contained the source pattern;
+module reload consequently failed because the platform device no longer had
+valid resources. The bounded diagnostic is preserved at
+`/tmp/wii-gx-submit-corruption-live-4c709fb23.txt`, 1826 bytes, SHA-256
+`28c29945de6fe19af223dd347edd35639e0f4f30b37669b38ef82d96221c235d`.
+
+The collision came from the previously accepted allocator layout, not from
+the typed command itself. Expanding `gx_texture` from 1536 KiB to 2 MiB made
+the nominal userspace spare range `0x01480000..0x014fffff`, overlapping the
+wrapper FDT and early device-tree allocations. Correct the ownership model by
+restoring the texture reservation to exactly two internal 768 KiB workspaces
+at `0x01300000..0x0147ffff` and adding an independent 512 KiB `gx_render`
+reservation at `0x01600000..0x0167ffff`. That range ends below the existing
+FIFO at `0x01684000`, and remains disjoint from the OHCI no-map pool beginning
+at `0x01500000` and XFB beginning at `0x01698000`.
+
+The GX probe now requires all three named reservations, rejects any pairwise
+overlap, requires the render aperture to be exactly 512 KiB, assigns the two
+internal workspaces directly from the texture reservation, and initializes
+the userspace `drm_mm` only over the render aperture. UAPI total/used/free
+accounting therefore starts at `524288/0/524288`; four 131072-byte objects
+still consume the pool exactly. Hardware re-acceptance must additionally hash
+all live GPU OF properties before and after submission, then unload and reload
+the GX module successfully. No result from the rejected image is evidence of
+render correctness until those ownership checks pass.
+
+Hardware result for commit `078a9ba3c`: passed; accept the isolated ownership
+layout and typed RGB565 submission. The corrected kernel booted with GX absent
+and exposed live reserved-memory cells `0x01300000+0x00180000` for internal
+textures, `0x01600000+0x00080000` for render objects, and
+`0x01684000+0x00010000` for the FIFO. The provider-absent smoke test passed
+before any GX module was loaded.
+
+Loading checksum-pinned module
+`811e6165314587befbea16d726f06e1ecbb3c0ba648784319da17dc26ce9bfa8`
+reported FIFO `0x01684000`, internal texture workspaces `0x01300000` and
+`0x013c0000`, and pool total/used/free `524288/0/524288`. The static smoke
+client reported the same total and free capacity, allocated exactly four
+131072-byte objects before `-ENOSPC`, passed all negative submission controls,
+and copied all 65536 tiled RGB565 texels byte-exactly. Reservation and binary
+syncobj waits completed and all capacity returned on object release.
+
+Before module load, every regular file in the live GPU OF node was hashed and
+the packed `/sys/firmware/fdt` was independently hashed. Both manifests
+remained byte-identical after typed submission, after normal scanout and
+offscreen regressions, and after final module unload. The module unloaded,
+reloaded, rebound to the original unmodified platform device, and unloaded
+again; provider-absent smoke passed after each final unload. This directly
+closes the ownership failure that invalidated the first candidate.
+
+The checksum-pinned visual fixture completed 80 RGB565 page flips while GX
+advanced 89 frames and 178 PE finishes. It then completed 80 XRGB8888 flips
+while GX advanced 90 frames and 180 PE finishes, including 81 XRGB8888
+conversions. Both runs satisfy the exact two-finishes-per-generated-frame
+invariant. After GX unload, the CPU XRGB8888 path completed 40 page flips and
+provider-absent discovery remained correct.
+
+The independent offscreen EFB-to-texture test completed one copy, changed all
+153600 destination words, replayed the result 23 times, and reached exactly
+`48 = 2 * (1 + 23)` PE finishes. Its 614400-byte XFB capture has SHA-256
+`2c488feb9b32a2510a6912f85c8187e021e0fe3d7b228f8431395502b57cd075`,
+byte-identical to the previously accepted four-quadrant fixture. This provides
+a full-frame positive control in addition to counters and sparse values.
+
+The exact committed tree passes strict patch-scoped checkpatch,
+`git diff --check`, focused PowerPC `W=1` builds, native and static PowerPC
+userspace builds with `-Wall -Wextra -Werror`, all eight explicitly enabled
+GCN UML KUnit tests, and full `zImage modules` with `-j16`. The complete
+353-line hardware log is preserved at
+`/tmp/wii-dmesg-gx-render-submit-078a9ba3c.txt`, SHA-256
+`3e0648aa9d3731ed26310330bc5e87089639f49ddfa3c339b6775908abc0cd45`.
+It contains no GX/DRM timeout, overlap error, oops, panic, or machine check.

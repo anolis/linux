@@ -30,6 +30,7 @@ enum drm_gcn_param {
 #define DRM_GCN_FEATURE_CONTEXTS		(1ULL << 1)
 #define DRM_GCN_FEATURE_WAIT		(1ULL << 2)
 #define DRM_GCN_FEATURE_SYNCOBJ		(1ULL << 3)
+#define DRM_GCN_FEATURE_SUBMIT_RGB565	(1ULL << 4)
 
 struct drm_gcn_get_param {
 	__u32 param;
@@ -92,13 +93,35 @@ struct drm_gcn_wait {
 	__u64 timeout_ns;
 };
 
+enum drm_gcn_render_op {
+	DRM_GCN_RENDER_OP_COPY_RGB565 = 1,
+};
+
+/*
+ * Submit one validated operation between driver-owned MEM1 GEM objects.
+ * No command bytes, register values, or physical addresses are accepted.
+ */
+struct drm_gcn_submit {
+	__u32 ctx_id;
+	__u32 op;
+	__u32 src_handle;
+	__u32 dst_handle;
+	/* Optional binary syncobj replaced with the completion fence. */
+	__u32 out_syncobj;
+	/* Must be zero. */
+	__u32 flags;
+	/* Must be zero. */
+	__u64 pad;
+};
+
 #define DRM_GCN_GET_PARAM	0x00
 #define DRM_GCN_GEM_CREATE	0x01
 #define DRM_GCN_GEM_MMAP	0x02
 #define DRM_GCN_CTX_CREATE	0x03
 #define DRM_GCN_CTX_FREE	0x04
 #define DRM_GCN_WAIT		0x05
-#define DRM_GCN_NUM_IOCTLS	0x06
+#define DRM_GCN_SUBMIT		0x06
+#define DRM_GCN_NUM_IOCTLS	0x07
 
 #define DRM_IOCTL_GCN_GET_PARAM \
 	DRM_IOWR(DRM_COMMAND_BASE + DRM_GCN_GET_PARAM, \
@@ -117,6 +140,8 @@ struct drm_gcn_wait {
 		struct drm_gcn_ctx_free)
 #define DRM_IOCTL_GCN_WAIT \
 	DRM_IOW(DRM_COMMAND_BASE + DRM_GCN_WAIT, struct drm_gcn_wait)
+#define DRM_IOCTL_GCN_SUBMIT \
+	DRM_IOW(DRM_COMMAND_BASE + DRM_GCN_SUBMIT, struct drm_gcn_submit)
 
 #if defined(__cplusplus)
 }

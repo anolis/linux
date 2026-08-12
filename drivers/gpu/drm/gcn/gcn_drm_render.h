@@ -52,4 +52,15 @@ static inline unsigned long gcn_drm_render_timeout_jiffies(u64 timeout_ns,
 	return max_t(unsigned long, 1, timeout_jiffies);
 }
 
+static inline int
+gcn_drm_render_validate_submit(const struct drm_gcn_submit *args)
+{
+	if (!args || !args->ctx_id || !args->src_handle || !args->dst_handle ||
+	    args->src_handle == args->dst_handle || args->flags || args->pad ||
+	    args->op != DRM_GCN_RENDER_OP_COPY_RGB565)
+		return -EINVAL;
+
+	return 0;
+}
+
 #endif /* __GCN_DRM_RENDER_H__ */
