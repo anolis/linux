@@ -15,6 +15,7 @@ struct gcn_drm_mem1_info {
 	u32 max_height;
 	u64 formats;
 	u64 layouts;
+	u64 features;
 };
 
 struct gcn_drm_accel_ops {
@@ -28,6 +29,8 @@ struct gcn_drm_accel_ops {
 	int (*mem1_alloc)(size_t size, void **allocation);
 	void (*mem1_free)(void *allocation);
 	int (*mem1_mmap)(void *allocation, struct vm_area_struct *vma);
+	int (*submit_rgb565)(void *src_allocation, void *dst_allocation,
+			     u16 width, u16 height);
 };
 
 int gcn_drm_register_accel(const struct gcn_drm_accel_ops *ops);

@@ -281,6 +281,21 @@ int gcn_drm_provider_mmap(const struct gcn_drm_accel_ops *provider,
 	return provider->mem1_mmap(allocation, vma);
 }
 
+int gcn_drm_provider_copy(const struct gcn_drm_accel_ops *provider,
+			  void *src_allocation, void *dst_allocation,
+			  u16 width, u16 height)
+{
+	int ret = -ENODEV;
+
+	mutex_lock(&gcn_drm_accel_lock);
+	if (gcn_drm_accel == provider && provider->submit_rgb565)
+		ret = provider->submit_rgb565(src_allocation, dst_allocation,
+					      width, height);
+	mutex_unlock(&gcn_drm_accel_lock);
+
+	return ret;
+}
+
 static int gcn_drm_accel_rgb565(const void *src, u32 src_pitch,
 				u32 xfb_phys, u16 width, u16 height)
 {

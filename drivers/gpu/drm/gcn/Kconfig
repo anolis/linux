@@ -2,6 +2,7 @@
 
 config DRM_GCN
 	bool
+	select DRM_EXEC
 
 config DRM_GCN_VI
 	tristate "Nintendo GameCube/Wii Video Interface KMS"
@@ -66,5 +67,6 @@ config DRM_GCN_RENDER_KUNIT_TEST
 	default KUNIT_ALL_TESTS
 	help
 	  Validate the fixed-width render UAPI layout, tiled RGB565 object
-	  dimensions and sizes, invalid argument rejection, and absolute timeout
-	  conversion. These tests run without Nintendo hardware.
+	  dimensions and sizes, typed submission validation, invalid argument
+	  rejection, and absolute timeout conversion. These tests run without
+	  Nintendo hardware.

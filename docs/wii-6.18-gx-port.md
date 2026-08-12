@@ -8836,3 +8836,65 @@ seven UML KUnit assertions, static host and PowerPC userspace builds with
 commit `496d2e2ab` also validates the new whole-file transfer path: both the
 6.56 MiB rollback download and candidate upload passed first-stream SHA-256,
 so no chunk repair was required.
+
+### Stage typed RGB565 render submission
+
+- Test branch: test/wii-gx-render-submit
+- Candidate dtbImage.wii SHA-256:
+  f65ed6ee9fbf4efa578f4c384b3f45accf86e1bbe0c29fe51f95f997699588fb
+- Candidate gcn-gx.ko SHA-256:
+  d2a372bee427705ba002cf91b2e476e3bcc71536f3ab8c7cea64a309aaa6c773
+- Candidate static wii-gcn-render-test SHA-256:
+  c9458810f42030034d7d791c9e435ca31d397d81d16fd52a53ae8c47e3348d4a
+
+Add the first userspace rendering operation without exposing raw FIFO bytes,
+GX register values, or physical addresses. `DRM_IOCTL_GCN_SUBMIT` accepts a
+per-file context ID, the typed `DRM_GCN_RENDER_OP_COPY_RGB565` operation, two
+driver-owned MEM1 GEM handles, and an optional binary syncobj. Source and
+destination must be distinct tiled-RGB565 objects from the same live provider
+with identical dimensions. Unknown contexts, operations, flags, padding,
+handles, foreign-file objects, aliasing, or mismatched metadata are rejected
+before hardware access.
+
+The DRM ioctl resolves opaque allocations, locks both reservation objects with
+`drm_exec`, and invokes one provider callback. The GX module flushes Broadway
+source and destination cache lines, serializes against scanout with the
+existing submit mutex, restores the known-good libogc-derived state, samples
+the source with nearest filtering, draws a full-size textured quad into EFB,
+and copies EFB into the destination as tiled RGB565. Separate BP 0x45 markers
+fence rasterization and texture copy; successful return requires both PE finish
+IRQs. The destination cache is invalidated before returning to userspace.
+
+Hardware execution remains synchronous in this stage. After the provider has
+completed, the ioctl attaches an already-signaled private fence to the source
+as a read dependency and destination as a write dependency, and replaces the
+optional binary syncobj with the same completion. This gives the existing WAIT
+ioctl and syncobj API correct observable semantics without claiming an
+asynchronous scheduler that the driver does not yet implement.
+
+The static fixture creates two 256 by 256 objects, writes a nonzero uniform
+RGB565 source and a distinct destination sentinel, validates unknown-context,
+aliased-handle, and cross-file rejection, submits through a real context,
+waits through both destination reservation and binary syncobj paths, and
+requires all 65536 destination texels to match byte-exactly. Existing provider
+absence, context isolation, mmap/readback, allocator exhaustion, capacity
+recovery, idle wait, and PRIME rejection tests remain enabled.
+
+Host validation passes patch-scoped strict checkpatch, `git diff --check`,
+fresh exported-UAPI native and static PowerPC clients with `-Wall -Wextra
+-Werror`, focused PowerPC `W=1` objects, all eight UML KUnit assertions, and a
+full `wii_defconfig` `zImage modules` build with `-j16`. The first full link
+correctly exposed a missing `DRM_EXEC` configuration dependency; `DRM_GCN` now
+selects that standard helper and final link/modpost pass.
+
+Hardware acceptance must first boot the checksum-pinned kernel with GX absent
+and rerun the provider-absent fixture. Then load the matching module and require
+the new submit feature bit, all pre-existing smoke assertions, both negative
+submit controls, a successful typed submission, successful reservation and
+syncobj waits, and byte-exact destination readback. Record PE finish deltas and
+reject any FIFO/token/finish timeout, stale readback, capacity leak, module
+lifetime failure, oops, panic, or machine check. Finally rerun visible XRGB8888,
+RGB565, offscreen replay, module-unload, and CPU-fallback regressions before
+accepting the stage.
+
+Hardware result: pending.
