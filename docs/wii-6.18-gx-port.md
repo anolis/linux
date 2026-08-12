@@ -8500,3 +8500,108 @@ MEM1 in native tiled RGB565 layout, invalidate and rebind that GPU-produced
 texture, and sample it into a later visible frame with deterministic
 completion fences. A render UAPI can now be designed from a demonstrated
 round trip rather than an assumed copy path.
+
+### Stage GX platform-resource ownership
+
+- Test branch: `test/wii-gx-resource-model`
+- Candidate commit: `58ecee803`
+- Candidate `zImage` SHA-256:
+  `0b6558f289ad809d7a79d18da6c1e98d12685f1f91e1edb9c88e15d79f8a82e7`
+- Candidate `gcn-gx.ko` SHA-256:
+  `815162479537fe0b5f90ee814221f5b9728cb24dcadafbffd8622e58c918f1eb`
+- Embedded `wii.dtb` SHA-256:
+  `94acfda6083844dc3a14f643d2bcb9b1b3e1250c5e7337cc1774869c269d6a6f`
+
+Replace the bring-up driver's anonymous GX reservations, fixed MEM1
+addresses, broad `ioremap(0x0c000000, 0x9000)`, and raw hwirq mapping with a
+named platform-resource contract. The unchanged physical ranges are now
+described as reserved-memory nodes. GX receives separate CP and PE windows,
+the PE finish interrupt, named FIFO and texture regions, and a phandle to the
+shared big-endian PI syscon. VI receives an explicit XFB memory reference.
+
+The module now binds through platform probe/remove. It rejects missing,
+`no-map`, undersized, misaligned, overlapping, or non-MEM1 FIFO and texture
+regions before hardware initialization. FIFO and texture addresses are
+derived from DT; no operational hard-coded GX buffer address remains. PI
+FIFO access uses the shared regmap instead of remapping the full PI block,
+while CP and PE are the only MMIO windows claimed directly by GX. Rendering
+commands, PE fences, provider callbacks, XFB selection, and CPU fallback are
+unchanged.
+
+Host validation passed a full PowerPC `zImage` and modules build with `-j16`,
+Wii DT compilation and decompilation, changed-line checkpatch, `git diff
+--check`, module OF-alias inspection, and embedded-DT string inspection. A
+temporary `dtschema` environment then completed both `dt_binding_check` for
+`nintendo,flipper-gx.yaml` and the filtered `dtbs_check` with no error. Only
+the optional `yamllint` style pass was skipped because that package is not
+installed.
+
+This test must deploy both checksum-pinned artifacts because the old DT has
+no GX platform node. After cold boot, first verify the named reserved-memory
+regions and `nintendo,hollywood-gx` platform device without loading the
+provider. CPU DRM scanout must remain clear and responsive. Then load the
+matching module and require the discovered addresses to remain FIFO
+`0x01684000` and textures `0x01300000`/`0x013c0000`, with the PE IRQ mapped
+and no resource, regmap, overlap, timeout, or fault message.
+
+Run short RGB565 and XRGB8888 fixtures and require the exact two-PE-finishes
+per generated-frame invariant, completed flips, advancing VI interrupts, and
+crisp output. Repeat the accepted `offscreen_probe=1` round trip and require
+one copy, all 153600 words changed, visible replay, and the same completion
+invariant. Explicitly terminate each holding client, unload the module, and
+confirm immediate clean CPU-console fallback. Do not add the MEM1 allocator
+or any render UAPI until this ownership-only conversion passes.
+
+Hardware result: passed; accept the GX platform-resource ownership model.
+Cold boot with the candidate DT reserved the exact named MEM1 ranges at
+`0x01300000..0x0147ffff` (texture), `0x01684000..0x01693fff` (FIFO), and
+`0x01698000..0x017fffff` (XFB). The `c000000.gpu` platform device existed
+before provider load, CPU DRM scanout remained active, and its live OF cells
+reported CP `0x0c000000+0x80`, PE `0x0c001000+0x10`, FIFO
+`0x01684000+0x10000`, and texture `0x01300000+0x180000`.
+
+Loading checksum-pinned module
+`815162479537fe0b5f90ee814221f5b9728cb24dcadafbffd8622e58c918f1eb`
+bound `c000000.gpu` to `gcn-gx` and discovered FIFO `0x01684000`, texture
+slots `0x01300000`/`0x013c0000`, and Linux PE IRQ 25. A normal RGB565 run
+reached 329 frames and exactly 658 PE finishes. Its independently retrieved
+XFB snapshot has SHA-256
+`952ad9ae5198e9f85e5661a8db4fbe728d3342fe5c2aee56c4db9e875be6f01d`;
+the corresponding source RGB565 snapshot has SHA-256
+`0f05a5822841e3c08e7e8c04ab672c7662645e8ea3f982ab5216565770c49ebf`.
+Both PNG conversions show a readable, geometrically correct console with no
+repeated columns, diffusion, tiling corruption, or channel swap.
+
+Add opt-in DRM XFB capture in commits `e53246f6d` and `a86fdbefe` without
+changing normal rendering. The resulting XRGB8888 fixture completed all 3000
+requested flips while the provider reached 2986 captured callbacks and
+exactly 5972 PE finishes. Its checksum-verified XFB has SHA-256
+`d89e784ed7e48c8610e7f489671cb584ac869023255975549ecfb6b868773a49`;
+PNG SHA-256 is
+`8e2004f388ec7c6ff00b71391bedf09264956a355bb653c45ae1db362e1ec1a2`.
+The PNG exactly reproduces the deterministic red/green/blue/white quadrants,
+black grid, cyan/magenta checkerboard, and yellow marker.
+
+Repeat the offscreen probe using final module SHA-256
+`07c3d2b6305d7cea37a8758f82e20c6102085100e08986954d84a886571e0f4d`.
+The DT-owned alternate texture changed all 153600 words; one copy and 63
+replays produced exactly 126 PE finishes at snapshot time, and the fixture
+subsequently completed all 120 requested flips. The replayed XFB has SHA-256
+`2c488feb9b32a2510a6912f85c8187e021e0fe3d7b228f8431395502b57cd075`;
+PNG SHA-256 is
+`8bba3984a94f1556b0cf031a2ecdc96e606af63a3e9b2855b159cde3eea03e63`.
+It shows the exact crisp red/green/blue/white grid, with no purple or teal
+clear leakage and no replay-layout corruption.
+
+Terminate the holding client and unload GX. With no provider present, a
+40-flip XRGB8888 fixture completed through CPU fallback while VI interrupts
+advanced from 62889 to 63129. No resource, regmap, overlap, FIFO, completion,
+DRM, oops, panic, or machine-check fault appears in the independently
+retrieved 464-line kernel log at
+`/tmp/wii-dmesg-gx-resource-model-a86fdbefe.txt`, SHA-256
+`c584a1df5771a8555debd6f112c0b3926651f46446e19200a39782d6af2fba6d`.
+
+This closes Stage 1. GX now owns hardware through explicit DT resources while
+preserving the accepted normal scanout, offscreen round trip, modular unload,
+and CPU fallback behavior. The next ownership stage may introduce a bounded
+MEM1 allocator; a render UAPI remains a later and separate interface change.

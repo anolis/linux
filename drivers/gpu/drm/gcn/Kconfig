@@ -22,6 +22,7 @@ config DRM_GCN_GX
 	tristate "Nintendo GameCube/Wii GX scanout accelerator"
 	depends on DRM_GCN_VI && WII
 	depends on !FB_GAMECUBE_GX
+	select MFD_SYSCON
 	help
 	  Build the GX fixed-function renderer as an optional scanout backend for
 	  the GCN VI DRM driver. GX converts RGB565 shadow buffers into inactive

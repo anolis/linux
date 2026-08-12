@@ -18,9 +18,6 @@
  * that range.
  */
 /*/memreserve/ 0x10000000 0x0004000;*/	/* DSP RAM */
-/memreserve/ 0x01698000 0x00168000;	/* two 640x576 YUYV XFBs */
-/memreserve/ 0x01300000 0x00180000;	/* two GX texture buffers */
-/memreserve/ 0x01684000 0x00010000;	/* GX command FIFO */
 
 / {
 	model = "nintendo,wii";
@@ -37,6 +34,18 @@
 			compatible = "shared-dma-pool";
 			reg = <0x01500000 0x00100000>;
 			no-map;
+		};
+
+		gx_texture: texture@1300000 {
+			reg = <0x01300000 0x00180000>;
+		};
+
+		gx_fifo: fifo@1684000 {
+			reg = <0x01684000 0x00010000>;
+		};
+
+		gx_xfb: framebuffer@1698000 {
+			reg = <0x01698000 0x00168000>;
 		};
 	};
 
@@ -84,19 +93,34 @@
 			interrupts = <8>;
 			xfb-start = <0x01698000>;
 			xfb-size = <0x00168000>;
+			memory-region = <&gx_xfb>;
+			memory-region-names = "xfb";
 			audio-video-encoder = <&AVE>;
 		};
 
-		processor-interface@c003000 {
+		PI0: processor-interface@c003000 {
 			compatible = "nintendo,hollywood-pi",
-					"nintendo,flipper-pi";
+					"nintendo,flipper-pi", "syscon";
 			reg = <0x0c003000 0x100>;
+			big-endian;
 
 			PIC0: pic0 {
 				#interrupt-cells = <1>;
 				compatible = "nintendo,flipper-pic";
 				interrupt-controller;
 			};
+		};
+
+		gpu@c000000 {
+			compatible = "nintendo,hollywood-gx",
+				     "nintendo,flipper-gx";
+			reg = <0x0c000000 0x80>,
+			      <0x0c001000 0x10>;
+			reg-names = "cp", "pe";
+			interrupts = <10>;
+			memory-region = <&gx_fifo>, <&gx_texture>;
+			memory-region-names = "fifo", "texture";
+			nintendo,processor-interface = <&PI0>;
 		};
 
 		dsp@c005000 {
