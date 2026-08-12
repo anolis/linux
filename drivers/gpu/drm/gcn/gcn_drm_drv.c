@@ -33,6 +33,7 @@
 #include <drm/drm_vblank.h>
 
 #include "gcn_drm_trace.h"
+#include "gcn_drm_internal.h"
 
 #define GCN_DRM_NAME		"gcn-vi"
 #define GCN_DRM_DESC		"Nintendo GameCube/Wii VI DRM"
@@ -153,8 +154,10 @@ int gcn_drm_register_accel(const struct gcn_drm_accel_ops *ops)
 {
 	int ret = 0;
 
-	if (!ops || !ops->name ||
-	    (!ops->blit_rgb565 && !ops->blit_xrgb8888))
+	if (!ops || !ops->name || !ops->owner ||
+	    (!ops->blit_rgb565 && !ops->blit_xrgb8888) ||
+	    !ops->mem1_info || !ops->mem1_alloc || !ops->mem1_free ||
+	    !ops->mem1_mmap)
 		return -EINVAL;
 
 	mutex_lock(&gcn_drm_accel_lock);
@@ -182,6 +185,67 @@ void gcn_drm_unregister_accel(const struct gcn_drm_accel_ops *ops)
 		ops ? ops->name : "unknown");
 }
 EXPORT_SYMBOL_GPL(gcn_drm_unregister_accel);
+
+int gcn_drm_provider_info(struct gcn_drm_mem1_info *info)
+{
+	int ret = -ENODEV;
+
+	if (!info)
+		return -EINVAL;
+
+	mutex_lock(&gcn_drm_accel_lock);
+	if (gcn_drm_accel && gcn_drm_accel->mem1_info)
+		ret = gcn_drm_accel->mem1_info(info);
+	mutex_unlock(&gcn_drm_accel_lock);
+	return ret;
+}
+
+int gcn_drm_provider_alloc(size_t size,
+			   const struct gcn_drm_accel_ops **provider,
+			   void **allocation)
+{
+	const struct gcn_drm_accel_ops *ops;
+	int ret = -ENODEV;
+
+	if (!provider || !allocation)
+		return -EINVAL;
+	*provider = NULL;
+	*allocation = NULL;
+
+	mutex_lock(&gcn_drm_accel_lock);
+	ops = gcn_drm_accel;
+	if (!ops || !ops->mem1_alloc || !try_module_get(ops->owner))
+		goto out_unlock;
+
+	ret = ops->mem1_alloc(size, allocation);
+	if (ret) {
+		module_put(ops->owner);
+		goto out_unlock;
+	}
+	*provider = ops;
+out_unlock:
+	mutex_unlock(&gcn_drm_accel_lock);
+	return ret;
+}
+
+void gcn_drm_provider_free(const struct gcn_drm_accel_ops *provider,
+			   void *allocation)
+{
+	if (!provider)
+		return;
+
+	provider->mem1_free(allocation);
+	module_put(provider->owner);
+}
+
+int gcn_drm_provider_mmap(const struct gcn_drm_accel_ops *provider,
+			  void *allocation, struct vm_area_struct *vma)
+{
+	if (!provider || !provider->mem1_mmap)
+		return -ENODEV;
+
+	return provider->mem1_mmap(allocation, vma);
+}
 
 static int gcn_drm_accel_rgb565(const void *src, u32 src_pitch,
 				u32 xfb_phys, u16 width, u16 height)
@@ -794,8 +858,38 @@ static irqreturn_t gcn_drm_irq(int irq, void *data)
 
 DEFINE_DRM_GEM_FOPS(gcn_drm_fops);
 
+static int gcn_drm_prime_handle_to_fd(struct drm_device *drm,
+				      struct drm_file *file, u32 handle,
+				      u32 flags, int *prime_fd)
+{
+	(void)drm;
+	(void)file;
+	(void)handle;
+	(void)flags;
+	(void)prime_fd;
+	return -EOPNOTSUPP;
+}
+
+static int gcn_drm_prime_fd_to_handle(struct drm_device *drm,
+				      struct drm_file *file, int prime_fd,
+				      u32 *handle)
+{
+	(void)drm;
+	(void)file;
+	(void)prime_fd;
+	(void)handle;
+	return -EOPNOTSUPP;
+}
+
 static const struct drm_driver gcn_drm_driver = {
-	.driver_features = DRIVER_MODESET | DRIVER_GEM | DRIVER_ATOMIC,
+	.driver_features = DRIVER_MODESET | DRIVER_GEM | DRIVER_ATOMIC |
+			   DRIVER_RENDER | DRIVER_SYNCOBJ,
+	.open = gcn_drm_render_open,
+	.postclose = gcn_drm_render_postclose,
+	.ioctls = gcn_drm_render_ioctls,
+	.num_ioctls = DRM_GCN_NUM_IOCTLS,
+	.prime_handle_to_fd = gcn_drm_prime_handle_to_fd,
+	.prime_fd_to_handle = gcn_drm_prime_fd_to_handle,
 	.fops = &gcn_drm_fops,
 	DRM_GEM_SHMEM_DRIVER_OPS,
 	DRM_FBDEV_SHMEM_DRIVER_OPS,
