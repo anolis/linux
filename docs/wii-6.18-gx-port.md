@@ -9204,3 +9204,31 @@ only one observed PE finish IRQ after submission. Retain the final unique token
 as the proof that the complete stream, including destination copyback, reached
 the PE. Repeat the unchanged all-pixel client; its destination readback remains
 the independent proof that the final copy actually completed.
+
+Hardware result for completion correction commit `a9efb5f78`: accepted for the
+bounded-fill render ABI. On fresh boot ID
+`c6ca3ddf-c0fc-460b-bd32-8b40be1e5dfb`, the Wii verified module SHA-256
+`065c33a4df9e8356bb7737bb055309025c856c8a28a1c42c0c40706f5f9f2e70`
+and unchanged static client SHA-256
+`99b89dd8dd836ee376aa0242b22e77b2bdb5c47768a08de1a209e5dafde682cf`.
+Provider-absent discovery passed before load.
+
+The unchanged client copied all 65536 tiled RGB565 pixels byte-exactly, filled
+the complete surface byte-exactly across four colours, filled the 73 by 61
+interior rectangle with every outside pixel preserved, and filled only the
+bottom-right pixel while preserving the complete prior surface. MEM1 capacity
+was `524288/0/524288` both before and after the test.
+
+One concurrent scanout frame and the render operations nominally emitted 20
+finish writes, while the global counter advanced by 19. This is direct positive
+evidence for exactly one coalesced level-triggered finish event. All operations
+nonetheless passed their complete memory oracle after their unique final PE
+tokens, validating the corrected completion rule without weakening copyback
+verification. The exact GX/DRM timeout, stall, failure, oops, panic, and machine
+check audit was empty.
+
+The module unloaded cleanly, provider-absent discovery passed again under CPU
+fallback, and the Wii was forcibly powered off after its initramfs `poweroff`
+wrapper failed to determine a runlevel. Broader RGB565/XRGB8888 visual and
+offscreen-capture regression tests remain intentionally deferred because this
+session was limited to the pending corrected rectangle test.
