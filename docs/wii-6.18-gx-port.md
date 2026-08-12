@@ -8659,4 +8659,54 @@ Reject the stage on any reservation overlap, allocator-layout error, changed
 workspace address, FIFO/completion timeout, DRM fault, oops, panic, or machine
 check.
 
-Hardware result: pending.
+Hardware result: passed; accept the bounded GX MEM1 allocator. The deployed
+kernel matched SHA-256
+`e39874481dda1afed6fef4288125e59eb468527cb28508a335b24d335a9b5ae0`
+and booted with the exact adjacent reservations
+`0x01300000..0x014fffff` for GX and `0x01500000..0x015fffff` for the
+independently owned no-map OHCI DMA pool. The live OF cell reported
+`<0x01300000 0x00200000>`, the GX platform device existed before provider
+load, and CPU DRM scanout remained active.
+
+Loading checksum-pinned module
+`ad563f74de8ea596e8ecef65bf43a41be054139260f0d451b6ee687b62c6a860`
+repeatedly allocated FIFO `0x01684000` and texture workspaces `0x01300000`
+and `0x013c0000`. Its ready line and read-only parameters both reported pool
+total/used/free values `2097152/1572864/524288`. A normal RGB565 run reached
+987 frames and exactly 1974 PE finishes. Its independently retrieved XFB has
+SHA-256
+`78f4661bdd5c7986fbff9e00a2badb21864fa7a66f55179d3165c6b5ccf30584`
+and decodes to a clear, readable, geometrically correct console.
+
+The deterministic XRGB8888 client completed all 80 requested zero-delay page
+flips while GX reached 85 generated frames and exactly 170 PE finishes. A
+separate paced first-frame capture produced XFB SHA-256
+`588a18495506a6215d2a3d537b5120851ba27086b444bfe11dd4d9236eaa4208`
+and PNG SHA-256
+`b8c3c74839e919e36db937dd5d1cbdbf061939d497aca41d0e1d5351c2c5cfcd`.
+The PNG exactly shows the red/green/blue/white quadrants, black grid, white
+border, cyan/magenta center checkerboard, and yellow marker.
+
+The offscreen round trip then completed one EFB-to-texture copy, changed all
+153600 destination words, and produced 123 visible replays. PE finishes were
+exactly `248 = 2 * (1 copy + 123 replays)`. Its XFB SHA-256
+`2c488feb9b32a2510a6912f85c8187e021e0fe3d7b228f8431395502b57cd075`
+and PNG SHA-256
+`8bba3984a94f1556b0cf031a2ecdc96e606af63a3e9b2855b159cde3eea03e63`
+exactly match the previously accepted offscreen fixture and show the crisp
+four-quadrant grid without purple or teal clear leakage.
+
+Terminate the holding client and unload GX. Allocator teardown completed
+without warning, a 40-flip XRGB8888 fixture completed through CPU fallback,
+and the VI interrupt count continued from 41193 before the run to 41396 after
+it, then 41456 after final client cleanup. The complete 357-line hardware log
+is preserved at `/tmp/wii-dmesg-gx-mem1-a41f6f5d6.txt`, SHA-256
+`3b8244ddff6ceb7ba8fafd9ad4faea0442f61085e0b6e7ecc46913b25c1d1ae6`.
+It contains no allocator-layout, overlap, FIFO, completion, DRM, oops, panic,
+or machine-check fault. The boot-time PowerPC alignment warning remains the
+known AVE I2C warning and occurs before GX load.
+
+This closes the bounded internal-memory stage. GX now has deterministic,
+capacity-limited allocation and explicit metadata for its two proven MEM1
+workspaces, with 512 KiB reserved spare capacity and no userspace ABI. The
+next stage may design a render UAPI over this accepted ownership model.
