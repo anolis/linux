@@ -130,6 +130,8 @@ if [[ -n $ssh_host ]]; then
 
 	remote_exec()
 	{
+		# Commands are intentionally assembled locally for the controlled Wii shell.
+		# shellcheck disable=SC2029
 		ssh "${ssh_options[@]}" "$remote" "$1"
 	}
 	remote_status()
@@ -162,80 +164,94 @@ if [[ -n $ssh_host ]]; then
 	{
 		local source=$1
 		local target=$2
-		local source_size chunks index expected_size attempt
-		local chunk_ok remote_size upload_command
+		local source_size source_hash remote_hash chunks index
+		local local_chunk_hash remote_chunk_hash upload_command
 
 		source_size=$(stat -c %s "$source")
+		source_hash=$(sha256sum "$source" | awk '{print $1}')
+		printf '  upload:   streaming %d bytes\n' "$source_size"
+		if remote_exec "cat > $target" < "$source"; then
+			remote_hash=$(remote_exec "sha256sum $target | cut -d' ' -f1")
+			if [[ $remote_hash == "$source_hash" ]]; then
+				printf '  upload:   checksum verified\n'
+				return 0
+			fi
+		fi
+
+		printf '  upload:   checksum mismatch; repairing chunks\n'
 		chunks=$(((source_size + chunk_bytes - 1) / chunk_bytes))
-		remote_exec ": > $target"
 		for ((index = 0; index < chunks; index++)); do
 			if ((index % 16 == 0)); then
-				printf '  upload:   %d/%d chunks\r' "$index" "$chunks"
+				printf '  upload:   checked %d/%d chunks\r' "$index" "$chunks"
 			fi
-			expected_size=$(((index + 1) * chunk_bytes))
-			if ((expected_size > source_size)); then
-				expected_size=$source_size
-			fi
-			chunk_ok=0
-			for ((attempt = 1; attempt <= 5; attempt++)); do
+			local_chunk_hash=$(dd if="$source" bs=$chunk_bytes skip="$index" \
+				count=1 2>/dev/null | sha256sum | awk '{print $1}')
+			remote_chunk_hash=$(remote_exec \
+				"dd if=$target bs=$chunk_bytes skip=$index count=1 2>/dev/null | sha256sum | cut -d' ' -f1" || true)
+			if [[ $remote_chunk_hash != "$local_chunk_hash" ]]; then
 				upload_command="dd of=$target bs=$chunk_bytes"
 				upload_command+=" seek=$index conv=notrunc 2>/dev/null"
-				dd if="$source" bs=$chunk_bytes skip=$index count=1 2>/dev/null |
-					remote_exec "$upload_command" || true
-				remote_size=$(remote_exec "stat -c %s $target")
-				if [[ $remote_size == "$expected_size" ]]; then
-					chunk_ok=1
-					break
-				fi
-				sleep 1
-			done
-			if (( ! chunk_ok )); then
-				echo "Remote upload failed at chunk $index/$chunks" >&2
-				return 1
+				dd if="$source" bs=$chunk_bytes skip="$index" count=1 2>/dev/null |
+					remote_exec "$upload_command"
 			fi
 		done
-		printf '  upload:   %d/%d chunks\n' "$chunks" "$chunks"
+		remote_exec "truncate -s $source_size $target"
+		remote_hash=$(remote_exec "sha256sum $target | cut -d' ' -f1")
+		if [[ $remote_hash != "$source_hash" ]]; then
+			echo "Remote upload repair checksum mismatch" >&2
+			return 1
+		fi
+		printf '  upload:   checked %d/%d chunks; repaired checksum verified\n' \
+			"$chunks" "$chunks"
 	}
 
 	remote_download()
 	{
 		local source=$1
 		local target=$2
-		local source_size chunks index chunk_size attempt
-		local chunk_ok download_command
+		local source_size source_hash local_hash chunks index
+		local local_chunk_hash remote_chunk_hash download_command
 		local chunk_file=${target}.chunk
 
 		source_size=$(remote_exec "stat -c %s $source")
+		source_hash=$(remote_exec "sha256sum $source | cut -d' ' -f1")
+		printf '  download: streaming %d bytes\n' "$source_size"
+		if remote_exec "cat $source" > "$target"; then
+			local_hash=$(sha256sum "$target" | awk '{print $1}')
+			if [[ $local_hash == "$source_hash" ]]; then
+				printf '  download: checksum verified\n'
+				return 0
+			fi
+		fi
+
+		printf '  download: checksum mismatch; repairing chunks\n'
 		chunks=$(((source_size + chunk_bytes - 1) / chunk_bytes))
-		: > "$target"
+		truncate -s "$source_size" "$target"
 		for ((index = 0; index < chunks; index++)); do
 			if ((index % 16 == 0)); then
-				printf '  download: %d/%d chunks\r' "$index" "$chunks"
+				printf '  download: checked %d/%d chunks\r' "$index" "$chunks"
 			fi
-			chunk_size=$((source_size - index * chunk_bytes))
-			if ((chunk_size > chunk_bytes)); then
-				chunk_size=$chunk_bytes
-			fi
-			chunk_ok=0
-			for ((attempt = 1; attempt <= 5; attempt++)); do
+			local_chunk_hash=$(dd if="$target" bs=$chunk_bytes skip="$index" \
+				count=1 2>/dev/null | sha256sum | awk '{print $1}')
+			remote_chunk_hash=$(remote_exec \
+				"dd if=$source bs=$chunk_bytes skip=$index count=1 2>/dev/null | sha256sum | cut -d' ' -f1")
+			if [[ $local_chunk_hash != "$remote_chunk_hash" ]]; then
 				download_command="dd if=$source bs=$chunk_bytes"
 				download_command+=" skip=$index count=1 2>/dev/null"
-				remote_exec "$download_command" > "$chunk_file" || true
-				if [[ $(stat -c %s "$chunk_file") == "$chunk_size" ]]; then
-					chunk_ok=1
-					break
-				fi
-				sleep 1
-			done
-			if (( ! chunk_ok )); then
-				rm -f "$chunk_file"
-				echo "Remote download failed at chunk $index/$chunks" >&2
-				return 1
+				remote_exec "$download_command" > "$chunk_file"
+				dd if="$chunk_file" of="$target" bs=$chunk_bytes seek="$index" \
+					conv=notrunc 2>/dev/null
 			fi
-			command cat "$chunk_file" >> "$target"
 		done
-		printf '  download: %d/%d chunks\n' "$chunks" "$chunks"
 		rm -f "$chunk_file"
+		truncate -s "$source_size" "$target"
+		local_hash=$(sha256sum "$target" | awk '{print $1}')
+		if [[ $local_hash != "$source_hash" ]]; then
+			echo "Remote download repair checksum mismatch" >&2
+			return 1
+		fi
+		printf '  download: checked %d/%d chunks; repaired checksum verified\n' \
+			"$chunks" "$chunks"
 	}
 
 	remote_status "preparing commit $commit"
