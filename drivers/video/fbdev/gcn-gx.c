@@ -55,6 +55,10 @@
 #include <asm/div64.h>
 #include <asm/page.h>
 
+#if IS_ENABLED(CONFIG_DRM_GCN_GX)
+#include <drm/gcn_gx_mem1.h>
+#endif
+
 #include "gcn-gx.h"
 #if IS_ENABLED(CONFIG_FB_GAMECUBE_GX)
 #include "gcnfb-accel.h"
@@ -68,6 +72,37 @@ static u16 __iomem *pe_regs;
 static struct regmap *pi_regmap;
 static phys_addr_t gx_fifo_phys;
 static phys_addr_t gx_tex_phys;
+
+#if IS_ENABLED(CONFIG_DRM_GCN_GX)
+enum gx_mem1_layout {
+	GX_MEM1_LAYOUT_TILED_RGB565,
+};
+
+enum gx_mem1_access {
+	GX_MEM1_ACCESS_IDLE,
+};
+
+struct gx_mem1_buffer {
+	struct drm_mm_node node;
+	void *cpu_addr;
+	phys_addr_t phys_addr;
+	size_t size;
+	enum gx_mem1_layout layout;
+	enum gx_mem1_access access;
+};
+
+static struct gcn_gx_mem1_allocator gx_mem1_allocator;
+static struct gx_mem1_buffer gx_tex_workspace[2];
+static unsigned int gx_mem1_total_bytes;
+static unsigned int gx_mem1_used_bytes;
+static unsigned int gx_mem1_free_bytes;
+module_param_named(mem1_total_bytes, gx_mem1_total_bytes, uint, 0444);
+MODULE_PARM_DESC(mem1_total_bytes, "Total bytes in the bounded GX MEM1 pool");
+module_param_named(mem1_used_bytes, gx_mem1_used_bytes, uint, 0444);
+MODULE_PARM_DESC(mem1_used_bytes, "Bytes allocated for internal GX workspaces");
+module_param_named(mem1_free_bytes, gx_mem1_free_bytes, uint, 0444);
+MODULE_PARM_DESC(mem1_free_bytes, "Unallocated bytes in the GX MEM1 pool");
+#endif
 
 /* Byte offset of the next GX command byte within gx_fifo_buf.
  * GX commands are written here directly; gx_submit_cmds() advances
@@ -2636,6 +2671,81 @@ static const struct gcn_drm_accel_ops gcn_gx_drm_accel_ops = {
 
 #define GX_MEM_ALIGNMENT	32
 
+#if IS_ENABLED(CONFIG_DRM_GCN_GX)
+static void gx_mem1_free_workspaces(void)
+{
+	int i;
+
+	if (!gx_mem1_allocator.initialized)
+		return;
+
+	for (i = ARRAY_SIZE(gx_tex_workspace) - 1; i >= 0; i--) {
+		gcn_gx_mem1_remove(&gx_tex_workspace[i].node);
+		memset(&gx_tex_workspace[i], 0,
+		       sizeof(gx_tex_workspace[i]));
+	}
+
+	gcn_gx_mem1_allocator_fini(&gx_mem1_allocator);
+	gx_mem1_total_bytes = 0;
+	gx_mem1_used_bytes = 0;
+	gx_mem1_free_bytes = 0;
+}
+
+static int gx_mem1_alloc_workspaces(struct device *dev,
+				    const struct resource *mem)
+{
+	u64 pool_size = resource_size(mem);
+	u64 expected_start = mem->start;
+	u64 spare;
+	int i;
+	int ret;
+
+	if (pool_size < 2 * GX_TEX_BUF_SLOT_SIZE || pool_size > UINT_MAX)
+		return -EINVAL;
+
+	memset(gx_tex_workspace, 0, sizeof(gx_tex_workspace));
+	ret = gcn_gx_mem1_allocator_init(&gx_mem1_allocator, mem->start,
+					 pool_size, GX_MEM_ALIGNMENT);
+	if (ret)
+		return ret;
+
+	for (i = 0; i < ARRAY_SIZE(gx_tex_workspace); i++) {
+		struct gx_mem1_buffer *buffer = &gx_tex_workspace[i];
+
+		ret = gcn_gx_mem1_insert(&gx_mem1_allocator, &buffer->node,
+					 GX_TEX_BUF_SLOT_SIZE,
+					 GX_MEM_ALIGNMENT);
+		if (ret)
+			goto err_free;
+		if (buffer->node.start != expected_start ||
+		    !gcn_gx_mem1_contains(&gx_mem1_allocator, &buffer->node)) {
+			ret = -EINVAL;
+			goto err_free;
+		}
+
+		buffer->cpu_addr = (void *)__va(buffer->node.start);
+		buffer->phys_addr = buffer->node.start;
+		buffer->size = GX_TEX_BUF_SLOT_SIZE;
+		buffer->layout = GX_MEM1_LAYOUT_TILED_RGB565;
+		buffer->access = GX_MEM1_ACCESS_IDLE;
+		expected_start += GX_TEX_BUF_SLOT_SIZE;
+	}
+
+	spare = pool_size - 2 * GX_TEX_BUF_SLOT_SIZE;
+	gx_mem1_total_bytes = pool_size;
+	gx_mem1_used_bytes = 2 * GX_TEX_BUF_SLOT_SIZE;
+	gx_mem1_free_bytes = spare;
+	gx_tex_phys = gx_tex_workspace[0].phys_addr;
+	gx_tex_buf = gx_tex_workspace[0].cpu_addr;
+	gx_tex_buf_alt = gx_tex_workspace[1].cpu_addr;
+	return 0;
+err_free:
+	dev_err(dev, "invalid GX MEM1 allocator layout: %d\n", ret);
+	gx_mem1_free_workspaces();
+	return ret;
+}
+#endif
+
 static bool gx_resources_overlap(const struct resource *a,
 				 const struct resource *b)
 {
@@ -2856,9 +2966,15 @@ static int gcn_gx_init(struct platform_device *pdev)
 	 * coalesced into one logical range.  Use the DTS-reserved region.
 	 */
 	gx_tex_raw = NULL;
+#if IS_ENABLED(CONFIG_DRM_GCN_GX)
+	ret = gx_mem1_alloc_workspaces(&pdev->dev, &texture_mem);
+	if (ret)
+		goto err_hw;
+#else
 	gx_tex_phys = texture_mem.start;
 	gx_tex_buf = (void *)__va(gx_tex_phys);
 	gx_tex_buf_alt = (void *)__va(gx_tex_phys + GX_TEX_BUF_SLOT_SIZE);
+#endif
 	memset(gx_tex_buf, 0, GX_TEX_BUF_SIZE);
 	memset(gx_tex_buf_alt, 0, GX_TEX_BUF_SIZE);
 #if IS_ENABLED(CONFIG_FB_GAMECUBE_GX)
@@ -2926,11 +3042,20 @@ static int gcn_gx_init(struct platform_device *pdev)
 				   &gx_xfb_snapshot_phys);
 	}
 
+#if IS_ENABLED(CONFIG_DRM_GCN_GX)
+	pr_info("gcn-gx: ready fifo=%08x tex=%08x/%08x pool=%u/%u/%u irq=%u renderer=%s bias8=%d debug_capture=%u offscreen_probe=%u\n",
+		(u32)gx_fifo_phys, (u32)gx_tex_phys,
+		(u32)gx_tex_workspace[1].phys_addr,
+		gx_mem1_total_bytes, gx_mem1_used_bytes, gx_mem1_free_bytes,
+		gx_pe_finish_irq, gx_renderer, gx_texel_bias_eighths,
+		gx_debug_capture, gx_offscreen_probe);
+#else
 	pr_info("gcn-gx: ready fifo=%08x tex=%08x/%08x irq=%u renderer=%s bias8=%d debug_capture=%u offscreen_probe=%u\n",
 		(u32)gx_fifo_phys, (u32)gx_tex_phys,
 		(u32)(gx_tex_phys + GX_TEX_BUF_SLOT_SIZE),
 		gx_pe_finish_irq, gx_renderer, gx_texel_bias_eighths,
 		gx_debug_capture, gx_offscreen_probe);
+#endif
 	gx_accel_ready = true;
 	return 0;
 
@@ -2948,6 +3073,9 @@ err_hw:
 		gx_pe_finish_irq_requested = false;
 	}
 	gx_pe_finish_irq = 0;
+#if IS_ENABLED(CONFIG_DRM_GCN_GX)
+	gx_mem1_free_workspaces();
+#endif
 	gx_fifo_buf_raw = NULL;
 	gx_fifo_buf = NULL;
 	gx_tex_buf = NULL;
@@ -2981,6 +3109,9 @@ static void gcn_gx_exit(void)
 	}
 
 	/* Texture and FIFO buffers are platform-owned MEM1 reservations. */
+#if IS_ENABLED(CONFIG_DRM_GCN_GX)
+	gx_mem1_free_workspaces();
+#endif
 	gx_tex_raw = NULL;
 	gx_tex_buf = NULL;
 	gx_tex_buf_alt = NULL;
