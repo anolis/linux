@@ -8714,13 +8714,15 @@ next stage may design a render UAPI over this accepted ownership model.
 ### Stage GX render UAPI foundation
 
 - Test branch: test/wii-gx-render-uapi
-- Candidate implementation commit: 6c89f4329e2ac427ace9473ca9d797536adb8a26
+- Candidate implementation commits:
+  6c89f4329e2ac427ace9473ca9d797536adb8a26,
+  a73ab8ecf, and 56fe9432d
 - Candidate zImage SHA-256:
-  8e0ca7620b9265f1d3db3363ea31526decd5d9f2296d331768c9893670c6ec65
+  7e78e7cb3662fb9e22426c6635b621e0c316705227f8c336a2be83c26a05199f
 - Candidate gcn-gx.ko SHA-256:
-  8ce5f0655ac33c97ace90a475a92aaa45ab93ba94669a30b48aba45a15b516ce
+  70a1609e485874080697cef685916d716e896cf4056b207e6cda76f7b88b401c
 - Candidate wii-gcn-render-test SHA-256:
-  465989f8246bf660c59b5a58e2836c55ba25dc61ea0586a05b1a89eaa79470fe
+  64880a0a2993c813030f8c4b8789e7d6a33e6413384d5c18a3130099b893883a
 
 Add version 1 of a deliberately bounded GCN render UAPI. The stable gcn-drm
 device now exposes a render node and six private ioctls for capability
@@ -8781,4 +8783,56 @@ Reject the stage on any address disclosure, out-of-pool mapping, capacity
 leak, stale provider call, FIFO/completion timeout, DRM fault, oops, panic, or
 machine check.
 
-Hardware result: pending.
+Hardware result: passed; accept the bounded render UAPI foundation. The exact
+kernel booted as build `#2`, created `/dev/dri/renderD128`, and exposed ABI
+version 1 with GX absent. The static client passed provider-absent capability,
+sync-object, and `-ENODEV` behavior before any GX module was loaded.
+
+The first provider-present run exposed a real PowerPC mapping defect. A
+cache-inhibited userspace alias to the ordinary reserved MEM1 linear mapping
+accepted byte stores but immediately returned stale data at offset zero.
+Commit `a73ab8ecf` retains the existing cacheable VMA protection, after which
+the complete client passed byte-exact zeroing and readback. It reported pool
+total/free/alignment `2097152/524288/4096`, allocated exactly four 131072-byte
+objects before `-ENOSPC`, and restored all 524288 free bytes after release.
+Contexts, per-file isolation, idle waits, oversize-mmap rejection, PRIME
+rejection, and all capability limits passed. A dedicated hold mode closed the
+GEM handle while retaining only its VMA: `rmmod gcn_gx` failed busy until the
+holder exited, then succeeded immediately and provider-absent validation
+passed again.
+
+Visual regression testing found and fixed a pre-existing converter/encoder
+ownership error rather than a render-UAPI failure. With one XRGB8888 frame
+frozen, GX output was visibly red/blue and cyan/gold swapped at AVE
+`0x62=0x02`, then became correct immediately after changing only that register
+to zero. After GX unload, the unchanged CPU path showed the exact reciprocal
+result: swapped at zero and correct at two. Commit `56fe9432d` therefore
+serializes encoder selection with provider publication under the existing
+accelerator mutex: GX registers only after verified `0x62=0x00`, and CPU
+fallback begins only after verified `0x62=0x02` on unregister.
+
+The checksum-pinned reboot validated both automatic transitions without a
+userspace AVE write. GX XRGB8888 completed 80 flips, reached 81 XRGB8888
+frames, and reported 182 PE finishes for 91 total frames; the user confirmed
+the red/green/blue/white quadrants and center checkerboard were crisp and
+correct. RGB565 completed the same 80-flip fixture and was also visually
+correct. Module unload automatically restored `0x62=0x02`; provider-absent
+smoke passed and a 40-flip CPU XRGB8888 fixture remained visually correct.
+
+On an independent clean boot, `offscreen_probe=1` completed one EFB-to-texture
+copy with all `153600/153600` words changed and 89 visible replays. PE finishes
+were exactly `180 = 2 * (1 copy + 89 replays)`. The user confirmed the replayed
+four-quadrant grid was correct. Final unload restored CPU order `0x62=0x02`.
+The bounded hardware log is preserved at
+`/tmp/wii-dmesg-gx-render-uapi-496d2e2ab.txt`, SHA-256
+`ca6a59b2c23102a7d3fd9ef8fcfcc58aca5c873c3282be9dc5934b6ee2007a02`.
+It contains no GX/DRM timeout, oops, panic, or machine check; the sole warning
+is the known boot-time AVE I2C alignment warning before GX load.
+
+The exact committed tree passes patch-scoped strict checkpatch, ShellCheck for
+the deployment helper, `git diff --check`, focused PowerPC `W=1` builds, all
+seven UML KUnit assertions, static host and PowerPC userspace builds with
+`-Wall -Wextra -Werror`, and full `zImage modules` with `-j16`. Deployment
+commit `496d2e2ab` also validates the new whole-file transfer path: both the
+6.56 MiB rollback download and candidate upload passed first-stream SHA-256,
+so no chunk repair was required.
