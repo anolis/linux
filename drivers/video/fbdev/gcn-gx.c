@@ -2962,7 +2962,12 @@ static int gcn_gx_drm_fill_rect_rgb565(void *dst_allocation, u16 width,
 	if (ret)
 		goto out_unlock;
 
-	completed = gx_wait_for_pe_finishes(finish_count, 3);
+	/*
+	 * BP finish status is level-triggered, so the three closely spaced
+	 * fences above may coalesce into one IRQ. gx_submit_cmds() has already
+	 * observed its unique final PE token, which orders after the copyback.
+	 */
+	completed = gx_wait_for_pe_finishes(finish_count, 1);
 	if (!completed) {
 		pr_warn_ratelimited("gcn-gx: rectangle fill timed out waiting for final PE finish\n");
 		ret = -ETIMEDOUT;
