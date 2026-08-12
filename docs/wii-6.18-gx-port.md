@@ -8901,7 +8901,8 @@ lifetime failure, oops, panic, or machine check. Finally rerun visible XRGB8888,
 RGB565, offscreen replay, module-unload, and CPU-fallback regressions before
 accepting the stage.
 
-Hardware result: pending.
+Hardware result for the original candidate: rejected; corrected candidate
+accepted below.
 
 The first hardware run of commit `4c709fb2381941f0533aab311ebed7a912b14d87`
 is rejected despite the smoke client's byte-exact result. The test allocated
@@ -8934,3 +8935,50 @@ still consume the pool exactly. Hardware re-acceptance must additionally hash
 all live GPU OF properties before and after submission, then unload and reload
 the GX module successfully. No result from the rejected image is evidence of
 render correctness until those ownership checks pass.
+
+Hardware result for commit `078a9ba3c`: passed; accept the isolated ownership
+layout and typed RGB565 submission. The corrected kernel booted with GX absent
+and exposed live reserved-memory cells `0x01300000+0x00180000` for internal
+textures, `0x01600000+0x00080000` for render objects, and
+`0x01684000+0x00010000` for the FIFO. The provider-absent smoke test passed
+before any GX module was loaded.
+
+Loading checksum-pinned module
+`811e6165314587befbea16d726f06e1ecbb3c0ba648784319da17dc26ce9bfa8`
+reported FIFO `0x01684000`, internal texture workspaces `0x01300000` and
+`0x013c0000`, and pool total/used/free `524288/0/524288`. The static smoke
+client reported the same total and free capacity, allocated exactly four
+131072-byte objects before `-ENOSPC`, passed all negative submission controls,
+and copied all 65536 tiled RGB565 texels byte-exactly. Reservation and binary
+syncobj waits completed and all capacity returned on object release.
+
+Before module load, every regular file in the live GPU OF node was hashed and
+the packed `/sys/firmware/fdt` was independently hashed. Both manifests
+remained byte-identical after typed submission, after normal scanout and
+offscreen regressions, and after final module unload. The module unloaded,
+reloaded, rebound to the original unmodified platform device, and unloaded
+again; provider-absent smoke passed after each final unload. This directly
+closes the ownership failure that invalidated the first candidate.
+
+The checksum-pinned visual fixture completed 80 RGB565 page flips while GX
+advanced 89 frames and 178 PE finishes. It then completed 80 XRGB8888 flips
+while GX advanced 90 frames and 180 PE finishes, including 81 XRGB8888
+conversions. Both runs satisfy the exact two-finishes-per-generated-frame
+invariant. After GX unload, the CPU XRGB8888 path completed 40 page flips and
+provider-absent discovery remained correct.
+
+The independent offscreen EFB-to-texture test completed one copy, changed all
+153600 destination words, replayed the result 23 times, and reached exactly
+`48 = 2 * (1 + 23)` PE finishes. Its 614400-byte XFB capture has SHA-256
+`2c488feb9b32a2510a6912f85c8187e021e0fe3d7b228f8431395502b57cd075`,
+byte-identical to the previously accepted four-quadrant fixture. This provides
+a full-frame positive control in addition to counters and sparse values.
+
+The exact committed tree passes strict patch-scoped checkpatch,
+`git diff --check`, focused PowerPC `W=1` builds, native and static PowerPC
+userspace builds with `-Wall -Wextra -Werror`, all eight explicitly enabled
+GCN UML KUnit tests, and full `zImage modules` with `-j16`. The complete
+353-line hardware log is preserved at
+`/tmp/wii-dmesg-gx-render-submit-078a9ba3c.txt`, SHA-256
+`3e0648aa9d3731ed26310330bc5e87089639f49ddfa3c339b6775908abc0cd45`.
+It contains no GX/DRM timeout, overlap error, oops, panic, or machine check.
