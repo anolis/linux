@@ -8710,3 +8710,75 @@ This closes the bounded internal-memory stage. GX now has deterministic,
 capacity-limited allocation and explicit metadata for its two proven MEM1
 workspaces, with 512 KiB reserved spare capacity and no userspace ABI. The
 next stage may design a render UAPI over this accepted ownership model.
+
+### Stage GX render UAPI foundation
+
+- Test branch: test/wii-gx-render-uapi
+- Candidate implementation commit: 6c89f4329e2ac427ace9473ca9d797536adb8a26
+- Candidate zImage SHA-256:
+  8e0ca7620b9265f1d3db3363ea31526decd5d9f2296d331768c9893670c6ec65
+- Candidate gcn-gx.ko SHA-256:
+  8ce5f0655ac33c97ace90a475a92aaa45ab93ba94669a30b48aba45a15b516ce
+- Candidate wii-gcn-render-test SHA-256:
+  465989f8246bf660c59b5a58e2836c55ba25dc61ea0586a05b1a89eaa79470fe
+
+Add version 1 of a deliberately bounded GCN render UAPI. The stable gcn-drm
+device now exposes a render node and six private ioctls for capability
+discovery, GX-backed MEM1 GEM allocation, GEM mmap-offset lookup, per-file
+software context creation and destruction, and reservation-object waiting.
+The driver also enables core DRM sync objects. This stage does not submit GX
+commands, accept raw FIFO data or register writes, expose physical addresses,
+import or export PRIME buffers, or change scanout behavior.
+
+Only page-aligned, GX 4x4-tiled RGB565 objects with dimensions divisible by
+four are accepted. Width and height are capped at the EFB limits of 640 by
+576, object sizes are overflow-checked, and every allocation is confined to
+the accepted 2 MiB GX MEM1 reservation. The two proven 768 KiB internal
+scanout workspaces remain permanently allocated, so userspace initially has
+512 KiB of spare capacity. A nominal 640 by 480 RGB565 object is structurally
+valid but cannot fit and must fail with -ENOSPC; four 256 by 256 objects fit
+exactly. New allocations are zeroed before userspace can map them.
+
+The provider remains optional. ABI-version, provider-availability, and
+feature discovery work when gcn-gx is absent; provider-dependent queries,
+allocation, and context creation return -ENODEV. Each MEM1 GEM object pins
+the provider module until its final handle and VMA reference is gone. Normal
+module removal therefore fails while a BO or mapping exists. A forced
+platform unbind unregisters new access but defers allocator teardown until
+the final existing allocation is released, and rebind is rejected while that
+old allocator remains live.
+
+The host validation consists of the gcn_drm_render UML KUnit suite and the
+existing gcn_gx_mem1 allocator suite. Seven tests pass in total, covering
+fixed-width UAPI layout, accepted and rejected object geometry, exact size
+calculation, absolute timeout conversion, bounded placement, exhaustion, and
+reuse. The standalone tools/wii-gcn-render-test.c client compiles against the
+exported UAPI with -Wall -Wextra -Werror. It validates provider-present and
+provider-absent behavior, per-file context isolation, zero-filled mmap and
+readback, oversize-mmap rejection, immediate reservation waits, PRIME export
+rejection, allocation exhaustion, and free-capacity recovery.
+checkpatch.pl --strict, git diff --check, focused W=1 builds of all changed
+PowerPC objects, and a full zImage modules build with -j16 pass. A tree-wide
+W=1 build remains blocked by pre-existing unused-variable warnings in
+arch/powerpc/lib/sstep.c; no changed object emits a new warning.
+
+Hardware acceptance must first boot the checksum-pinned kernel with GX
+unloaded. Require /dev/dri/renderD128, ABI version 1, provider availability
+zero, successful core sync-object creation, and -ENODEV from every
+provider-dependent operation while normal CPU scanout remains clear and
+responsive. Then load the matching GX module and require total/free capacity
+of 2097152/524288 bytes, 4096-byte alignment, RGB565 and tiled-4x4 capability
+bits, EFB limits 640 by 576, and the MEM1-GEM feature bit.
+
+Run the checksum-pinned smoke client and require four 131072-byte objects
+before -ENOSPC, byte-exact zeroing and CPU readback, isolated context IDs,
+successful idle waits, PRIME rejection, and restoration of all 524288 free
+bytes after close. Keep one mapped object alive and require rmmod gcn_gx to
+fail busy; after unmap and close, unload must succeed and provider discovery
+must immediately return absent. Finally repeat the accepted RGB565,
+XRGB8888, offscreen round-trip, module-unload, and CPU-fallback regressions.
+Reject the stage on any address disclosure, out-of-pool mapping, capacity
+leak, stale provider call, FIFO/completion timeout, DRM fault, oops, panic, or
+machine check.
+
+Hardware result: pending.
