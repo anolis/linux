@@ -32,6 +32,7 @@ enum drm_gcn_param {
 #define DRM_GCN_FEATURE_SYNCOBJ		(1ULL << 3)
 #define DRM_GCN_FEATURE_SUBMIT_RGB565	(1ULL << 4)
 #define DRM_GCN_FEATURE_FILL_RGB565	(1ULL << 5)
+#define DRM_GCN_FEATURE_FILL_RECT_RGB565	(1ULL << 6)
 
 struct drm_gcn_get_param {
 	__u32 param;
@@ -97,7 +98,27 @@ struct drm_gcn_wait {
 enum drm_gcn_render_op {
 	DRM_GCN_RENDER_OP_COPY_RGB565 = 1,
 	DRM_GCN_RENDER_OP_FILL_RGB565 = 2,
+	DRM_GCN_RENDER_OP_FILL_RECT_RGB565 = 3,
 };
+
+#define DRM_GCN_RECT_COLOR_SHIFT	0
+#define DRM_GCN_RECT_X_SHIFT		16
+#define DRM_GCN_RECT_Y_SHIFT		26
+#define DRM_GCN_RECT_WIDTH_SHIFT	36
+#define DRM_GCN_RECT_HEIGHT_SHIFT	46
+#define DRM_GCN_RECT_COLOR_MASK		0xffffULL
+#define DRM_GCN_RECT_FIELD_MASK		0x3ffULL
+#define DRM_GCN_RECT_RESERVED_MASK	(0xffULL << 56)
+
+/* Width and height must be in the inclusive range 1..1024. */
+#define DRM_GCN_RECT_DATA(color, x, y, width, height) \
+	(((__u64)(color) & DRM_GCN_RECT_COLOR_MASK) | \
+	 (((__u64)(x) & DRM_GCN_RECT_FIELD_MASK) << DRM_GCN_RECT_X_SHIFT) | \
+	 (((__u64)(y) & DRM_GCN_RECT_FIELD_MASK) << DRM_GCN_RECT_Y_SHIFT) | \
+	 (((__u64)((width) - 1) & DRM_GCN_RECT_FIELD_MASK) << \
+	  DRM_GCN_RECT_WIDTH_SHIFT) | \
+	 (((__u64)((height) - 1) & DRM_GCN_RECT_FIELD_MASK) << \
+	  DRM_GCN_RECT_HEIGHT_SHIFT))
 
 /*
  * Submit one validated operation between driver-owned MEM1 GEM objects.
@@ -112,7 +133,7 @@ struct drm_gcn_submit {
 	__u32 out_syncobj;
 	/* Must be zero. */
 	__u32 flags;
-	/* Operation-specific data; RGB565 fill colour in bits 15:0. */
+	/* Operation-specific data; see DRM_GCN_RECT_DATA for rectangle fill. */
 	union {
 		__u64 data;
 		/* Legacy name retained for source compatibility. */

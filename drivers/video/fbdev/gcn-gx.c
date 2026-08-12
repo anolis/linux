@@ -2688,7 +2688,8 @@ static int gcn_gx_drm_mem1_info(struct gcn_drm_mem1_info *info)
 	info->formats = DRM_GCN_FORMAT_RGB565;
 	info->layouts = DRM_GCN_LAYOUT_TILED_4X4;
 	info->features = DRM_GCN_FEATURE_SUBMIT_RGB565 |
-			 DRM_GCN_FEATURE_FILL_RGB565;
+			 DRM_GCN_FEATURE_FILL_RGB565 |
+			 DRM_GCN_FEATURE_FILL_RECT_RGB565;
 	mutex_unlock(&gx_mem1_lock);
 	return 0;
 }
@@ -2892,6 +2893,78 @@ out_unlock:
 	return ret;
 }
 
+static int gcn_gx_drm_fill_rect_rgb565(void *dst_allocation, u16 width,
+				       u16 height, u16 x, u16 y,
+				       u16 rect_width, u16 rect_height,
+				       u16 color)
+{
+	struct gx_mem1_allocation *dst = dst_allocation;
+	u8 r5 = (color >> 11) & 0x1f;
+	u8 g6 = (color >> 5) & 0x3f;
+	u8 b5 = color & 0x1f;
+	u8 r = (r5 << 3) | (r5 >> 2);
+	u8 g = (g6 << 2) | (g6 >> 4);
+	u8 b = (b5 << 3) | (b5 >> 2);
+	u32 finish_count;
+	size_t bytes;
+	long completed;
+	int ret;
+	int i;
+
+	if (!dst || !width || !height || (width & 3) || (height & 3) ||
+	    !rect_width || !rect_height || x >= width || y >= height ||
+	    rect_width > width - x || rect_height > height - y)
+		return -EINVAL;
+	bytes = (size_t)width * height * sizeof(u16);
+	if (bytes > dst->size)
+		return -E2BIG;
+	if (!READ_ONCE(gx_accel_ready))
+		return -ENODEV;
+
+	mutex_lock(&gx_submit_lock);
+	flush_dcache_range((unsigned long)dst->cpu_addr,
+			   (unsigned long)dst->cpu_addr + bytes);
+
+	finish_count = READ_ONCE(gx_pe_finish_count);
+	fifo_pos = 0;
+	gx_load_libogc_init_preamble();
+	gx_setup_display_copy_state();
+
+	/* Restore the destination into EFB before drawing the bounded overlay. */
+	gx_setup_rgb565_texture_state(width, height);
+	gx_setup_texture_rgb565(dst->cpu_addr, width, height);
+	gx_draw_color_quad(width, height, 0xff, 0xff, 0xff);
+	gx_load_bp_reg(0x45000002);
+	for (i = 0; i < 32; i++)
+		gx_wr8(0);
+
+	gx_setup_vertex_color_state(width, height);
+	gx_draw_color_rect(x, y, x + rect_width, y + rect_height, r, g, b);
+	gx_load_bp_reg(0x45000002);
+	for (i = 0; i < 32; i++)
+		gx_wr8(0);
+
+	gx_set_copy_clear_rgb(0x00, 0x00, 0x00);
+	gx_copy_efb_to_rgb565_texture(dst->cpu_addr, width, height, true);
+	ret = gx_submit_cmds("render-fill-rect");
+	if (ret)
+		goto out_unlock;
+
+	completed = gx_wait_for_pe_finishes(finish_count, 3);
+	if (!completed) {
+		pr_warn_ratelimited("gcn-gx: rectangle fill timed out waiting for final PE finish\n");
+		ret = -ETIMEDOUT;
+		goto out_unlock;
+	}
+
+	invalidate_dcache_range((unsigned long)dst->cpu_addr,
+				(unsigned long)dst->cpu_addr + bytes);
+
+out_unlock:
+	mutex_unlock(&gx_submit_lock);
+	return ret;
+}
+
 static const struct gcn_drm_accel_ops gcn_gx_drm_accel_ops = {
 	.name = "gcn-gx",
 	.owner = THIS_MODULE,
@@ -2903,6 +2976,7 @@ static const struct gcn_drm_accel_ops gcn_gx_drm_accel_ops = {
 	.mem1_mmap = gcn_gx_drm_mem1_mmap,
 	.submit_rgb565 = gcn_gx_drm_submit_rgb565,
 	.fill_rgb565 = gcn_gx_drm_fill_rgb565,
+	.fill_rect_rgb565 = gcn_gx_drm_fill_rect_rgb565,
 };
 #endif
 

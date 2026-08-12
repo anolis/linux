@@ -21,6 +21,13 @@
 
 static int failures;
 
+static size_t tiled_rgb565_index(unsigned int x, unsigned int y,
+				 unsigned int width)
+{
+	return ((size_t)(y >> 2) * (width >> 2) + (x >> 2)) * 16 +
+	       (y & 3) * 4 + (x & 3);
+}
+
 static void fail(const char *what)
 {
 	fprintf(stderr, "FAIL: %s: %s\n", what, strerror(errno));
@@ -383,6 +390,89 @@ static void test_submit(int fd, int other_fd)
 	if (ioctl(fd, DRM_IOCTL_SYNCOBJ_WAIT, &sync_wait))
 		fail("wait for render-fill syncobj");
 
+	submit.op = DRM_GCN_RENDER_OP_FILL_RECT_RGB565;
+	submit.data = DRM_GCN_RECT_DATA(0xf800, 255, 255, 2, 1);
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_SUBMIT, &submit) || errno != EINVAL)
+		fail("out-of-bounds rectangle should return EINVAL");
+	submit.data = DRM_GCN_RECT_DATA(0xf800, 13, 17, 73, 61) |
+		      DRM_GCN_RECT_RESERVED_MASK;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_SUBMIT, &submit) || errno != EINVAL)
+		fail("rectangle with reserved bits should return EINVAL");
+	submit.data = DRM_GCN_RECT_DATA(0xf800, 13, 17, 73, 61);
+	submit.src_handle = src.handle;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_SUBMIT, &submit) || errno != EINVAL)
+		fail("rectangle fill with source object should return EINVAL");
+	submit.src_handle = 0;
+
+	/* Establish an exact background, then verify every inside/outside pixel. */
+	submit.op = DRM_GCN_RENDER_OP_FILL_RGB565;
+	submit.data = 0x07e0;
+	if (ioctl(fd, DRM_IOCTL_GCN_SUBMIT, &submit)) {
+		fail("seed rectangle-fill background");
+		goto out_sync;
+	}
+	submit.op = DRM_GCN_RENDER_OP_FILL_RECT_RGB565;
+	submit.data = DRM_GCN_RECT_DATA(0xf800, 13, 17, 73, 61);
+	if (ioctl(fd, DRM_IOCTL_GCN_SUBMIT, &submit)) {
+		fail("submit interior RGB565 rectangle fill");
+		goto out_sync;
+	}
+	for (unsigned int y = 0; y < TEST_HEIGHT; y++) {
+		for (unsigned int x = 0; x < TEST_WIDTH; x++) {
+			uint16_t expected = x >= 13 && x < 86 &&
+					    y >= 17 && y < 78 ? 0xf800 : 0x07e0;
+			size_t pixel = tiled_rgb565_index(x, y, TEST_WIDTH);
+
+			if (dst_map[pixel] != expected) {
+				fprintf(stderr,
+					"FAIL: rectangle mismatch at (%u,%u) tile=%zu: got=0x%04x expected=0x%04x\n",
+					x, y, pixel, dst_map[pixel], expected);
+				failures++;
+				goto rect_done;
+			}
+		}
+	}
+	printf("SUBMIT: filled 73x61 RGB565 rectangle with all outside pixels preserved\n");
+
+	/* The final representable coordinate must update exactly one pixel. */
+	submit.data = DRM_GCN_RECT_DATA(0x001f, 255, 255, 1, 1);
+	if (ioctl(fd, DRM_IOCTL_GCN_SUBMIT, &submit)) {
+		fail("submit bottom-right one-pixel rectangle");
+		goto out_sync;
+	}
+	for (unsigned int y = 0; y < TEST_HEIGHT; y++) {
+		for (unsigned int x = 0; x < TEST_WIDTH; x++) {
+			uint16_t expected;
+			size_t pixel = tiled_rgb565_index(x, y, TEST_WIDTH);
+
+			if (x == 255 && y == 255)
+				expected = 0x001f;
+			else if (x >= 13 && x < 86 && y >= 17 && y < 78)
+				expected = 0xf800;
+			else
+				expected = 0x07e0;
+			if (dst_map[pixel] != expected) {
+				fprintf(stderr,
+					"FAIL: one-pixel rectangle mismatch at (%u,%u): got=0x%04x expected=0x%04x\n",
+					x, y, dst_map[pixel], expected);
+				failures++;
+				goto rect_done;
+			}
+		}
+	}
+	puts("SUBMIT: filled bottom-right RGB565 pixel with prior surface preserved");
+
+rect_done:
+	wait_args.timeout_ns = monotonic_ns() + 1000000000ULL;
+	if (ioctl(fd, DRM_IOCTL_GCN_WAIT, &wait_args))
+		fail("wait for rectangle-fill destination");
+	sync_wait.timeout_nsec = (int64_t)(monotonic_ns() + 1000000000ULL);
+	if (ioctl(fd, DRM_IOCTL_SYNCOBJ_WAIT, &sync_wait))
+		fail("wait for rectangle-fill syncobj");
+
 out_sync:
 	destroy.handle = sync.handle;
 	destroy.pad = 0;
@@ -599,14 +689,17 @@ int main(int argc, char **argv)
 		}
 		test_provider(fd, other_fd, free_bytes);
 		if ((features & (DRM_GCN_FEATURE_SUBMIT_RGB565 |
-				 DRM_GCN_FEATURE_FILL_RGB565)) ==
+				 DRM_GCN_FEATURE_FILL_RGB565 |
+				 DRM_GCN_FEATURE_FILL_RECT_RGB565)) ==
 		    (DRM_GCN_FEATURE_SUBMIT_RGB565 |
-		     DRM_GCN_FEATURE_FILL_RGB565))
+		     DRM_GCN_FEATURE_FILL_RGB565 |
+		     DRM_GCN_FEATURE_FILL_RECT_RGB565))
 			test_submit(fd, other_fd);
 		else
 			fail_value("RGB565 render features", features,
 				   DRM_GCN_FEATURE_SUBMIT_RGB565 |
-				   DRM_GCN_FEATURE_FILL_RGB565);
+				   DRM_GCN_FEATURE_FILL_RGB565 |
+				   DRM_GCN_FEATURE_FILL_RECT_RGB565);
 	}
 
 	close(other_fd);

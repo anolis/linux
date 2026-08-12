@@ -9086,3 +9086,65 @@ master. The final 360-line hardware log is preserved at
 `f5a1b569a821446491c1e1514515d6f704b921bc45d1c8b12ef44d0c8e160f74`.
 Its exact GX/DRM timeout, overlap, failure, oops, panic, and machine-check audit
 is empty.
+
+### Stage bounded RGB565 rectangle fill
+
+- Test branch: test/wii-gx-rect-fill
+
+Add `DRM_GCN_RENDER_OP_FILL_RECT_RGB565` and advertise it independently with
+`DRM_GCN_FEATURE_FILL_RECT_RGB565`. Preserve the version-1 32-byte submit ABI
+by packing RGB565 colour plus 10-bit `x`, `y`, `width - 1`, and `height - 1`
+fields into the existing 64-bit operation data. The high eight bits remain
+reserved and must be zero. This represents the complete Wii EFB coordinate
+range while accepting no pointers, physical addresses, register values, or
+raw command bytes.
+
+Submission validation rejects source handles and reserved bits before object
+lookup, then decodes the rectangle and validates nonempty dimensions and
+overflow-safe bounds against the actual destination GEM dimensions. The DRM
+path locks only the destination reservation object and publishes successful
+completion through its write fence and optional binary syncobj exactly as for
+full-surface fill.
+
+The GX provider restores the tiled destination into EFB, waits behind a PE
+marker, overlays the accepted direct-colour pixel-space rectangle, emits a
+second marker, and copies the complete EFB back into the same destination
+before a third marker. One serialized FIFO and three ordered PE completions
+make the in-place read/modify/write explicit. Broadway cache maintenance wraps
+the operation, and pixels outside the requested rectangle must survive
+byte-exactly.
+
+KUnit validates packed-field decode, reserved bits, a 73 by 61 interior
+rectangle, an out-of-bounds edge, and the final valid one-pixel coordinate.
+The static smoke client retains every prior control, rejects malformed
+rectangle requests, seeds a known green destination, fills odd interior bounds
+red, and checks every pixel in true 4 by 4 tiled order. It then fills only
+pixel `(255,255)` blue and again verifies all 65536 pixels, proving inclusive
+edge handling and preservation of both the previous rectangle and untouched
+background.
+
+Hardware acceptance requires checksum-pinned artifacts, provider-absent
+control, unchanged OF/FDT ownership hashes, exact client readback, three PE
+finishes per accepted rectangle operation after accounting for concurrent
+scanout, unchanged pool capacity, clean unload/reload, normal RGB565 and
+XRGB8888 scanout, the accepted offscreen replay/full-frame hash, and CPU
+fallback. Reject any changed outside pixel, edge error, timeout, leak, oops,
+panic, or machine check.
+
+Candidate artifacts:
+
+- `dtbImage.wii` / `zImage` SHA-256:
+  `9a170d1464a151dbfdfad0d25fa6c8f66a0984ac8b6d09b8fb31c60d28253008`
+- `gcn-gx.ko` SHA-256:
+  `c68210be9b53d3c43f19af21232270c5dfc6ad9172152e61782fdbac01fa1958`
+- static `wii-gcn-render-test` SHA-256:
+  `99b89dd8dd836ee376aa0242b22e77b2bdb5c47768a08de1a209e5dafde682cf`
+
+Host validation passed strict `checkpatch.pl`, `git diff --check`, focused
+PowerPC `W=1` compilation, native and static PowerPC clients against exported
+UAPI headers, all ten focused GCN allocator/render KUnit tests under UML, and
+a clean full `zImage modules` build with `-j16`. The first sandboxed UML launch
+correctly diagnosed denied `ptrace`; the identical compiled UML kernel ran all
+ten tests successfully with the required host permission.
+
+Hardware result: pending.

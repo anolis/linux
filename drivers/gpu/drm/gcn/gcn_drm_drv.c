@@ -310,6 +310,23 @@ int gcn_drm_provider_fill(const struct gcn_drm_accel_ops *provider,
 	return ret;
 }
 
+int gcn_drm_provider_fill_rect(const struct gcn_drm_accel_ops *provider,
+			       void *dst_allocation, u16 width, u16 height,
+			       u16 x, u16 y, u16 rect_width,
+			       u16 rect_height, u16 color)
+{
+	int ret = -ENODEV;
+
+	mutex_lock(&gcn_drm_accel_lock);
+	if (gcn_drm_accel == provider && provider->fill_rect_rgb565)
+		ret = provider->fill_rect_rgb565(dst_allocation, width, height,
+						 x, y, rect_width, rect_height,
+						 color);
+	mutex_unlock(&gcn_drm_accel_lock);
+
+	return ret;
+}
+
 static int gcn_drm_accel_rgb565(const void *src, u32 src_pitch,
 				u32 xfb_phys, u16 width, u16 height)
 {
