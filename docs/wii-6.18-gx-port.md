@@ -9147,4 +9147,17 @@ a clean full `zImage modules` build with `-j16`. The first sandboxed UML launch
 correctly diagnosed denied `ptrace`; the identical compiled UML kernel ran all
 ten tests successfully with the required host permission.
 
-Hardware result: pending.
+Hardware result for commit `b8bbc578c`: rejected for the extreme one-pixel
+edge case. The checksum-pinned kernel, module, and client passed provider
+absence, ownership hashes, all prior copy/full-fill controls, and the complete
+73 by 61 interior rectangle check. Every one of its 65536 tiled destination
+pixels matched: the requested area was red and every outside green pixel was
+preserved byte-exactly. This validates packed decode, DRM bounds, destination
+restore, general rectangle rasterization, and in-place copyback.
+
+The subsequent one-pixel quad spanning `(255,255)` through `(256,256)` timed
+out waiting for its third PE completion. The machine remained alive, pool
+capacity returned to `524288/0/524288`, and OF/FDT hashes remained unchanged.
+Reject the candidate because a valid representable rectangle must not stall.
+Replace narrow rectangle geometry with the GX scissor applied to the proven
+full-surface direct-colour quad, then repeat the exact same all-pixel client.
