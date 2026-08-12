@@ -149,6 +149,28 @@ static const u32 gcn_drm_vi_filter[] = {
 static atomic_t gcn_drm_vi_write_sequence = ATOMIC_INIT(0);
 static DEFINE_MUTEX(gcn_drm_accel_lock);
 static const struct gcn_drm_accel_ops *gcn_drm_accel;
+static struct gcn_drm *gcn_drm_active;
+
+static int gcn_drm_ave_write_verify(struct gcn_drm *gcn, u8 value);
+
+static int gcn_drm_set_accel_ave_locked(bool accel_active)
+{
+	struct gcn_drm *gcn = gcn_drm_active;
+	u8 value = accel_active ? AVE_CHROMA_EXCHANGE_OFF :
+				 AVE_CHROMA_EXCHANGE_ON;
+	int ret;
+
+	if (!gcn || !gcn->ave)
+		return 0;
+
+	ret = gcn_drm_ave_write_verify(gcn, value);
+	if (ret)
+		return ret;
+
+	drm_info(&gcn->drm, "set AVE chroma exchange for %s scanout: 62=%02x\n",
+		 accel_active ? "GX" : "CPU", value);
+	return 0;
+}
 
 int gcn_drm_register_accel(const struct gcn_drm_accel_ops *ops)
 {
@@ -161,10 +183,15 @@ int gcn_drm_register_accel(const struct gcn_drm_accel_ops *ops)
 		return -EINVAL;
 
 	mutex_lock(&gcn_drm_accel_lock);
-	if (gcn_drm_accel)
+	if (gcn_drm_accel) {
 		ret = -EBUSY;
-	else
+	} else {
+		ret = gcn_drm_set_accel_ave_locked(true);
+		if (ret)
+			goto out_unlock;
 		gcn_drm_accel = ops;
+	}
+out_unlock:
 	mutex_unlock(&gcn_drm_accel_lock);
 
 	if (!ret)
@@ -176,11 +203,18 @@ EXPORT_SYMBOL_GPL(gcn_drm_register_accel);
 
 void gcn_drm_unregister_accel(const struct gcn_drm_accel_ops *ops)
 {
+	int ret = 0;
+
 	mutex_lock(&gcn_drm_accel_lock);
-	if (gcn_drm_accel == ops)
+	if (gcn_drm_accel == ops) {
 		gcn_drm_accel = NULL;
+		ret = gcn_drm_set_accel_ave_locked(false);
+	}
 	mutex_unlock(&gcn_drm_accel_lock);
 
+	if (ret)
+		pr_err("gcn-drm: failed to select CPU AVE chroma order: %d\n",
+		       ret);
 	pr_info("gcn-drm: unregistered scanout accelerator %s\n",
 		ops ? ops->name : "unknown");
 }
@@ -363,6 +397,10 @@ static void gcn_drm_release_ave(void *data)
 {
 	struct gcn_drm *gcn = data;
 
+	mutex_lock(&gcn_drm_accel_lock);
+	if (gcn_drm_active == gcn)
+		gcn_drm_active = NULL;
+	mutex_unlock(&gcn_drm_accel_lock);
 	gcn_drm_restore_ave(gcn);
 	put_device(&gcn->ave->dev);
 	gcn->ave = NULL;
@@ -952,6 +990,16 @@ static int gcn_drm_probe(struct platform_device *pdev)
 		return dev_err_probe(dev, ret,
 				     "failed to enable AVE chroma exchange\n");
 
+	mutex_lock(&gcn_drm_accel_lock);
+	gcn_drm_active = gcn;
+	ret = gcn_drm_set_accel_ave_locked(gcn_drm_accel);
+	if (ret)
+		gcn_drm_active = NULL;
+	mutex_unlock(&gcn_drm_accel_lock);
+	if (ret)
+		return dev_err_probe(dev, ret,
+				     "failed to select scanout chroma order\n");
+
 	ret = drmm_mode_config_init(&gcn->drm);
 	if (ret)
 		return ret;
@@ -1012,6 +1060,10 @@ static void gcn_drm_remove(struct platform_device *pdev)
 {
 	struct gcn_drm *gcn = platform_get_drvdata(pdev);
 
+	mutex_lock(&gcn_drm_accel_lock);
+	if (gcn_drm_active == gcn)
+		gcn_drm_active = NULL;
+	mutex_unlock(&gcn_drm_accel_lock);
 	drm_dev_unplug(&gcn->drm);
 	drm_atomic_helper_shutdown(&gcn->drm);
 	gcn_drm_vi_write32(gcn, VI_DI0, 0);
