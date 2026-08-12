@@ -2595,7 +2595,9 @@ static int gcn_gx_drm_blit(const void *src, u32 src_pitch, u32 xfb_phys,
 		if (!completed) {
 			pr_warn_ratelimited("gcn-gx: DRM frame timed out waiting for final PE finish\n");
 			ret = -ETIMEDOUT;
-		}
+		} else if (gx_debug_capture &&
+			   !READ_ONCE(gx_xfb_snapshot_size))
+			gx_capture_xfb(xfb_phys, width, height);
 	}
 
 out_unlock:
