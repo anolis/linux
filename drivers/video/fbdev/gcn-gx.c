@@ -1423,6 +1423,17 @@ static void gx_draw_color_quad(u16 width, u16 height, u8 r, u8 g, u8 b)
 	gx_draw_color_rect(0, 0, width, height, r, g, b);
 }
 
+static void gx_set_scissor(u16 x, u16 y, u16 width, u16 height)
+{
+	u32 x0 = x + 342;
+	u32 y0 = y + 342;
+	u32 x1 = x0 + width - 1;
+	u32 y1 = y0 + height - 1;
+
+	gx_load_bp_reg(0x20000000 | ((x0 & 0x7ff) << 12) | (y0 & 0xfff));
+	gx_load_bp_reg(0x21000000 | ((x1 & 0x7ff) << 12) | (y1 & 0xfff));
+}
+
 static void gx_draw_textured_color_quad(u16 width, u16 height,
 					u8 r, u8 g, u8 b)
 {
@@ -2939,7 +2950,8 @@ static int gcn_gx_drm_fill_rect_rgb565(void *dst_allocation, u16 width,
 		gx_wr8(0);
 
 	gx_setup_vertex_color_state(width, height);
-	gx_draw_color_rect(x, y, x + rect_width, y + rect_height, r, g, b);
+	gx_set_scissor(x, y, rect_width, rect_height);
+	gx_draw_color_quad(width, height, r, g, b);
 	gx_load_bp_reg(0x45000002);
 	for (i = 0; i < 32; i++)
 		gx_wr8(0);

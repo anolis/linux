@@ -9161,3 +9161,26 @@ capacity returned to `524288/0/524288`, and OF/FDT hashes remained unchanged.
 Reject the candidate because a valid representable rectangle must not stall.
 Replace narrow rectangle geometry with the GX scissor applied to the proven
 full-surface direct-colour quad, then repeat the exact same all-pixel client.
+
+Corrected candidate: retain the successful destination restore and copyback,
+but program BP scissor top-left/bottom-right from the validated rectangle and
+draw the proven full-surface direct-colour quad. This keeps raster geometry
+nondegenerate for one-pixel rectangles while the pixel engine clips writes to
+the exact inclusive bounds. The unchanged smoke client is the independent
+oracle for scissor field order, offsets, inclusivity, and outside preservation.
+
+Corrected candidate artifacts:
+
+- `dtbImage.wii` / `zImage` SHA-256:
+  `e3e1e3cfb389fd9657cabe958639f7608f1b813300840bed52c5bd0993ced2ee`
+- `gcn-gx.ko` SHA-256:
+  `bca645cbba0dd692d082c6d59768dea5b5e158f0627cbbfeeb6a6ce4fc888a1f`
+- unchanged static client SHA-256:
+  `99b89dd8dd836ee376aa0242b22e77b2bdb5c47768a08de1a209e5dafde682cf`
+
+The correction passes strict `checkpatch.pl`, `git diff --check`, focused
+PowerPC `W=1` GX compilation, and full `zImage modules` link/modpost with
+`-j16`. The UAPI, DRM validation, KUnit, and smoke-client sources are unchanged
+from the first candidate and retain their previously passed host gates.
+
+Corrected hardware result: pending.
