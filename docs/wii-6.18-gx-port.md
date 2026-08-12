@@ -9232,3 +9232,37 @@ fallback, and the Wii was forcibly powered off after its initramfs `poweroff`
 wrapper failed to determine a runlevel. Broader RGB565/XRGB8888 visual and
 offscreen-capture regression tests remain intentionally deferred because this
 session was limited to the pending corrected rectangle test.
+
+Deferred regression acceptance completed on fresh boot ID
+`5103c2b5-ae5f-4e8c-9812-8e6dcf9254f3`. The Wii again verified the accepted
+module and render-client hashes, plus visual fixture SHA-256
+`d2aa7acc2fc097fb695d06b318543725c01ed39c5c6b53745a07849229430b50`.
+The bounded fixture wrapper explicitly terminated each exact client PID after
+its completion line so the final inspection frame could not hold DRM master.
+
+The RGB565 fixture completed its initial frame and 40 page flips while GX
+advanced exactly 41 frames and 82 PE finishes. The XRGB8888 fixture likewise
+advanced exactly 41 frames and 82 PE finishes, including 41 XRGB8888
+conversions. Both therefore preserve the accepted two-finishes-per-generated-
+frame invariant, and neither left a client holder or fault signature.
+
+An independent module load with `offscreen_probe=1 debug_capture=1` completed
+one EFB-to-tiled-RGB565 copy, changed all 153600 destination words, and replayed
+the result 43 times. Its counter was exactly
+`88 = 2 * (1 copy + 43 replays)`. The 614400-byte post-token XFB capture had
+SHA-256
+`2c488feb9b32a2510a6912f85c8187e021e0fe3d7b228f8431395502b57cd075`,
+byte-identical to the accepted crisp four-quadrant reference; no separate
+living-room visual judgment was required.
+
+Before and after the complete regression cycle, the live GX OF-property
+manifest remained
+`cfc9a93ba4135f31d45faf7fdb2d8615b2304080163b7348a590e6df7ea197a0`
+and the packed FDT remained
+`e76a396b09be52f0a5ea3bd3cc5a58ed5af6bc59597fe039e0a420030556c51b`.
+Final module unload restored provider absence and completed 20 XRGB8888 CPU
+fallback flips. No process retained DRM master. The final 341-line log is
+preserved at `/tmp/wii-dmesg-gx-rect-fill-a9efb5f78-final.txt`, SHA-256
+`6c957a6cbc8959b6cc95daba8d6fc51d4fccda4b203f2877e41bffed38961c07`;
+its exact GX/DRM timeout, stall, failure, oops, panic, and machine-check audit
+is empty. The bounded RGB565 rectangle-fill stage is fully accepted.
