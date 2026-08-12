@@ -1,0 +1,125 @@
+/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
+#ifndef __UAPI_GCN_DRM_H__
+#define __UAPI_GCN_DRM_H__
+
+#include "drm.h"
+
+#if defined(__cplusplus)
+extern "C" {
+#endif
+
+#define DRM_GCN_RENDER_ABI_VERSION	1
+
+enum drm_gcn_param {
+	DRM_GCN_PARAM_ABI_VERSION = 0,
+	DRM_GCN_PARAM_PROVIDER_AVAILABLE = 1,
+	DRM_GCN_PARAM_MEM1_TOTAL_BYTES = 2,
+	DRM_GCN_PARAM_MEM1_FREE_BYTES = 3,
+	DRM_GCN_PARAM_MEM1_ALIGNMENT = 4,
+	DRM_GCN_PARAM_MAX_EFB_WIDTH = 5,
+	DRM_GCN_PARAM_MAX_EFB_HEIGHT = 6,
+	DRM_GCN_PARAM_FORMATS = 7,
+	DRM_GCN_PARAM_LAYOUTS = 8,
+	DRM_GCN_PARAM_FEATURES = 9,
+};
+
+#define DRM_GCN_FORMAT_RGB565		(1ULL << 0)
+#define DRM_GCN_LAYOUT_TILED_4X4		(1ULL << 0)
+
+#define DRM_GCN_FEATURE_MEM1_GEM		(1ULL << 0)
+#define DRM_GCN_FEATURE_CONTEXTS		(1ULL << 1)
+#define DRM_GCN_FEATURE_WAIT		(1ULL << 2)
+#define DRM_GCN_FEATURE_SYNCOBJ		(1ULL << 3)
+
+struct drm_gcn_get_param {
+	__u32 param;
+	/* Must be zero. */
+	__u32 pad;
+	__u64 value;
+};
+
+enum drm_gcn_gem_format {
+	DRM_GCN_GEM_FORMAT_RGB565 = 1,
+};
+
+enum drm_gcn_gem_layout {
+	DRM_GCN_GEM_LAYOUT_TILED_4X4 = 1,
+};
+
+struct drm_gcn_gem_create {
+	__u32 width;
+	__u32 height;
+	__u32 format;
+	__u32 layout;
+	/* Must be zero. */
+	__u32 flags;
+	/* Must be zero on input; GEM handle on success. */
+	__u32 handle;
+	/* Must be zero on input; allocation size on success. */
+	__u64 size;
+};
+
+struct drm_gcn_gem_mmap {
+	__u32 handle;
+	/* Must be zero. */
+	__u32 pad;
+	/* Must be zero on input; DRM mmap offset on success. */
+	__u64 offset;
+};
+
+struct drm_gcn_ctx_create {
+	/* Must be zero. */
+	__u32 flags;
+	/* Must be zero on input; per-file context ID on success. */
+	__u32 id;
+};
+
+struct drm_gcn_ctx_free {
+	__u32 id;
+	/* Must be zero. */
+	__u32 pad;
+};
+
+#define DRM_GCN_WAIT_WRITE		(1U << 0)
+
+struct drm_gcn_wait {
+	__u32 handle;
+	__u32 flags;
+	/*
+	 * Absolute CLOCK_MONOTONIC deadline in nanoseconds. U64_MAX waits
+	 * indefinitely.
+	 */
+	__u64 timeout_ns;
+};
+
+#define DRM_GCN_GET_PARAM	0x00
+#define DRM_GCN_GEM_CREATE	0x01
+#define DRM_GCN_GEM_MMAP	0x02
+#define DRM_GCN_CTX_CREATE	0x03
+#define DRM_GCN_CTX_FREE	0x04
+#define DRM_GCN_WAIT		0x05
+#define DRM_GCN_NUM_IOCTLS	0x06
+
+#define DRM_IOCTL_GCN_GET_PARAM \
+	DRM_IOWR(DRM_COMMAND_BASE + DRM_GCN_GET_PARAM, \
+		 struct drm_gcn_get_param)
+#define DRM_IOCTL_GCN_GEM_CREATE \
+	DRM_IOWR(DRM_COMMAND_BASE + DRM_GCN_GEM_CREATE, \
+		 struct drm_gcn_gem_create)
+#define DRM_IOCTL_GCN_GEM_MMAP \
+	DRM_IOWR(DRM_COMMAND_BASE + DRM_GCN_GEM_MMAP, \
+		 struct drm_gcn_gem_mmap)
+#define DRM_IOCTL_GCN_CTX_CREATE \
+	DRM_IOWR(DRM_COMMAND_BASE + DRM_GCN_CTX_CREATE, \
+		 struct drm_gcn_ctx_create)
+#define DRM_IOCTL_GCN_CTX_FREE \
+	DRM_IOW(DRM_COMMAND_BASE + DRM_GCN_CTX_FREE, \
+		struct drm_gcn_ctx_free)
+#define DRM_IOCTL_GCN_WAIT \
+	DRM_IOW(DRM_COMMAND_BASE + DRM_GCN_WAIT, struct drm_gcn_wait)
+
+#if defined(__cplusplus)
+}
+#endif
+
+#endif /* __UAPI_GCN_DRM_H__ */

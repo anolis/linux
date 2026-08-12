@@ -8710,3 +8710,129 @@ This closes the bounded internal-memory stage. GX now has deterministic,
 capacity-limited allocation and explicit metadata for its two proven MEM1
 workspaces, with 512 KiB reserved spare capacity and no userspace ABI. The
 next stage may design a render UAPI over this accepted ownership model.
+
+### Stage GX render UAPI foundation
+
+- Test branch: test/wii-gx-render-uapi
+- Candidate implementation commits:
+  6c89f4329e2ac427ace9473ca9d797536adb8a26,
+  a73ab8ecf, and 56fe9432d
+- Candidate zImage SHA-256:
+  7e78e7cb3662fb9e22426c6635b621e0c316705227f8c336a2be83c26a05199f
+- Candidate gcn-gx.ko SHA-256:
+  70a1609e485874080697cef685916d716e896cf4056b207e6cda76f7b88b401c
+- Candidate wii-gcn-render-test SHA-256:
+  64880a0a2993c813030f8c4b8789e7d6a33e6413384d5c18a3130099b893883a
+
+Add version 1 of a deliberately bounded GCN render UAPI. The stable gcn-drm
+device now exposes a render node and six private ioctls for capability
+discovery, GX-backed MEM1 GEM allocation, GEM mmap-offset lookup, per-file
+software context creation and destruction, and reservation-object waiting.
+The driver also enables core DRM sync objects. This stage does not submit GX
+commands, accept raw FIFO data or register writes, expose physical addresses,
+import or export PRIME buffers, or change scanout behavior.
+
+Only page-aligned, GX 4x4-tiled RGB565 objects with dimensions divisible by
+four are accepted. Width and height are capped at the EFB limits of 640 by
+576, object sizes are overflow-checked, and every allocation is confined to
+the accepted 2 MiB GX MEM1 reservation. The two proven 768 KiB internal
+scanout workspaces remain permanently allocated, so userspace initially has
+512 KiB of spare capacity. A nominal 640 by 480 RGB565 object is structurally
+valid but cannot fit and must fail with -ENOSPC; four 256 by 256 objects fit
+exactly. New allocations are zeroed before userspace can map them.
+
+The provider remains optional. ABI-version, provider-availability, and
+feature discovery work when gcn-gx is absent; provider-dependent queries,
+allocation, and context creation return -ENODEV. Each MEM1 GEM object pins
+the provider module until its final handle and VMA reference is gone. Normal
+module removal therefore fails while a BO or mapping exists. A forced
+platform unbind unregisters new access but defers allocator teardown until
+the final existing allocation is released, and rebind is rejected while that
+old allocator remains live.
+
+The host validation consists of the gcn_drm_render UML KUnit suite and the
+existing gcn_gx_mem1 allocator suite. Seven tests pass in total, covering
+fixed-width UAPI layout, accepted and rejected object geometry, exact size
+calculation, absolute timeout conversion, bounded placement, exhaustion, and
+reuse. The standalone tools/wii-gcn-render-test.c client compiles against the
+exported UAPI with -Wall -Wextra -Werror. It validates provider-present and
+provider-absent behavior, per-file context isolation, zero-filled mmap and
+readback, oversize-mmap rejection, immediate reservation waits, PRIME export
+rejection, allocation exhaustion, and free-capacity recovery.
+checkpatch.pl --strict, git diff --check, focused W=1 builds of all changed
+PowerPC objects, and a full zImage modules build with -j16 pass. A tree-wide
+W=1 build remains blocked by pre-existing unused-variable warnings in
+arch/powerpc/lib/sstep.c; no changed object emits a new warning.
+
+Hardware acceptance must first boot the checksum-pinned kernel with GX
+unloaded. Require /dev/dri/renderD128, ABI version 1, provider availability
+zero, successful core sync-object creation, and -ENODEV from every
+provider-dependent operation while normal CPU scanout remains clear and
+responsive. Then load the matching GX module and require total/free capacity
+of 2097152/524288 bytes, 4096-byte alignment, RGB565 and tiled-4x4 capability
+bits, EFB limits 640 by 576, and the MEM1-GEM feature bit.
+
+Run the checksum-pinned smoke client and require four 131072-byte objects
+before -ENOSPC, byte-exact zeroing and CPU readback, isolated context IDs,
+successful idle waits, PRIME rejection, and restoration of all 524288 free
+bytes after close. Keep one mapped object alive and require rmmod gcn_gx to
+fail busy; after unmap and close, unload must succeed and provider discovery
+must immediately return absent. Finally repeat the accepted RGB565,
+XRGB8888, offscreen round-trip, module-unload, and CPU-fallback regressions.
+Reject the stage on any address disclosure, out-of-pool mapping, capacity
+leak, stale provider call, FIFO/completion timeout, DRM fault, oops, panic, or
+machine check.
+
+Hardware result: passed; accept the bounded render UAPI foundation. The exact
+kernel booted as build `#2`, created `/dev/dri/renderD128`, and exposed ABI
+version 1 with GX absent. The static client passed provider-absent capability,
+sync-object, and `-ENODEV` behavior before any GX module was loaded.
+
+The first provider-present run exposed a real PowerPC mapping defect. A
+cache-inhibited userspace alias to the ordinary reserved MEM1 linear mapping
+accepted byte stores but immediately returned stale data at offset zero.
+Commit `a73ab8ecf` retains the existing cacheable VMA protection, after which
+the complete client passed byte-exact zeroing and readback. It reported pool
+total/free/alignment `2097152/524288/4096`, allocated exactly four 131072-byte
+objects before `-ENOSPC`, and restored all 524288 free bytes after release.
+Contexts, per-file isolation, idle waits, oversize-mmap rejection, PRIME
+rejection, and all capability limits passed. A dedicated hold mode closed the
+GEM handle while retaining only its VMA: `rmmod gcn_gx` failed busy until the
+holder exited, then succeeded immediately and provider-absent validation
+passed again.
+
+Visual regression testing found and fixed a pre-existing converter/encoder
+ownership error rather than a render-UAPI failure. With one XRGB8888 frame
+frozen, GX output was visibly red/blue and cyan/gold swapped at AVE
+`0x62=0x02`, then became correct immediately after changing only that register
+to zero. After GX unload, the unchanged CPU path showed the exact reciprocal
+result: swapped at zero and correct at two. Commit `56fe9432d` therefore
+serializes encoder selection with provider publication under the existing
+accelerator mutex: GX registers only after verified `0x62=0x00`, and CPU
+fallback begins only after verified `0x62=0x02` on unregister.
+
+The checksum-pinned reboot validated both automatic transitions without a
+userspace AVE write. GX XRGB8888 completed 80 flips, reached 81 XRGB8888
+frames, and reported 182 PE finishes for 91 total frames; the user confirmed
+the red/green/blue/white quadrants and center checkerboard were crisp and
+correct. RGB565 completed the same 80-flip fixture and was also visually
+correct. Module unload automatically restored `0x62=0x02`; provider-absent
+smoke passed and a 40-flip CPU XRGB8888 fixture remained visually correct.
+
+On an independent clean boot, `offscreen_probe=1` completed one EFB-to-texture
+copy with all `153600/153600` words changed and 89 visible replays. PE finishes
+were exactly `180 = 2 * (1 copy + 89 replays)`. The user confirmed the replayed
+four-quadrant grid was correct. Final unload restored CPU order `0x62=0x02`.
+The bounded hardware log is preserved at
+`/tmp/wii-dmesg-gx-render-uapi-496d2e2ab.txt`, SHA-256
+`ca6a59b2c23102a7d3fd9ef8fcfcc58aca5c873c3282be9dc5934b6ee2007a02`.
+It contains no GX/DRM timeout, oops, panic, or machine check; the sole warning
+is the known boot-time AVE I2C alignment warning before GX load.
+
+The exact committed tree passes patch-scoped strict checkpatch, ShellCheck for
+the deployment helper, `git diff --check`, focused PowerPC `W=1` builds, all
+seven UML KUnit assertions, static host and PowerPC userspace builds with
+`-Wall -Wextra -Werror`, and full `zImage modules` with `-j16`. Deployment
+commit `496d2e2ab` also validates the new whole-file transfer path: both the
+6.56 MiB rollback download and candidate upload passed first-stream SHA-256,
+so no chunk repair was required.

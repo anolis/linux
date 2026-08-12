@@ -58,3 +58,13 @@ config DRM_GCN_GX_MEM1_KUNIT_TEST
 	  These tests run without Nintendo hardware and do not load the GX driver.
 	  This option is intended only for kernel developers working on GX memory
 	  management and should normally be left disabled.
+
+config DRM_GCN_RENDER_KUNIT_TEST
+	tristate "KUnit tests for Nintendo GCN render UAPI" if !KUNIT_ALL_TESTS
+	depends on KUNIT && DRM
+	select DRM_GCN
+	default KUNIT_ALL_TESTS
+	help
+	  Validate the fixed-width render UAPI layout, tiled RGB565 object
+	  dimensions and sizes, invalid argument rejection, and absolute timeout
+	  conversion. These tests run without Nintendo hardware.

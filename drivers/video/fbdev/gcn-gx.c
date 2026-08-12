@@ -40,6 +40,7 @@
 #include <linux/ktime.h>
 #include <linux/math64.h>
 #include <linux/mutex.h>
+#include <linux/mm.h>
 #include <linux/string.h>
 #include <linux/wait.h>
 #include <linux/workqueue.h>
@@ -57,6 +58,7 @@
 
 #if IS_ENABLED(CONFIG_DRM_GCN_GX)
 #include <drm/gcn_gx_mem1.h>
+#include <uapi/drm/gcn_drm.h>
 #endif
 
 #include "gcn-gx.h"
@@ -91,8 +93,18 @@ struct gx_mem1_buffer {
 	enum gx_mem1_access access;
 };
 
+struct gx_mem1_allocation {
+	struct drm_mm_node node;
+	void *cpu_addr;
+	size_t size;
+};
+
 static struct gcn_gx_mem1_allocator gx_mem1_allocator;
 static struct gx_mem1_buffer gx_tex_workspace[2];
+static DEFINE_MUTEX(gx_mem1_lock);
+static unsigned int gx_mem1_user_allocations;
+static bool gx_mem1_shutdown;
+static void gx_mem1_free_workspaces_locked(void);
 static unsigned int gx_mem1_total_bytes;
 static unsigned int gx_mem1_used_bytes;
 static unsigned int gx_mem1_free_bytes;
@@ -2658,10 +2670,118 @@ static int gcn_gx_drm_blit_xrgb8888(const void *src, u32 src_pitch,
 			       GX_VFB_XRGB8888);
 }
 
+static int gcn_gx_drm_mem1_info(struct gcn_drm_mem1_info *info)
+{
+	if (!info)
+		return -EINVAL;
+
+	mutex_lock(&gx_mem1_lock);
+	if (!gx_mem1_allocator.initialized || gx_mem1_shutdown) {
+		mutex_unlock(&gx_mem1_lock);
+		return -ENODEV;
+	}
+
+	info->total_bytes = gx_mem1_total_bytes;
+	info->free_bytes = gx_mem1_free_bytes;
+	info->alignment = PAGE_SIZE;
+	info->max_width = 640;
+	info->max_height = 576;
+	info->formats = DRM_GCN_FORMAT_RGB565;
+	info->layouts = DRM_GCN_LAYOUT_TILED_4X4;
+	mutex_unlock(&gx_mem1_lock);
+	return 0;
+}
+
+static int gcn_gx_drm_mem1_alloc(size_t size, void **allocation)
+{
+	struct gx_mem1_allocation *mem;
+	int ret;
+
+	if (!allocation || !size || !IS_ALIGNED(size, PAGE_SIZE))
+		return -EINVAL;
+	*allocation = NULL;
+
+	mem = kzalloc(sizeof(*mem), GFP_KERNEL);
+	if (!mem)
+		return -ENOMEM;
+
+	mutex_lock(&gx_mem1_lock);
+	if (!gx_mem1_allocator.initialized || gx_mem1_shutdown) {
+		ret = -ENODEV;
+		goto err_unlock;
+	}
+	ret = gcn_gx_mem1_insert(&gx_mem1_allocator, &mem->node, size,
+				  PAGE_SIZE);
+	if (ret)
+		goto err_unlock;
+	if (!gcn_gx_mem1_contains(&gx_mem1_allocator, &mem->node)) {
+		ret = -EINVAL;
+		gcn_gx_mem1_remove(&mem->node);
+		goto err_unlock;
+	}
+	gx_mem1_used_bytes += size;
+	gx_mem1_free_bytes -= size;
+	gx_mem1_user_allocations++;
+	mutex_unlock(&gx_mem1_lock);
+
+	mem->cpu_addr = (void *)__va(mem->node.start);
+	mem->size = size;
+	memset(mem->cpu_addr, 0, size);
+	flush_dcache_range((unsigned long)mem->cpu_addr,
+			   (unsigned long)mem->cpu_addr + size);
+	*allocation = mem;
+	return 0;
+
+err_unlock:
+	mutex_unlock(&gx_mem1_lock);
+	kfree(mem);
+	return ret;
+}
+
+static void gcn_gx_drm_mem1_free(void *allocation)
+{
+	struct gx_mem1_allocation *mem = allocation;
+
+	if (!mem)
+		return;
+
+	mutex_lock(&gx_mem1_lock);
+	if (drm_mm_node_allocated(&mem->node)) {
+		gx_mem1_used_bytes -= mem->size;
+		gx_mem1_free_bytes += mem->size;
+		gcn_gx_mem1_remove(&mem->node);
+		gx_mem1_user_allocations--;
+		if (gx_mem1_shutdown && !gx_mem1_user_allocations)
+			gx_mem1_free_workspaces_locked();
+	}
+	mutex_unlock(&gx_mem1_lock);
+	kfree(mem);
+}
+
+static int gcn_gx_drm_mem1_mmap(void *allocation,
+				struct vm_area_struct *vma)
+{
+	struct gx_mem1_allocation *mem = allocation;
+	unsigned long size = vma->vm_end - vma->vm_start;
+
+	if (!mem || size != mem->size)
+		return -EINVAL;
+
+	vm_flags_set(vma, VM_IO | VM_PFNMAP | VM_DONTEXPAND | VM_DONTDUMP);
+	return remap_pfn_range(vma, vma->vm_start,
+			       PHYS_PFN(mem->node.start), size,
+			       vma->vm_page_prot);
+}
+
 static const struct gcn_drm_accel_ops gcn_gx_drm_accel_ops = {
 	.name = "gcn-gx",
+	.owner = THIS_MODULE,
 	.blit_rgb565 = gcn_gx_drm_blit_rgb565,
 	.blit_xrgb8888 = gcn_gx_drm_blit_xrgb8888,
+	.mem1_info = gcn_gx_drm_mem1_info,
+	.mem1_alloc = gcn_gx_drm_mem1_alloc,
+	.mem1_free = gcn_gx_drm_mem1_free,
+	.mem1_mmap = gcn_gx_drm_mem1_mmap,
 };
 #endif
 
@@ -2672,11 +2792,11 @@ static const struct gcn_drm_accel_ops gcn_gx_drm_accel_ops = {
 #define GX_MEM_ALIGNMENT	32
 
 #if IS_ENABLED(CONFIG_DRM_GCN_GX)
-static void gx_mem1_free_workspaces(void)
+static void gx_mem1_free_workspaces_locked(void)
 {
 	int i;
 
-	if (!gx_mem1_allocator.initialized)
+	if (!gx_mem1_allocator.initialized || gx_mem1_user_allocations)
 		return;
 
 	for (i = ARRAY_SIZE(gx_tex_workspace) - 1; i >= 0; i--) {
@@ -2691,6 +2811,14 @@ static void gx_mem1_free_workspaces(void)
 	gx_mem1_free_bytes = 0;
 }
 
+static void gx_mem1_free_workspaces(void)
+{
+	mutex_lock(&gx_mem1_lock);
+	gx_mem1_shutdown = true;
+	gx_mem1_free_workspaces_locked();
+	mutex_unlock(&gx_mem1_lock);
+}
+
 static int gx_mem1_alloc_workspaces(struct device *dev,
 				    const struct resource *mem)
 {
@@ -2703,11 +2831,21 @@ static int gx_mem1_alloc_workspaces(struct device *dev,
 	if (pool_size < 2 * GX_TEX_BUF_SLOT_SIZE || pool_size > UINT_MAX)
 		return -EINVAL;
 
+	mutex_lock(&gx_mem1_lock);
+	if (gx_mem1_allocator.initialized) {
+		mutex_unlock(&gx_mem1_lock);
+		return -EBUSY;
+	}
+
 	memset(gx_tex_workspace, 0, sizeof(gx_tex_workspace));
+	gx_mem1_shutdown = false;
+	gx_mem1_user_allocations = 0;
 	ret = gcn_gx_mem1_allocator_init(&gx_mem1_allocator, mem->start,
 					 pool_size, GX_MEM_ALIGNMENT);
-	if (ret)
+	if (ret) {
+		mutex_unlock(&gx_mem1_lock);
 		return ret;
+	}
 
 	for (i = 0; i < ARRAY_SIZE(gx_tex_workspace); i++) {
 		struct gx_mem1_buffer *buffer = &gx_tex_workspace[i];
@@ -2738,10 +2876,13 @@ static int gx_mem1_alloc_workspaces(struct device *dev,
 	gx_tex_phys = gx_tex_workspace[0].phys_addr;
 	gx_tex_buf = gx_tex_workspace[0].cpu_addr;
 	gx_tex_buf_alt = gx_tex_workspace[1].cpu_addr;
+	mutex_unlock(&gx_mem1_lock);
 	return 0;
 err_free:
 	dev_err(dev, "invalid GX MEM1 allocator layout: %d\n", ret);
-	gx_mem1_free_workspaces();
+	gx_mem1_shutdown = true;
+	gx_mem1_free_workspaces_locked();
+	mutex_unlock(&gx_mem1_lock);
 	return ret;
 }
 #endif

@@ -4,12 +4,30 @@
 
 #include <linux/types.h>
 
+struct module;
+struct vm_area_struct;
+
+struct gcn_drm_mem1_info {
+	u64 total_bytes;
+	u64 free_bytes;
+	u32 alignment;
+	u32 max_width;
+	u32 max_height;
+	u64 formats;
+	u64 layouts;
+};
+
 struct gcn_drm_accel_ops {
 	const char *name;
+	struct module *owner;
 	int (*blit_rgb565)(const void *src, u32 src_pitch, u32 xfb_phys,
 			   u16 width, u16 height);
 	int (*blit_xrgb8888)(const void *src, u32 src_pitch, u32 xfb_phys,
 			     u16 width, u16 height);
+	int (*mem1_info)(struct gcn_drm_mem1_info *info);
+	int (*mem1_alloc)(size_t size, void **allocation);
+	void (*mem1_free)(void *allocation);
+	int (*mem1_mmap)(void *allocation, struct vm_area_struct *vma);
 };
 
 int gcn_drm_register_accel(const struct gcn_drm_accel_ops *ops);

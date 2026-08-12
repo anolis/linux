@@ -33,6 +33,7 @@
 #include <drm/drm_vblank.h>
 
 #include "gcn_drm_trace.h"
+#include "gcn_drm_internal.h"
 
 #define GCN_DRM_NAME		"gcn-vi"
 #define GCN_DRM_DESC		"Nintendo GameCube/Wii VI DRM"
@@ -148,20 +149,49 @@ static const u32 gcn_drm_vi_filter[] = {
 static atomic_t gcn_drm_vi_write_sequence = ATOMIC_INIT(0);
 static DEFINE_MUTEX(gcn_drm_accel_lock);
 static const struct gcn_drm_accel_ops *gcn_drm_accel;
+static struct gcn_drm *gcn_drm_active;
+
+static int gcn_drm_ave_write_verify(struct gcn_drm *gcn, u8 value);
+
+static int gcn_drm_set_accel_ave_locked(bool accel_active)
+{
+	struct gcn_drm *gcn = gcn_drm_active;
+	u8 value = accel_active ? AVE_CHROMA_EXCHANGE_OFF :
+				 AVE_CHROMA_EXCHANGE_ON;
+	int ret;
+
+	if (!gcn || !gcn->ave)
+		return 0;
+
+	ret = gcn_drm_ave_write_verify(gcn, value);
+	if (ret)
+		return ret;
+
+	drm_info(&gcn->drm, "set AVE chroma exchange for %s scanout: 62=%02x\n",
+		 accel_active ? "GX" : "CPU", value);
+	return 0;
+}
 
 int gcn_drm_register_accel(const struct gcn_drm_accel_ops *ops)
 {
 	int ret = 0;
 
-	if (!ops || !ops->name ||
-	    (!ops->blit_rgb565 && !ops->blit_xrgb8888))
+	if (!ops || !ops->name || !ops->owner ||
+	    (!ops->blit_rgb565 && !ops->blit_xrgb8888) ||
+	    !ops->mem1_info || !ops->mem1_alloc || !ops->mem1_free ||
+	    !ops->mem1_mmap)
 		return -EINVAL;
 
 	mutex_lock(&gcn_drm_accel_lock);
-	if (gcn_drm_accel)
+	if (gcn_drm_accel) {
 		ret = -EBUSY;
-	else
+	} else {
+		ret = gcn_drm_set_accel_ave_locked(true);
+		if (ret)
+			goto out_unlock;
 		gcn_drm_accel = ops;
+	}
+out_unlock:
 	mutex_unlock(&gcn_drm_accel_lock);
 
 	if (!ret)
@@ -173,15 +203,83 @@ EXPORT_SYMBOL_GPL(gcn_drm_register_accel);
 
 void gcn_drm_unregister_accel(const struct gcn_drm_accel_ops *ops)
 {
+	int ret = 0;
+
 	mutex_lock(&gcn_drm_accel_lock);
-	if (gcn_drm_accel == ops)
+	if (gcn_drm_accel == ops) {
 		gcn_drm_accel = NULL;
+		ret = gcn_drm_set_accel_ave_locked(false);
+	}
 	mutex_unlock(&gcn_drm_accel_lock);
 
+	if (ret)
+		pr_err("gcn-drm: failed to select CPU AVE chroma order: %d\n",
+		       ret);
 	pr_info("gcn-drm: unregistered scanout accelerator %s\n",
 		ops ? ops->name : "unknown");
 }
 EXPORT_SYMBOL_GPL(gcn_drm_unregister_accel);
+
+int gcn_drm_provider_info(struct gcn_drm_mem1_info *info)
+{
+	int ret = -ENODEV;
+
+	if (!info)
+		return -EINVAL;
+
+	mutex_lock(&gcn_drm_accel_lock);
+	if (gcn_drm_accel && gcn_drm_accel->mem1_info)
+		ret = gcn_drm_accel->mem1_info(info);
+	mutex_unlock(&gcn_drm_accel_lock);
+	return ret;
+}
+
+int gcn_drm_provider_alloc(size_t size,
+			   const struct gcn_drm_accel_ops **provider,
+			   void **allocation)
+{
+	const struct gcn_drm_accel_ops *ops;
+	int ret = -ENODEV;
+
+	if (!provider || !allocation)
+		return -EINVAL;
+	*provider = NULL;
+	*allocation = NULL;
+
+	mutex_lock(&gcn_drm_accel_lock);
+	ops = gcn_drm_accel;
+	if (!ops || !ops->mem1_alloc || !try_module_get(ops->owner))
+		goto out_unlock;
+
+	ret = ops->mem1_alloc(size, allocation);
+	if (ret) {
+		module_put(ops->owner);
+		goto out_unlock;
+	}
+	*provider = ops;
+out_unlock:
+	mutex_unlock(&gcn_drm_accel_lock);
+	return ret;
+}
+
+void gcn_drm_provider_free(const struct gcn_drm_accel_ops *provider,
+			   void *allocation)
+{
+	if (!provider)
+		return;
+
+	provider->mem1_free(allocation);
+	module_put(provider->owner);
+}
+
+int gcn_drm_provider_mmap(const struct gcn_drm_accel_ops *provider,
+			  void *allocation, struct vm_area_struct *vma)
+{
+	if (!provider || !provider->mem1_mmap)
+		return -ENODEV;
+
+	return provider->mem1_mmap(allocation, vma);
+}
 
 static int gcn_drm_accel_rgb565(const void *src, u32 src_pitch,
 				u32 xfb_phys, u16 width, u16 height)
@@ -299,6 +397,10 @@ static void gcn_drm_release_ave(void *data)
 {
 	struct gcn_drm *gcn = data;
 
+	mutex_lock(&gcn_drm_accel_lock);
+	if (gcn_drm_active == gcn)
+		gcn_drm_active = NULL;
+	mutex_unlock(&gcn_drm_accel_lock);
 	gcn_drm_restore_ave(gcn);
 	put_device(&gcn->ave->dev);
 	gcn->ave = NULL;
@@ -794,8 +896,38 @@ static irqreturn_t gcn_drm_irq(int irq, void *data)
 
 DEFINE_DRM_GEM_FOPS(gcn_drm_fops);
 
+static int gcn_drm_prime_handle_to_fd(struct drm_device *drm,
+				      struct drm_file *file, u32 handle,
+				      u32 flags, int *prime_fd)
+{
+	(void)drm;
+	(void)file;
+	(void)handle;
+	(void)flags;
+	(void)prime_fd;
+	return -EOPNOTSUPP;
+}
+
+static int gcn_drm_prime_fd_to_handle(struct drm_device *drm,
+				      struct drm_file *file, int prime_fd,
+				      u32 *handle)
+{
+	(void)drm;
+	(void)file;
+	(void)prime_fd;
+	(void)handle;
+	return -EOPNOTSUPP;
+}
+
 static const struct drm_driver gcn_drm_driver = {
-	.driver_features = DRIVER_MODESET | DRIVER_GEM | DRIVER_ATOMIC,
+	.driver_features = DRIVER_MODESET | DRIVER_GEM | DRIVER_ATOMIC |
+			   DRIVER_RENDER | DRIVER_SYNCOBJ,
+	.open = gcn_drm_render_open,
+	.postclose = gcn_drm_render_postclose,
+	.ioctls = gcn_drm_render_ioctls,
+	.num_ioctls = DRM_GCN_NUM_IOCTLS,
+	.prime_handle_to_fd = gcn_drm_prime_handle_to_fd,
+	.prime_fd_to_handle = gcn_drm_prime_fd_to_handle,
 	.fops = &gcn_drm_fops,
 	DRM_GEM_SHMEM_DRIVER_OPS,
 	DRM_FBDEV_SHMEM_DRIVER_OPS,
@@ -858,6 +990,16 @@ static int gcn_drm_probe(struct platform_device *pdev)
 		return dev_err_probe(dev, ret,
 				     "failed to enable AVE chroma exchange\n");
 
+	mutex_lock(&gcn_drm_accel_lock);
+	gcn_drm_active = gcn;
+	ret = gcn_drm_set_accel_ave_locked(gcn_drm_accel);
+	if (ret)
+		gcn_drm_active = NULL;
+	mutex_unlock(&gcn_drm_accel_lock);
+	if (ret)
+		return dev_err_probe(dev, ret,
+				     "failed to select scanout chroma order\n");
+
 	ret = drmm_mode_config_init(&gcn->drm);
 	if (ret)
 		return ret;
@@ -918,6 +1060,10 @@ static void gcn_drm_remove(struct platform_device *pdev)
 {
 	struct gcn_drm *gcn = platform_get_drvdata(pdev);
 
+	mutex_lock(&gcn_drm_accel_lock);
+	if (gcn_drm_active == gcn)
+		gcn_drm_active = NULL;
+	mutex_unlock(&gcn_drm_accel_lock);
 	drm_dev_unplug(&gcn->drm);
 	drm_atomic_helper_shutdown(&gcn->drm);
 	gcn_drm_vi_write32(gcn, VI_DI0, 0);
