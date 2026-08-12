@@ -9039,4 +9039,50 @@ focused GCN allocator/render KUnit tests under UML. The submit structure
 remains 32 bytes; its final union retains the legacy `pad` source name while
 adding the operation-specific `data` name at the same offset.
 
-Hardware result: pending.
+Hardware result for commit `0a4193997`: passed; accept typed full-surface
+RGB565 solid fill. The Wii booted checksum-pinned kernel
+`76bb6ead37d3b8b9088a8a91683a69143727d999faddd37d9459a8190f4150e2`,
+passed the provider-absent fixture, and loaded matching module
+`81283434ccee358196af74c13fe64df58157f3ebbcd57dfe07ee4e8d889646b7`.
+The remote static client independently matched its committed checksum and
+reported both copy and fill feature bits.
+
+The client retained all prior allocator, mapping, context, PRIME, wait,
+syncobj, cross-file, aliased-object, and typed-copy controls. It copied all
+65536 source texels byte-exactly, rejected a fill with data bit 16 set,
+rejected a fill carrying a source handle, then filled all 65536 destination
+texels byte-exactly with each of `0x0000`, `0xffff`, `0x5aa5`, and `0xa55a`.
+Destination reservation and binary syncobj waits succeeded, and pool capacity
+returned exactly to `524288/0/524288` after object release. A clean module
+reload repeated the complete smoke result.
+
+The global PE counter advanced by 14 during a measured smoke run while normal
+scanout advanced by exactly two frames. Subtracting those four scanout
+finishes leaves exactly ten finishes for one typed copy and four typed fills,
+matching two raster/copy completions per accepted operation. Invalid controls
+did not submit hardware work. No FIFO, PE-finish, reservation, or syncobj
+timeout occurred.
+
+Every regular file in the live GX OF node had manifest SHA-256
+`cfc9a93ba4135f31d45faf7fdb2d8615b2304080163b7348a590e6df7ea197a0`;
+the packed FDT had SHA-256
+`e76a396b09be52f0a5ea3bd3cc5a58ed5af6bc59597fe039e0a420030556c51b`.
+Both remained byte-identical after repeated copy/fill submissions, offscreen
+rendering, normal scanout, module reload, and final unload.
+
+The accepted static visual fixture completed 40 RGB565 and 40 XRGB8888 page
+flips. The independent offscreen test completed one EFB-to-texture copy,
+changed all 153600 destination words, replayed the texture 43 times, and
+reached exactly `88 = 2 * (1 + 43)` PE finishes. A later full-frame capture
+was exactly 614400 bytes with SHA-256
+`2c488feb9b32a2510a6912f85c8187e021e0fe3d7b228f8431395502b57cd075`,
+byte-identical to the previously accepted crisp four-quadrant reference.
+
+The module unloaded, reloaded, and unloaded again without leaking provider or
+MEM1 ownership. Provider-absent discovery passed after unload, and the CPU
+fallback completed 20 XRGB8888 page flips. No process remained holding DRM
+master. The final 360-line hardware log is preserved at
+`/tmp/wii-dmesg-gx-solid-fill-0a4193997-final.txt`, SHA-256
+`f5a1b569a821446491c1e1514515d6f704b921bc45d1c8b12ef44d0c8e160f74`.
+Its exact GX/DRM timeout, overlap, failure, oops, panic, and machine-check audit
+is empty.
