@@ -31,6 +31,7 @@ enum drm_gcn_param {
 #define DRM_GCN_FEATURE_WAIT		(1ULL << 2)
 #define DRM_GCN_FEATURE_SYNCOBJ		(1ULL << 3)
 #define DRM_GCN_FEATURE_SUBMIT_RGB565	(1ULL << 4)
+#define DRM_GCN_FEATURE_FILL_RGB565	(1ULL << 5)
 
 struct drm_gcn_get_param {
 	__u32 param;
@@ -95,6 +96,7 @@ struct drm_gcn_wait {
 
 enum drm_gcn_render_op {
 	DRM_GCN_RENDER_OP_COPY_RGB565 = 1,
+	DRM_GCN_RENDER_OP_FILL_RGB565 = 2,
 };
 
 /*
@@ -110,8 +112,12 @@ struct drm_gcn_submit {
 	__u32 out_syncobj;
 	/* Must be zero. */
 	__u32 flags;
-	/* Must be zero. */
-	__u64 pad;
+	/* Operation-specific data; RGB565 fill colour in bits 15:0. */
+	union {
+		__u64 data;
+		/* Legacy name retained for source compatibility. */
+		__u64 pad;
+	};
 };
 
 #define DRM_GCN_GET_PARAM	0x00

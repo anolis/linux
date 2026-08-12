@@ -31,6 +31,8 @@ struct gcn_drm_accel_ops {
 	int (*mem1_mmap)(void *allocation, struct vm_area_struct *vma);
 	int (*submit_rgb565)(void *src_allocation, void *dst_allocation,
 			     u16 width, u16 height);
+	int (*fill_rgb565)(void *dst_allocation, u16 width, u16 height,
+			   u16 color);
 };
 
 int gcn_drm_register_accel(const struct gcn_drm_accel_ops *ops);

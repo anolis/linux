@@ -17,6 +17,7 @@
 #define TEST_WIDTH 256U
 #define TEST_HEIGHT 256U
 #define MAX_OBJECTS 1024U
+#define ARRAY_SIZE(array) (sizeof(array) / sizeof((array)[0]))
 
 static int failures;
 
@@ -240,6 +241,9 @@ static void test_syncobj(int fd)
 
 static void test_submit(int fd, int other_fd)
 {
+	static const uint16_t fill_colors[] = {
+		0x0000, 0xffff, 0x5aa5, 0xa55a,
+	};
 	struct drm_syncobj_create sync = {};
 	struct drm_syncobj_destroy destroy;
 	struct drm_gcn_ctx_create ctx = {};
@@ -334,6 +338,50 @@ static void test_submit(int fd, int other_fd)
 	if (i == pixels)
 		printf("SUBMIT: copied %zu tiled RGB565 pixels byte-exactly\n",
 		       pixels);
+
+	submit.op = DRM_GCN_RENDER_OP_FILL_RGB565;
+	submit.src_handle = 0;
+	submit.data = 1ULL << 16;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_SUBMIT, &submit) || errno != EINVAL)
+		fail("fill with out-of-range colour should return EINVAL");
+	submit.data = fill_colors[0];
+	submit.src_handle = src.handle;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_SUBMIT, &submit) || errno != EINVAL)
+		fail("fill with source object should return EINVAL");
+	submit.src_handle = 0;
+
+	for (i = 0; i < ARRAY_SIZE(fill_colors); i++) {
+		size_t pixel;
+
+		submit.data = fill_colors[i];
+		if (ioctl(fd, DRM_IOCTL_GCN_SUBMIT, &submit)) {
+			fail("submit RGB565 solid fill");
+			break;
+		}
+		for (pixel = 0; pixel < pixels; pixel++) {
+			if (dst_map[pixel] != fill_colors[i]) {
+				fprintf(stderr,
+					"FAIL: render-fill mismatch at %zu: got=0x%04x expected=0x%04x\n",
+					pixel, dst_map[pixel], fill_colors[i]);
+				failures++;
+				break;
+			}
+		}
+		if (pixel != pixels)
+			break;
+	}
+	if (i == ARRAY_SIZE(fill_colors))
+		printf("SUBMIT: filled %zu tiled RGB565 pixels byte-exactly across %zu colours\n",
+		       pixels, i);
+
+	wait_args.timeout_ns = monotonic_ns() + 1000000000ULL;
+	if (ioctl(fd, DRM_IOCTL_GCN_WAIT, &wait_args))
+		fail("wait for render-fill destination");
+	sync_wait.timeout_nsec = (int64_t)(monotonic_ns() + 1000000000ULL);
+	if (ioctl(fd, DRM_IOCTL_SYNCOBJ_WAIT, &sync_wait))
+		fail("wait for render-fill syncobj");
 
 out_sync:
 	destroy.handle = sync.handle;
@@ -550,11 +598,15 @@ int main(int argc, char **argv)
 				fail_value("provider EFB height", max_height, 576);
 		}
 		test_provider(fd, other_fd, free_bytes);
-		if (features & DRM_GCN_FEATURE_SUBMIT_RGB565)
+		if ((features & (DRM_GCN_FEATURE_SUBMIT_RGB565 |
+				 DRM_GCN_FEATURE_FILL_RGB565)) ==
+		    (DRM_GCN_FEATURE_SUBMIT_RGB565 |
+		     DRM_GCN_FEATURE_FILL_RGB565))
 			test_submit(fd, other_fd);
 		else
-			fail_value("RGB565 submit feature", features,
-				   DRM_GCN_FEATURE_SUBMIT_RGB565);
+			fail_value("RGB565 render features", features,
+				   DRM_GCN_FEATURE_SUBMIT_RGB565 |
+				   DRM_GCN_FEATURE_FILL_RGB565);
 	}
 
 	close(other_fd);

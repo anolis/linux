@@ -308,7 +308,7 @@ static int gcn_drm_ioctl_submit(struct drm_device *drm, void *data,
 	struct drm_gem_object *dst_gem = NULL;
 	struct drm_syncobj *out_syncobj = NULL;
 	struct dma_fence *fence = NULL;
-	struct gcn_drm_bo *src;
+	struct gcn_drm_bo *src = NULL;
 	struct gcn_drm_bo *dst;
 	struct drm_exec exec;
 	int ret;
@@ -327,34 +327,43 @@ static int gcn_drm_ioctl_submit(struct drm_device *drm, void *data,
 			return -ENOENT;
 	}
 
-	src_gem = drm_gem_object_lookup(file, args->src_handle);
 	dst_gem = drm_gem_object_lookup(file, args->dst_handle);
-	if (!src_gem || !dst_gem) {
+	if (args->src_handle)
+		src_gem = drm_gem_object_lookup(file, args->src_handle);
+	if ((args->src_handle && !src_gem) || !dst_gem) {
 		ret = -ENOENT;
 		goto out_put;
 	}
-	if (!gcn_drm_is_mem1_bo(src_gem) || !gcn_drm_is_mem1_bo(dst_gem)) {
+	if ((src_gem && !gcn_drm_is_mem1_bo(src_gem)) ||
+	    !gcn_drm_is_mem1_bo(dst_gem)) {
 		ret = -EINVAL;
 		goto out_put;
 	}
 
-	src = to_gcn_drm_bo(src_gem);
 	dst = to_gcn_drm_bo(dst_gem);
-	if (src->provider != dst->provider || src->width != dst->width ||
-	    src->height != dst->height || src->format != dst->format ||
-	    src->layout != dst->layout ||
-	    src->format != DRM_GCN_GEM_FORMAT_RGB565 ||
-	    src->layout != DRM_GCN_GEM_LAYOUT_TILED_4X4) {
+	if (dst->format != DRM_GCN_GEM_FORMAT_RGB565 ||
+	    dst->layout != DRM_GCN_GEM_LAYOUT_TILED_4X4) {
 		ret = -EINVAL;
 		goto out_put;
 	}
+	if (src_gem) {
+		src = to_gcn_drm_bo(src_gem);
+		if (src->provider != dst->provider ||
+		    src->width != dst->width || src->height != dst->height ||
+		    src->format != dst->format || src->layout != dst->layout) {
+			ret = -EINVAL;
+			goto out_put;
+		}
+	}
 
-	drm_exec_init(&exec, DRM_EXEC_INTERRUPTIBLE_WAIT, 2);
+	drm_exec_init(&exec, DRM_EXEC_INTERRUPTIBLE_WAIT, src_gem ? 2 : 1);
 	drm_exec_until_all_locked(&exec) {
-		ret = drm_exec_prepare_obj(&exec, src_gem, 1);
-		drm_exec_retry_on_contention(&exec);
-		if (ret)
-			break;
+		if (src_gem) {
+			ret = drm_exec_prepare_obj(&exec, src_gem, 1);
+			drm_exec_retry_on_contention(&exec);
+			if (ret)
+				break;
+		}
 		ret = drm_exec_prepare_obj(&exec, dst_gem, 1);
 		drm_exec_retry_on_contention(&exec);
 		if (ret)
@@ -369,12 +378,19 @@ static int gcn_drm_ioctl_submit(struct drm_device *drm, void *data,
 		goto out_exec;
 	}
 
-	ret = gcn_drm_provider_copy(src->provider, src->allocation,
-				    dst->allocation, src->width, src->height);
+	if (args->op == DRM_GCN_RENDER_OP_COPY_RGB565)
+		ret = gcn_drm_provider_copy(src->provider, src->allocation,
+					    dst->allocation, src->width,
+					    src->height);
+	else
+		ret = gcn_drm_provider_fill(dst->provider, dst->allocation,
+					    dst->width, dst->height,
+					    (u16)args->data);
 	if (ret)
 		goto out_exec;
 
-	dma_resv_add_fence(src_gem->resv, fence, DMA_RESV_USAGE_READ);
+	if (src_gem)
+		dma_resv_add_fence(src_gem->resv, fence, DMA_RESV_USAGE_READ);
 	dma_resv_add_fence(dst_gem->resv, fence, DMA_RESV_USAGE_WRITE);
 	if (out_syncobj)
 		drm_syncobj_replace_fence(out_syncobj, fence);

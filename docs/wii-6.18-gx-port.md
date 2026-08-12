@@ -8982,3 +8982,61 @@ GCN UML KUnit tests, and full `zImage modules` with `-j16`. The complete
 `/tmp/wii-dmesg-gx-render-submit-078a9ba3c.txt`, SHA-256
 `3e0648aa9d3731ed26310330bc5e87089639f49ddfa3c339b6775908abc0cd45`.
 It contains no GX/DRM timeout, overlap error, oops, panic, or machine check.
+
+### Stage full-surface RGB565 solid fill
+
+- Test branch: test/wii-gx-solid-fill
+
+Add a second typed rendering operation without changing the version-1 submit
+structure size or exposing raw GX state. `DRM_GCN_RENDER_OP_FILL_RGB565` is a
+source-free operation over one destination MEM1 GEM object. The low 16 bits
+of the existing operation-data field carry an RGB565 colour; all upper bits,
+the source handle, flags, and unrelated fields must be zero. Advertise the
+operation independently through `DRM_GCN_FEATURE_FILL_RGB565`.
+
+The DRM path validates the operation before object lookup, resolves and locks
+only the destination reservation object, and invokes the provider with opaque
+allocation metadata. On success it attaches a write fence to the destination
+and publishes the same already-signaled completion through an optional binary
+syncobj. Existing copy semantics, structure sizes, ioctl numbers, context
+isolation, and object ownership remain unchanged.
+
+The GX provider expands the 5:6:5 input components to 8-bit direct vertex
+colour, restores the accepted direct-colour state, draws one full-surface
+quad, fences rasterization, and copies EFB back into the tiled RGB565
+destination before a second PE finish. The path performs the same explicit
+Broadway cache maintenance and submit serialization as typed texture copy.
+
+The static smoke client retains every copy test and adds invalid upper colour
+bits, forbidden source-handle, destination wait, syncobj wait, and byte-exact
+full-object checks. It submits black, white, `0x5aa5`, and `0xa55a`; the mixed
+patterns exercise all channels and expose field masking or expansion errors.
+KUnit separately validates copy and fill argument contracts while preserving
+the 32-byte submit ABI.
+
+Hardware acceptance requires the checksum-pinned kernel, module, and static
+client. Hash the complete live GPU OF node and packed FDT before loading GX.
+Require all pre-existing copy controls plus four exact 65536-pixel fill
+results, exactly two additional PE finishes per fill, destination and syncobj
+wait success, unchanged memory capacity, byte-identical OF/FDT hashes, clean
+module unload/reload, visible scanout regression, and CPU fallback. Reject any
+stale texel, channel mismatch, timeout, ownership change, oops, panic, or
+machine check.
+
+Candidate artifacts:
+
+- `dtbImage.wii` / `zImage` SHA-256:
+  `76bb6ead37d3b8b9088a8a91683a69143727d999faddd37d9459a8190f4150e2`
+- `gcn-gx.ko` SHA-256:
+  `81283434ccee358196af74c13fe64df58157f3ebbcd57dfe07ee4e8d889646b7`
+- static `wii-gcn-render-test` SHA-256:
+  `2a3617dddcf9aa3a2576b9b96386d5ea573ce5504c28c6cdb845976e0204f276`
+
+Host validation passed strict `checkpatch.pl`, `git diff --check`, focused
+PowerPC `W=1` compilation, native and static PowerPC clients against exported
+UAPI headers, a clean full `zImage modules` build with `-j16`, and all nine
+focused GCN allocator/render KUnit tests under UML. The submit structure
+remains 32 bytes; its final union retains the legacy `pad` source name while
+adding the operation-specific `data` name at the same offset.
+
+Hardware result: pending.
