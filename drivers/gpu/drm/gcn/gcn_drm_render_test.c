@@ -19,7 +19,7 @@ static void gcn_drm_render_uapi_layout(struct kunit *test)
 	KUNIT_EXPECT_EQ(test, DRM_GCN_PARAM_FEATURES, 9);
 }
 
-static void gcn_drm_render_validates_typed_submit(struct kunit *test)
+static void gcn_drm_render_validates_copy_submit(struct kunit *test)
 {
 	struct drm_gcn_submit args = {
 		.ctx_id = 1,
@@ -35,7 +35,32 @@ static void gcn_drm_render_validates_typed_submit(struct kunit *test)
 	args.dst_handle = args.src_handle;
 	KUNIT_EXPECT_EQ(test, gcn_drm_render_validate_submit(&args), -EINVAL);
 	args.dst_handle = 2;
+	args.data = 1;
+	KUNIT_EXPECT_EQ(test, gcn_drm_render_validate_submit(&args), -EINVAL);
+	args.data = 0;
 	args.op = 0;
+	KUNIT_EXPECT_EQ(test, gcn_drm_render_validate_submit(&args), -EINVAL);
+}
+
+static void gcn_drm_render_validates_fill_submit(struct kunit *test)
+{
+	struct drm_gcn_submit args = {
+		.ctx_id = 1,
+		.op = DRM_GCN_RENDER_OP_FILL_RGB565,
+		.dst_handle = 2,
+		.data = 0x5aa5,
+	};
+
+	KUNIT_EXPECT_EQ(test, gcn_drm_render_validate_submit(&args), 0);
+	args.data = 0;
+	KUNIT_EXPECT_EQ(test, gcn_drm_render_validate_submit(&args), 0);
+	args.data = 1ULL << 16;
+	KUNIT_EXPECT_EQ(test, gcn_drm_render_validate_submit(&args), -EINVAL);
+	args.data = 0x5aa5;
+	args.src_handle = 1;
+	KUNIT_EXPECT_EQ(test, gcn_drm_render_validate_submit(&args), -EINVAL);
+	args.src_handle = 0;
+	args.dst_handle = 0;
 	KUNIT_EXPECT_EQ(test, gcn_drm_render_validate_submit(&args), -EINVAL);
 }
 
@@ -107,7 +132,8 @@ static struct kunit_case gcn_drm_render_test_cases[] = {
 	KUNIT_CASE(gcn_drm_render_accepts_tiled_rgb565),
 	KUNIT_CASE(gcn_drm_render_rejects_invalid_objects),
 	KUNIT_CASE(gcn_drm_render_converts_absolute_timeouts),
-	KUNIT_CASE(gcn_drm_render_validates_typed_submit),
+	KUNIT_CASE(gcn_drm_render_validates_copy_submit),
+	KUNIT_CASE(gcn_drm_render_validates_fill_submit),
 	{}
 };
 
