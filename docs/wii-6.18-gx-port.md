@@ -8605,3 +8605,58 @@ This closes Stage 1. GX now owns hardware through explicit DT resources while
 preserving the accepted normal scanout, offscreen round trip, modular unload,
 and CPU fallback behavior. The next ownership stage may introduce a bounded
 MEM1 allocator; a render UAPI remains a later and separate interface change.
+
+### Stage GX bounded MEM1 allocator
+
+- Test branch: `test/wii-gx-mem1-pool`
+- Candidate commits: `f8cd3608c`, `c55fc1e53`
+- Candidate `zImage` SHA-256:
+  `e39874481dda1afed6fef4288125e59eb468527cb28508a335b24d335a9b5ae0`
+- Candidate `gcn-gx.ko` SHA-256:
+  `ad563f74de8ea596e8ecef65bf43a41be054139260f0d451b6ee687b62c6a860`
+- Embedded `wii.dtb` SHA-256:
+  `c5a14c88f795bfb438e7816327f68af994fd434e93a92997cad1a57265deeb67`
+
+Expand the named GX texture reservation from 1536 KiB to 2 MiB. Its range is
+now `0x01300000..0x014fffff`, ending exactly below the independently owned OHCI
+DMA pool at `0x01500000`. The FIFO and XFB reservations do not move. Preserve
+the two proven 768 KiB texture workspaces at `0x01300000` and `0x013c0000`,
+leaving 512 KiB of bounded spare capacity for later internal GX resources.
+
+Replace implicit address arithmetic on the modern DRM path with a `drm_mm`
+allocator over that reserved region. Each internal workspace now carries an
+allocation node, CPU mapping, physical address, byte size, tiled-RGB565 layout,
+and access state. Probe rejects malformed, undersized, overflowing, or
+out-of-range layouts; failure and remove paths release every node before
+allocator teardown. Read-only module parameters expose total, allocated, and
+free bytes. This stage adds no userspace ABI and does not change command
+generation, synchronization, rendering, or framebuffer publication.
+
+The host positive control is the `gcn_gx_mem1` UML KUnit suite. All three tests
+pass: invalid and overflowing ranges are rejected; two aligned 768 KiB
+workspaces receive deterministic low addresses and a freed address is reused;
+and consuming the full 2 MiB range makes the next allocation fail with
+`-ENOSPC`. A focused GX binding check passes, with only optional `yamllint`
+unavailable. A clean PowerPC `zImage modules` build with `-j16`, a `W=1` GX
+module build, DTB decompilation, and `git diff --check` also pass. The embedded
+DTB contains `texture@1300000 { reg = <0x01300000 0x00200000>; }`.
+
+Hardware acceptance requires the checksum-pinned kernel because the reserved
+memory map changed. Before loading GX, require CPU scanout and the platform
+device to remain functional and verify that the kernel reserves the exact
+texture range without overlap into the OHCI pool. Load the matching module and
+require its ready line to report FIFO `0x01684000`, workspaces `0x01300000` and
+`0x013c0000`, and pool counters `2097152/1572864/524288`. The three read-only
+module parameters must report those same total/used/free values.
+
+Run the accepted RGB565 and XRGB8888 fixtures and require completed flips,
+advancing VI interrupts, exactly two PE finishes per generated frame, and
+checksum-verified PNG captures with correct geometry and channels. Repeat the
+accepted `offscreen_probe=1` round trip and require one copy, all 153600 words
+changed, visible replay, and the same PE-finish invariant. Terminate every
+holding client, unload GX, and require immediate clear CPU-console fallback.
+Reject the stage on any reservation overlap, allocator-layout error, changed
+workspace address, FIFO/completion timeout, DRM fault, oops, panic, or machine
+check.
+
+Hardware result: pending.
