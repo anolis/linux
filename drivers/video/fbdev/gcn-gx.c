@@ -2579,6 +2579,9 @@ static int gcn_gx_drm_blit(const void *src, u32 src_pitch, u32 xfb_phys,
 	mutex_lock(&gx_submit_lock);
 	if (gx_offscreen_probe) {
 		ret = gx_drm_offscreen_probe(xfb_phys, width, height);
+		if (!ret && gx_debug_capture &&
+		    !READ_ONCE(gx_xfb_snapshot_size))
+			gx_capture_xfb(xfb_phys, width, height);
 		goto out_unlock;
 	}
 
