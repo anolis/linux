@@ -2768,7 +2768,6 @@ static int gcn_gx_drm_mem1_mmap(void *allocation,
 		return -EINVAL;
 
 	vm_flags_set(vma, VM_IO | VM_PFNMAP | VM_DONTEXPAND | VM_DONTDUMP);
-	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
 	return remap_pfn_range(vma, vma->vm_start,
 			       PHYS_PFN(mem->node.start), size,
 			       vma->vm_page_prot);

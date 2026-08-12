@@ -217,6 +217,64 @@ static void test_syncobj(int fd)
 		fail("destroy core DRM sync object");
 }
 
+static int hold_mapping(const char *node)
+{
+	struct drm_gcn_gem_mmap mmap_args = {};
+	struct drm_gcn_gem_create bo;
+	uint8_t *mapping;
+	uint64_t provider;
+	int fd;
+
+	fd = open(node, O_RDWR | O_CLOEXEC);
+	if (fd < 0) {
+		fail("open render node for hold");
+		return EXIT_FAILURE;
+	}
+	if (get_param(fd, DRM_GCN_PARAM_PROVIDER_AVAILABLE, &provider) ||
+	    !provider) {
+		errno = ENODEV;
+		fail("provider required for hold");
+		close(fd);
+		return EXIT_FAILURE;
+	}
+	if (create_bo(fd, &bo)) {
+		fail("create held MEM1 object");
+		close(fd);
+		return EXIT_FAILURE;
+	}
+	mmap_args.handle = bo.handle;
+	if (ioctl(fd, DRM_IOCTL_GCN_GEM_MMAP, &mmap_args)) {
+		fail("query held MEM1 mmap offset");
+		close_bo(fd, bo.handle);
+		close(fd);
+		return EXIT_FAILURE;
+	}
+	mapping = mmap(NULL, bo.size, PROT_READ | PROT_WRITE, MAP_SHARED, fd,
+		       mmap_args.offset);
+	if (mapping == MAP_FAILED) {
+		fail("mmap held MEM1 object");
+		close_bo(fd, bo.handle);
+		close(fd);
+		return EXIT_FAILURE;
+	}
+	mapping[0] = 0x5a;
+	if (mapping[0] != 0x5a) {
+		errno = EIO;
+		fail("held MEM1 mapping readback");
+		return EXIT_FAILURE;
+	}
+	if (close_bo(fd, bo.handle)) {
+		fail("close held MEM1 handle");
+		return EXIT_FAILURE;
+	}
+
+	printf("READY: holding MEM1 VMA pid=%ld size=%llu\n", (long)getpid(),
+	       (unsigned long long)bo.size);
+	fflush(stdout);
+	for (;;)
+		pause();
+}
+
 static void test_provider(int fd, int other_fd, uint64_t free_before)
 {
 	struct drm_gcn_gem_create objects[MAX_OBJECTS];
@@ -279,7 +337,9 @@ static void test_provider(int fd, int other_fd, uint64_t free_before)
 
 int main(int argc, char **argv)
 {
-	const char *node = argc > 1 ? argv[1] : "/dev/dri/renderD128";
+	bool hold = argc > 1 && !strcmp(argv[1], "--hold");
+	const char *node = argc > 1 + hold ? argv[1 + hold] :
+			   "/dev/dri/renderD128";
 	uint64_t provider = 0;
 	uint64_t abi = 0;
 	uint64_t total = 0;
@@ -292,6 +352,9 @@ int main(int argc, char **argv)
 	uint64_t max_height = 0;
 	int other_fd;
 	int fd;
+
+	if (hold)
+		return hold_mapping(node);
 
 	fd = open(node, O_RDWR | O_CLOEXEC);
 	if (fd < 0) {
