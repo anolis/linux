@@ -1,8 +1,12 @@
 # SPDX-License-Identifier: GPL-2.0-only
 
+config DRM_GCN
+	bool
+
 config DRM_GCN_VI
 	tristate "Nintendo GameCube/Wii Video Interface KMS"
 	depends on DRM && WII && I2C
+	select DRM_GCN
 	select DRM_CLIENT_SELECTION
 	select DRM_GEM_SHMEM_HELPER
 	select DRM_KMS_HELPER
@@ -27,6 +31,8 @@ config DRM_GCN_GX
 	  Build the GX fixed-function renderer as an optional scanout backend for
 	  the GCN VI DRM driver. GX converts RGB565 shadow buffers into inactive
 	  YUYV XFB pages while DRM retains VI, vblank, and page-flip ownership.
+	  Internal GX-visible work buffers are allocated from the bounded MEM1
+	  texture region described by the device tree.
 
 	  Removing or failing this module leaves the DRM driver's CPU conversion
 	  path active. If M is selected, the module will be called gcn-gx.
@@ -40,3 +46,15 @@ config DRM_GCN_XFB_OBSERVER
 	  and should normally be left disabled.
 
 	  If M is selected, the module will be called gcn-xfb-observer.
+
+config DRM_GCN_GX_MEM1_KUNIT_TEST
+	tristate "KUnit tests for Nintendo GX MEM1 allocation" if !KUNIT_ALL_TESTS
+	depends on KUNIT && DRM
+	select DRM_GCN
+	default KUNIT_ALL_TESTS
+	help
+	  Test the bounded range, alignment, deterministic placement, exhaustion,
+	  freeing, and reuse behavior used by the GX MEM1 workspace allocator.
+	  These tests run without Nintendo hardware and do not load the GX driver.
+	  This option is intended only for kernel developers working on GX memory
+	  management and should normally be left disabled.

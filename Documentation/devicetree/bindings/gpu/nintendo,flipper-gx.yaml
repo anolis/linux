@@ -43,6 +43,9 @@ properties:
   memory-region:
     minItems: 2
     maxItems: 2
+    description:
+      Reserved MEM1 regions used for the command FIFO and bounded texture
+      workspace allocator.
 
   memory-region-names:
     items:
