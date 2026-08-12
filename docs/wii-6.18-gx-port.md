@@ -9266,3 +9266,50 @@ preserved at `/tmp/wii-dmesg-gx-rect-fill-a9efb5f78-final.txt`, SHA-256
 `6c957a6cbc8959b6cc95daba8d6fc51d4fccda4b203f2877e41bffed38961c07`;
 its exact GX/DRM timeout, stall, failure, oops, panic, and machine-check audit
 is empty. The bounded RGB565 rectangle-fill stage is fully accepted.
+
+### Stage bounded RGB565 rectangle blit
+
+- Test branch: `test/wii-gx-rect-blit`
+
+Add `DRM_GCN_RENDER_OP_BLIT_RECT_RGB565` and advertise it independently with
+`DRM_GCN_FEATURE_BLIT_RECT_RGB565`. Preserve the version-1 32-byte submit ABI
+by packing six 10-bit fields into operation data: source x/y, destination x/y,
+width minus one, and height minus one. The high four bits remain reserved and
+must be zero. Userspace supplies only driver-owned GEM handles and validated
+coordinates; no pointers, physical addresses, register values, or raw command
+bytes cross the ABI.
+
+The first stage requires distinct source and destination objects with identical
+dimensions, tiled RGB565 layout, and provider ownership. It performs an
+unscaled, unrotated, opaque copy. Both source and destination bounds are
+validated against their actual GEM dimensions before locking. The DRM path
+locks both reservation objects, publishes a read fence on the source and a
+write fence on the destination, and replaces an optional binary syncobj only
+after synchronous GX completion. Same-object overlap is explicitly rejected
+and remains a later milestone.
+
+The GX provider restores the complete destination texture into EFB, then binds
+the source texture and draws the proven full-surface textured quad under the
+destination scissor. A translated position-to-texture matrix maps each target
+pixel to `source + target - destination`, retaining the accepted normalized
+texture path and texel bias while avoiding narrow geometry and direct TEX0.
+The complete EFB is copied back into the destination after a third ordered
+hardware fence. A unique final PE token plus at least one finish IRQ establishes
+completion because closely spaced finish status events may coalesce.
+
+KUnit must verify packed-field decoding, reserved bits, source bounds,
+destination bounds, the final valid pixel, and aliased-handle rejection. The
+unchanged smoke suite retains all allocator, context, mapping, wait, syncobj,
+copy, fill, and rectangle-fill controls. It adds a coordinate-dependent source
+pattern, translates an odd 67 by 53 interior rectangle, and checks every one of
+65536 tiled destination pixels. A second operation copies only source
+`(255,255)` to destination `(255,255)` and again verifies the entire retained
+surface. Malformed source bounds, destination bounds, reserved bits, and
+aliased objects must fail before hardware submission.
+
+Hardware acceptance requires checksum-pinned artifacts, provider absence,
+exact all-pixel results, destination wait and syncobj completion, unchanged
+MEM1 capacity and OF/FDT ownership hashes, clean module unload/reload, normal
+RGB565 and XRGB8888 scanout, the accepted offscreen full-frame hash, and CPU
+fallback. Reject any changed outside pixel, incorrect source coordinate,
+timeout, capacity leak, ownership change, oops, panic, or machine check.
