@@ -9527,3 +9527,23 @@ offscreen XFB hash, unchanged OF/FDT ownership, final CPU fallback, and an
 empty exact fault audit. Reject any overlap-direction dependency, changed
 source or outside pixel, deadlock, duplicate-reservation failure, timeout,
 capacity leak, ownership change, oops, panic, or machine check.
+
+Candidate commit `8521fef2d7c1eb16471ebcbca30fd0202cd5adc1` passed
+`git diff --check`, strict patch-scoped `checkpatch.pl` with zero diagnostics,
+native and static PowerPC client builds with `-Wall -Wextra -Werror`, focused
+PowerPC `W=1` builds of `gcn_drm_render.o`, `gcn_drm_drv.o`, and `gcn-gx.o`,
+and a clean full PowerPC `zImage modules -j16` build. The exact
+`gcn_drm_render` KUnit suite passed all 8 tests and the `gcn_gx_mem1` suite
+passed all 3 tests.
+
+The checksum-pinned hardware candidate artifacts are:
+
+- `dtbImage.wii`/`zImage`:
+  `2c4d55f1407e44d87c453dc01468dd5ac0fdc2f9568e798a1a4cdf969c6909dc`
+- `gcn-gx.ko`:
+  `2bc39accc19de582c5e2bd44769d1415b0a3c156eb423e91e5ee8cbe2ef88ffd`
+- static PowerPC `wii-gcn-render-test`:
+  `ab6b9a211b7c0a1a7b83de8ab0a1b16bd381e6097a1f47d1f0b94ca11e2a08a9`
+
+An incremental post-commit rebuild reproduced all three hashes exactly. These
+are the only artifacts eligible for this stage's hardware acceptance result.
