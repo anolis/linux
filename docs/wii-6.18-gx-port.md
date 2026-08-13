@@ -9798,3 +9798,17 @@ that exact case and misses only a later mixed-axis fractional boundary. This
 requires a slope correction anchored at the first destination pixel. Add a
 separate signed float-ULP adjustment for both scaled matrix slopes so the
 hardware effect of the final coefficient rounding can be tested directly.
+
+The slope sweep found a narrow interval that passes the complete seven-case
+strict client. Values from `-1` through `-1024` left the original mixed-axis
+error unchanged; `-2048` moved that case's first mismatch from destination
+`(176,17)` to `(230,17)`. Values `-2176` through `-2768` retained the latter
+mismatch. Exactly `-2784`, `-2800`, and `-2816` passed all existing scale and
+alias cases, including exhaustive comparison of every destination and outside
+pixel. At `-2832` and below, exact 2x reduction failed at its first pixel;
+larger negative adjustments eventually also broke enlargement and no-scale
+controls. This is a reproducible candidate interval, not yet an accepted
+constant: the seven-case suite is too sparse to establish that one raw IEEE
+754 ULP adjustment correctly compensates every ratio and exponent. Broaden
+the deterministic ratio matrix before selecting a default or changing the
+documented nearest-neighbor contract.
