@@ -9826,3 +9826,16 @@ pixel-center nearest required `0x1379`. The automated render cycle repeated
 the `-2800` failure and restored the CPU console after unloading the module.
 This rejects the narrow interval as a general fix. The required correction is
 ratio-dependent; do not select a global raw-float ULP default.
+
+A follow-up two-parameter sweep tested whether a positive intercept could
+pair with a more negative slope while preserving the first destination
+sample. Biases `+1/256` and `+2/256` texel were each combined with slope
+adjustments from `-3072` through `-8192` ULPs and run against the expanded
+strict client. No pair passed. The `+1/256` series first failed same-object
+scaling and then progressively earlier exact 2x-reduction samples; the
+`+2/256` series failed mixed and odd ratios before likewise breaking exact
+reduction. A single global affine correction is therefore rejected alongside
+the translation-only and slope-only corrections. Future work should model the
+GX 1/128-texel fixed-point conversion per ratio or define the ABI around the
+hardware's deterministic sampling rule, rather than adding another global
+phase parameter.
