@@ -17,6 +17,9 @@ static void gcn_drm_render_uapi_layout(struct kunit *test)
 	KUNIT_EXPECT_EQ(test, sizeof(struct drm_gcn_submit), 32U);
 	KUNIT_EXPECT_EQ(test, DRM_GCN_NUM_IOCTLS, 7);
 	KUNIT_EXPECT_EQ(test, DRM_GCN_PARAM_FEATURES, 9);
+	KUNIT_EXPECT_EQ(test,
+			DRM_GCN_FEATURE_BLIT_RECT_RGB565_UNEQUAL_DIMS,
+			1ULL << 8);
 }
 
 static void gcn_drm_render_validates_copy_submit(struct kunit *test)
@@ -131,6 +134,15 @@ static void gcn_drm_render_validates_rect_blit_submit(struct kunit *test)
 	args.data = DRM_GCN_BLIT_RECT_DATA(255, 255, 255, 255, 1, 1);
 	ret = gcn_drm_render_validate_blit_rect(args.data, 256, 256, 256, 256);
 	KUNIT_EXPECT_EQ(test, ret, 0);
+	args.data = DRM_GCN_BLIT_RECT_DATA(241, 103, 11, 97, 67, 53);
+	ret = gcn_drm_render_validate_blit_rect(args.data, 320, 192, 256, 256);
+	KUNIT_EXPECT_EQ(test, ret, 0);
+	args.data = DRM_GCN_BLIT_RECT_DATA(319, 191, 255, 255, 1, 1);
+	ret = gcn_drm_render_validate_blit_rect(args.data, 320, 192, 256, 256);
+	KUNIT_EXPECT_EQ(test, ret, 0);
+	args.data = DRM_GCN_BLIT_RECT_DATA(319, 191, 255, 255, 2, 1);
+	ret = gcn_drm_render_validate_blit_rect(args.data, 320, 192, 256, 256);
+	KUNIT_EXPECT_EQ(test, ret, -EINVAL);
 	args.dst_handle = args.src_handle;
 	KUNIT_EXPECT_EQ(test, gcn_drm_render_validate_submit(&args), -EINVAL);
 }

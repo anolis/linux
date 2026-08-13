@@ -34,6 +34,7 @@ enum drm_gcn_param {
 #define DRM_GCN_FEATURE_FILL_RGB565	(1ULL << 5)
 #define DRM_GCN_FEATURE_FILL_RECT_RGB565	(1ULL << 6)
 #define DRM_GCN_FEATURE_BLIT_RECT_RGB565	(1ULL << 7)
+#define DRM_GCN_FEATURE_BLIT_RECT_RGB565_UNEQUAL_DIMS	(1ULL << 8)
 
 struct drm_gcn_get_param {
 	__u32 param;

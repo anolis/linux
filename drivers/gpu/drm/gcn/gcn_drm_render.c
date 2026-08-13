@@ -358,8 +358,12 @@ static int gcn_drm_ioctl_submit(struct drm_device *drm, void *data,
 	if (src_gem) {
 		src = to_gcn_drm_bo(src_gem);
 		if (src->provider != dst->provider ||
-		    src->width != dst->width || src->height != dst->height ||
 		    src->format != dst->format || src->layout != dst->layout) {
+			ret = -EINVAL;
+			goto out_put;
+		}
+		if (args->op == DRM_GCN_RENDER_OP_COPY_RGB565 &&
+		    (src->width != dst->width || src->height != dst->height)) {
 			ret = -EINVAL;
 			goto out_put;
 		}
@@ -410,7 +414,8 @@ static int gcn_drm_ioctl_submit(struct drm_device *drm, void *data,
 						 rect.height, rect.color);
 	else
 		ret = gcn_drm_provider_blit_rect(src->provider, src->allocation,
-						 dst->allocation, dst->width,
+						 dst->allocation, src->width,
+						 src->height, dst->width,
 						 dst->height, blit_rect.src_x,
 						 blit_rect.src_y, blit_rect.dst_x,
 						 blit_rect.dst_y, blit_rect.width,
