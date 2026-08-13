@@ -9650,3 +9650,18 @@ accepted offscreen XFB hash, unchanged OF/FDT ownership, final CPU fallback,
 and an empty exact fault audit. Reject any source-phase mismatch, changed
 outside pixel, overlap propagation, timeout, capacity leak, ownership change,
 oops, panic, or machine check.
+
+Candidate commit `90e05350d42a55a1c56081c887a82f1c91a74f62` passed the
+host validation above and a clean full PowerPC `zImage modules -j16` build.
+An incremental rebuild from the clean commit reproduced all three artifacts
+exactly. The checksum-pinned hardware candidate artifacts are:
+
+- `dtbImage.wii` / `zImage` SHA-256:
+  `ec1c67246d5f515cb33ccdf8e13b99070761f7751e93b78164bf661d9a4c5a69`
+- `gcn-gx.ko` SHA-256:
+  `5af73ef21d2d438aefbad4720c5e8814525d2195ff28693b4ab45e9c23de82ac`
+- static PowerPC `wii-gcn-render-test` SHA-256:
+  `31a5dcb21abd5063321d3f2f28c9b770a5859edb49cf7fea61c9d43e472b1770`
+
+These are the only artifacts eligible for this stage's hardware acceptance
+result.
