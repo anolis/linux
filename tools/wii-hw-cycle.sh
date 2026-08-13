@@ -37,6 +37,7 @@ Usage:
   tools/wii-hw-cycle.sh build TEST_ID
   tools/wii-hw-cycle.sh stage TEST_ID
   tools/wii-hw-cycle.sh deploy IMAGE TEST_ID
+  tools/wii-hw-cycle.sh artifacts MODULE CLIENT
   tools/wii-hw-cycle.sh collect [TEST_ID]
   tools/wii-hw-cycle.sh status
 
@@ -44,12 +45,69 @@ build   Build zImage with make -j16 and archive it with a manifest.
 stage   Build and immediately deploy the checksum-verified archived image.
 deploy  Mount the labelled SD partitions if needed, snapshot old log hashes,
         copy IMAGE to gumboot/zImage.ngx, sync, and verify the card checksum.
+artifacts
+        Stage a GX module and render-test client in rootfs /gx-test, verify both
+        checksums, sync, and unmount both card partitions.
 collect Copy returned logs and reject unchanged or wrongly-marked diagnostics.
 status  Show the latest run manifest, card mounts, image hash, and log hashes.
 
 TEST_ID must also appear in the kernel command line as wii_test=TEST_ID.
 No action uses sudo or pkexec. Root-owned logs are compared, not deleted.
 EOF
+}
+
+unmount_card()
+{
+	local mount_path source
+
+	for mount_path in "$ROOT_MOUNT" "$BOOT_MOUNT"; do
+		if findmnt -rn --target "$mount_path" >/dev/null 2>&1; then
+			source=$(findmnt -nr -o SOURCE --target "$mount_path")
+			say "unmounting $source"
+			udisksctl unmount -b "$source" >/dev/null
+		fi
+	done
+}
+
+stage_artifacts()
+{
+	local module=$1 client=$2 root module_dst client_dst
+	local module_hash client_hash staged_hash
+
+	[[ -f "$module" ]] || die "module not found: $module"
+	[[ -f "$client" ]] || die "client not found: $client"
+	root=$(ensure_mount "$ROOT_LABEL" "$ROOT_MOUNT")
+	ensure_mount "$BOOT_LABEL" "$BOOT_MOUNT" >/dev/null
+	mkdir -p "$root/gx-test"
+	module_dst=$root/gx-test/gcn-gx.ko
+	client_dst=$root/gx-test/wii-gcn-render-test
+	module_hash=$(hash_file "$module")
+	client_hash=$(hash_file "$client")
+
+	say "staging GX module $module_hash"
+	cp "$module" "$module_dst.new"
+	staged_hash=$(hash_file "$module_dst.new")
+	[[ "$staged_hash" == "$module_hash" ]] ||
+		die "module verification failed: $staged_hash != $module_hash"
+	mv -f "$module_dst.new" "$module_dst"
+
+	say "staging render client $client_hash"
+	cp "$client" "$client_dst.new"
+	chmod 0755 "$client_dst.new"
+	staged_hash=$(hash_file "$client_dst.new")
+	[[ "$staged_hash" == "$client_hash" ]] ||
+		die "client verification failed: $staged_hash != $client_hash"
+	mv -f "$client_dst.new" "$client_dst"
+
+	sync "$module_dst" "$client_dst"
+	[[ $(hash_file "$module_dst") == "$module_hash" ]] ||
+		die 'final module checksum mismatch'
+	[[ $(hash_file "$client_dst") == "$client_hash" ]] ||
+		die 'final client checksum mismatch'
+	say "verified $module_dst"
+	say "verified $client_dst"
+	unmount_card
+	finish 'GX artifacts staged; card can be removed'
 }
 
 safe_id()
@@ -262,6 +320,10 @@ case ${1:-} in
 	deploy)
 		[[ $# == 3 ]] || { usage; exit 2; }
 		deploy_image "$2" "$3"
+		;;
+	artifacts)
+		[[ $# == 3 ]] || { usage; exit 2; }
+		stage_artifacts "$2" "$3"
 		;;
 	collect)
 		[[ $# -le 2 ]] || { usage; exit 2; }
