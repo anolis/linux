@@ -9745,3 +9745,11 @@ The crop submission's unique final PE token had already been observed by
 finish status is level-triggered, so the draw and texture-copy finish events
 may coalesce. Require one finish IRQ like the established final-copyback paths;
 the unique token supplies ordering after the crop command.
+
+The first follow-up accidentally changed the analogous offscreen-probe wait,
+not the scaled crop wait; checksum `f70f8afe23ff4af24aae45b16edcfc647e23a39dd3bf735a1f0e480513803488`
+therefore reproduced the same source-crop timeout. Restore the offscreen probe.
+For the crop boundary, use the stronger signal already returned by
+`gx_submit_cmds()`: its unique token is emitted after every preceding command
+and was observed successfully in both failed runs. No additional finish IRQ is
+required between the crop and replay submissions.

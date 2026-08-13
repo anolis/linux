@@ -2607,8 +2607,8 @@ static int gx_drm_offscreen_capture(u16 width, u16 height)
 	if (ret)
 		return ret;
 
-	/* The unique submit token orders after the crop; finish IRQs may coalesce. */
-	completed = gx_wait_for_pe_finishes(finish_count, 1);
+	completed = gx_wait_for_pe_finishes(finish_count,
+					    GX_DRM_FRAME_PE_FINISHES);
 	if (!completed) {
 		pr_warn("gcn-gx: offscreen texture copy timed out waiting for final PE finish\n");
 		return -ETIMEDOUT;
@@ -2891,7 +2891,6 @@ static int gcn_gx_drm_submit_rgb565(void *src_allocation,
 	flush_dcache_range((unsigned long)dst->cpu_addr,
 			   (unsigned long)dst->cpu_addr + bytes);
 
-	finish_count = READ_ONCE(gx_pe_finish_count);
 	fifo_pos = 0;
 	gx_load_libogc_init_preamble();
 	gx_setup_display_copy_state();
@@ -3228,14 +3227,7 @@ static int gcn_gx_drm_blit_scaled_rgb565(void *src_allocation,
 	if (ret)
 		goto out_unlock;
 
-	completed = gx_wait_for_pe_finishes(finish_count,
-					    GX_DRM_FRAME_PE_FINISHES);
-	if (!completed) {
-		pr_warn_ratelimited("gcn-gx: scaled blit timed out waiting for source crop\n");
-		ret = -ETIMEDOUT;
-		goto out_unlock;
-	}
-
+	/* gx_submit_cmds() observed the unique token ordered after the crop. */
 	finish_count = READ_ONCE(gx_pe_finish_count);
 	fifo_pos = 0;
 	gx_load_libogc_init_preamble();
