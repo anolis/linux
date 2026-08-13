@@ -9416,3 +9416,17 @@ MEM1 capacity and OF/FDT hashes, normal RGB565/XRGB8888 scanout, the accepted
 offscreen XFB hash, final CPU fallback, and an empty exact fault audit. Reject
 any scaling, source-coordinate error, changed outside pixel, timeout, leak,
 ownership change, oops, panic, or machine check.
+
+Candidate commit `81fa85934` passed strict diff-scoped checkpatch with no
+errors, warnings, or checks; `git diff --check`; exported-header native and
+static clients with `-Wall -Wextra -Werror`; focused PowerPC `W=1` GX and DRM
+objects; all 11 focused allocator/render KUnit tests under UML; and a clean
+full PowerPC `zImage modules` build with `-j16`. The checksum-pinned artifacts
+are:
+
+- `dtbImage.wii` / `zImage` SHA-256:
+  `147d31ebc3484a910aeec87ce8ce5534442ff20907e51b5ce088633ccde99acf`
+- `gcn-gx.ko` SHA-256:
+  `6d0ea60c9d901f02727ccfe59c6884a3e4cce86bcdafcc45dfc2f060a4128ce4`
+- static `wii-gcn-render-test` SHA-256:
+  `09f57544123aa42a5ccb71a6f660ba8cdf138f26306f61cae64bda579d086c3d`
