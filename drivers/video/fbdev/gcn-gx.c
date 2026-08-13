@@ -2709,7 +2709,8 @@ static int gcn_gx_drm_mem1_info(struct gcn_drm_mem1_info *info)
 			 DRM_GCN_FEATURE_FILL_RGB565 |
 			 DRM_GCN_FEATURE_FILL_RECT_RGB565 |
 			 DRM_GCN_FEATURE_BLIT_RECT_RGB565 |
-			 DRM_GCN_FEATURE_BLIT_RECT_RGB565_UNEQUAL_DIMS;
+			 DRM_GCN_FEATURE_BLIT_RECT_RGB565_UNEQUAL_DIMS |
+			 DRM_GCN_FEATURE_BLIT_RECT_RGB565_SAME_OBJECT;
 	mutex_unlock(&gx_mem1_lock);
 	return 0;
 }
@@ -3007,7 +3008,7 @@ static int gcn_gx_drm_blit_rect_rgb565(void *src_allocation,
 	int ret;
 	int i;
 
-	if (!src || !dst || src == dst || !src_width || !src_height ||
+	if (!src || !dst || !src_width || !src_height ||
 	    !dst_width || !dst_height || (src_width & 3) ||
 	    (src_height & 3) || (dst_width & 3) || (dst_height & 3) ||
 	    !rect_width || !rect_height || src_x >= src_width ||
@@ -3025,8 +3026,9 @@ static int gcn_gx_drm_blit_rect_rgb565(void *src_allocation,
 		return -ENODEV;
 
 	mutex_lock(&gx_submit_lock);
-	flush_dcache_range((unsigned long)src->cpu_addr,
-			   (unsigned long)src->cpu_addr + src_bytes);
+	if (src != dst)
+		flush_dcache_range((unsigned long)src->cpu_addr,
+				   (unsigned long)src->cpu_addr + src_bytes);
 	flush_dcache_range((unsigned long)dst->cpu_addr,
 			   (unsigned long)dst->cpu_addr + dst_bytes);
 

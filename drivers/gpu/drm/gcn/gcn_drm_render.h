@@ -160,7 +160,6 @@ gcn_drm_render_validate_submit(const struct drm_gcn_submit *args)
 		return 0;
 	case DRM_GCN_RENDER_OP_BLIT_RECT_RGB565:
 		if (!args->src_handle ||
-		    args->src_handle == args->dst_handle ||
 		    args->data & DRM_GCN_BLIT_RESERVED_MASK)
 			return -EINVAL;
 		return 0;

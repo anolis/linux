@@ -377,7 +377,8 @@ static int gcn_drm_ioctl_submit(struct drm_device *drm, void *data,
 		gcn_drm_render_decode_blit_rect(args->data, &blit_rect);
 	}
 
-	drm_exec_init(&exec, DRM_EXEC_INTERRUPTIBLE_WAIT, src_gem ? 2 : 1);
+	drm_exec_init(&exec, DRM_EXEC_INTERRUPTIBLE_WAIT,
+		      src_gem && src_gem != dst_gem ? 2 : 1);
 	drm_exec_until_all_locked(&exec) {
 		if (src_gem) {
 			ret = drm_exec_prepare_obj(&exec, src_gem, 1);
@@ -385,10 +386,12 @@ static int gcn_drm_ioctl_submit(struct drm_device *drm, void *data,
 			if (ret)
 				break;
 		}
-		ret = drm_exec_prepare_obj(&exec, dst_gem, 1);
-		drm_exec_retry_on_contention(&exec);
-		if (ret)
-			break;
+		if (src_gem != dst_gem) {
+			ret = drm_exec_prepare_obj(&exec, dst_gem, 1);
+			drm_exec_retry_on_contention(&exec);
+			if (ret)
+				break;
+		}
 	}
 	if (ret)
 		goto out_exec;
@@ -423,7 +426,8 @@ static int gcn_drm_ioctl_submit(struct drm_device *drm, void *data,
 	if (ret)
 		goto out_exec;
 
-	if (src_gem)
+	/* An aliased blit writes the one object; do not add a duplicate read fence. */
+	if (src_gem && src_gem != dst_gem)
 		dma_resv_add_fence(src_gem->resv, fence, DMA_RESV_USAGE_READ);
 	dma_resv_add_fence(dst_gem->resv, fence, DMA_RESV_USAGE_WRITE);
 	if (out_syncobj)

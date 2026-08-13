@@ -23,6 +23,8 @@
 
 static int failures;
 
+static void fail(const char *what);
+
 static size_t tiled_rgb565_index(unsigned int x, unsigned int y,
 				 unsigned int width)
 {
@@ -39,6 +41,69 @@ static uint16_t source_pattern(unsigned int x, unsigned int y)
 static uint16_t unequal_source_pattern(unsigned int x, unsigned int y)
 {
 	return y * UNEQUAL_SRC_WIDTH + x;
+}
+
+static uint16_t same_object_pattern(unsigned int x, unsigned int y)
+{
+	return y * TEST_WIDTH + x;
+}
+
+struct same_object_blit_case {
+	const char *name;
+	uint16_t src_x;
+	uint16_t src_y;
+	uint16_t dst_x;
+	uint16_t dst_y;
+	uint16_t width;
+	uint16_t height;
+};
+
+static int test_same_object_blit_case(int fd, struct drm_gcn_submit *submit,
+				      uint16_t *map,
+				      const struct same_object_blit_case *test)
+{
+	for (unsigned int y = 0; y < TEST_HEIGHT; y++) {
+		for (unsigned int x = 0; x < TEST_WIDTH; x++) {
+			size_t pixel = tiled_rgb565_index(x, y, TEST_WIDTH);
+
+			map[pixel] = same_object_pattern(x, y);
+		}
+	}
+
+	submit->data =
+		DRM_GCN_BLIT_RECT_DATA(test->src_x, test->src_y,
+				       test->dst_x, test->dst_y,
+				       test->width, test->height);
+	if (ioctl(fd, DRM_IOCTL_GCN_SUBMIT, submit)) {
+		fail(test->name);
+		return -1;
+	}
+
+	for (unsigned int y = 0; y < TEST_HEIGHT; y++) {
+		for (unsigned int x = 0; x < TEST_WIDTH; x++) {
+			uint16_t expected = same_object_pattern(x, y);
+			size_t pixel = tiled_rgb565_index(x, y, TEST_WIDTH);
+
+			if (x >= test->dst_x && x < test->dst_x + test->width &&
+			    y >= test->dst_y && y < test->dst_y + test->height) {
+				unsigned int source_x = test->src_x + x - test->dst_x;
+				unsigned int source_y = test->src_y + y - test->dst_y;
+
+				expected = same_object_pattern(source_x, source_y);
+			}
+			if (map[pixel] != expected) {
+				fprintf(stderr,
+					"FAIL: %s mismatch at (%u,%u): got=0x%04x expected=0x%04x\n",
+					test->name, x, y, map[pixel], expected);
+				failures++;
+				return -1;
+			}
+		}
+	}
+
+	printf("SUBMIT: %s preserved all source and outside pixels\n",
+	       test->name);
+	return 0;
 }
 
 static void fail(const char *what)
@@ -269,6 +334,15 @@ static void test_submit(int fd, int other_fd)
 {
 	static const uint16_t fill_colors[] = {
 		0x0000, 0xffff, 0x5aa5, 0xa55a,
+	};
+	static const struct same_object_blit_case same_object_cases[] = {
+		{ "same-object identical-region blit", 37, 41, 37, 41, 83, 71 },
+		{ "same-object non-overlap blit", 9, 11, 171, 177, 53, 47 },
+		{ "same-object right-overlap blit", 17, 31, 43, 31, 113, 79 },
+		{ "same-object left-overlap blit", 43, 31, 17, 31, 113, 79 },
+		{ "same-object down-overlap blit", 29, 19, 29, 47, 91, 117 },
+		{ "same-object up-overlap blit", 29, 47, 29, 19, 91, 117 },
+		{ "same-object diagonal-overlap blit", 23, 27, 47, 51, 129, 111 },
 	};
 	struct drm_syncobj_create sync = {};
 	struct drm_syncobj_destroy destroy;
@@ -520,9 +594,6 @@ rect_done:
 		fail("rectangle blit with reserved bits should return EINVAL");
 	submit.data = DRM_GCN_BLIT_RECT_DATA(101, 29, 11, 97, 67, 53);
 	submit.dst_handle = src.handle;
-	errno = 0;
-	if (!ioctl(fd, DRM_IOCTL_GCN_SUBMIT, &submit) || errno != EINVAL)
-		fail("aliased rectangle blit should return EINVAL");
 	submit.dst_handle = dst.handle;
 	if (ioctl(fd, DRM_IOCTL_GCN_SUBMIT, &submit)) {
 		fail("submit interior RGB565 rectangle blit");
@@ -655,6 +726,15 @@ rect_done:
 	}
 	puts("SUBMIT: blitted unequal source and destination bottom-right pixels");
 	puts("SUBMIT: unequal-dimension prior surface preserved");
+
+	submit.src_handle = dst.handle;
+	submit.dst_handle = dst.handle;
+	for (i = 0; i < ARRAY_SIZE(same_object_cases); i++) {
+		if (test_same_object_blit_case(fd, &submit, dst_map,
+					       &same_object_cases[i]))
+			goto blit_done;
+	}
+	puts("SUBMIT: same-object RGB565 blits passed in all overlap directions");
 
 blit_done:
 	wait_args.timeout_ns = monotonic_ns() + 1000000000ULL;
@@ -888,12 +968,14 @@ int main(int argc, char **argv)
 				 DRM_GCN_FEATURE_FILL_RGB565 |
 				 DRM_GCN_FEATURE_FILL_RECT_RGB565 |
 				 DRM_GCN_FEATURE_BLIT_RECT_RGB565 |
-				 DRM_GCN_FEATURE_BLIT_RECT_RGB565_UNEQUAL_DIMS)) ==
+				 DRM_GCN_FEATURE_BLIT_RECT_RGB565_UNEQUAL_DIMS |
+				 DRM_GCN_FEATURE_BLIT_RECT_RGB565_SAME_OBJECT)) ==
 		    (DRM_GCN_FEATURE_SUBMIT_RGB565 |
 		     DRM_GCN_FEATURE_FILL_RGB565 |
 		     DRM_GCN_FEATURE_FILL_RECT_RGB565 |
 		     DRM_GCN_FEATURE_BLIT_RECT_RGB565 |
-		     DRM_GCN_FEATURE_BLIT_RECT_RGB565_UNEQUAL_DIMS))
+		     DRM_GCN_FEATURE_BLIT_RECT_RGB565_UNEQUAL_DIMS |
+		     DRM_GCN_FEATURE_BLIT_RECT_RGB565_SAME_OBJECT))
 			test_submit(fd, other_fd);
 		else
 			fail_value("RGB565 render features", features,
@@ -901,7 +983,8 @@ int main(int argc, char **argv)
 				   DRM_GCN_FEATURE_FILL_RGB565 |
 				   DRM_GCN_FEATURE_FILL_RECT_RGB565 |
 				   DRM_GCN_FEATURE_BLIT_RECT_RGB565 |
-				   DRM_GCN_FEATURE_BLIT_RECT_RGB565_UNEQUAL_DIMS);
+				   DRM_GCN_FEATURE_BLIT_RECT_RGB565_UNEQUAL_DIMS |
+				   DRM_GCN_FEATURE_BLIT_RECT_RGB565_SAME_OBJECT);
 	}
 
 	close(other_fd);

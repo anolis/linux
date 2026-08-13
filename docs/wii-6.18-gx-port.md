@@ -9488,3 +9488,107 @@ XRGB8888 flips. The final 39-line log is preserved at
 `d13e070affe1df8307efdb0ea5c231146288c0e226c20f25956c55589e1d4b25`;
 its exact GX/DRM timeout, stall, failure, oops, panic, and machine-check audit
 is empty. The unequal-dimension rectangle-blit stage is fully accepted.
+
+### Stage same-object RGB565 rectangle blit
+
+- Test branch: `test/wii-gx-same-object-blit`
+
+Extend only `DRM_GCN_RENDER_OP_BLIT_RECT_RGB565` to permit equal source and
+destination GEM handles. Advertise this independently through
+`DRM_GCN_FEATURE_BLIT_RECT_RGB565_SAME_OBJECT`. Preserve the version-1
+32-byte submit ABI, packed rectangle fields, tiled RGB565 layout, unscaled and
+unrotated semantics, and all distinct-object behavior. Full-surface copy
+continues to reject aliased handles.
+
+Same-object blits have snapshot/memmove semantics: every destination pixel is
+sampled from the source surface as it existed before the operation, regardless
+of overlap direction. The established GX sequence already provides this
+ordering. It restores the complete MEM1 object into EFB, samples the still
+unchanged MEM1 object through the bounded source texture draw, and copies the
+completed EFB back to MEM1 only after rasterization. The DRM path must lock the
+aliased GEM reservation object once, reserve one fence slot, and publish only
+a write fence for the operation. It must not prepare the same reservation
+twice or attach redundant read and write fences to one object.
+
+The unchanged client must retain every prior control and exhaustive oracle.
+Add an exact-region no-op, a non-overlapping copy, horizontal overlap in both
+directions, vertical overlap in both directions, and diagonal overlap. Reseed
+the complete 256 by 256 object before every case with a unique 16-bit value for
+each coordinate, then verify all 65536 tiled pixels against a pre-operation
+snapshot oracle. This detects directional propagation, stale cache lines,
+incorrect source coordinates, and damage outside the destination rectangle.
+KUnit must independently retain full-copy alias rejection while accepting a
+structurally valid same-object bounded blit.
+
+Hardware acceptance requires checksum-pinned artifacts, the advertised
+capability, provider absence, two complete client passes across module reload,
+full MEM1 capacity recovery, normal RGB565/XRGB8888 scanout, the accepted
+offscreen XFB hash, unchanged OF/FDT ownership, final CPU fallback, and an
+empty exact fault audit. Reject any overlap-direction dependency, changed
+source or outside pixel, deadlock, duplicate-reservation failure, timeout,
+capacity leak, ownership change, oops, panic, or machine check.
+
+Candidate commit `8521fef2d7c1eb16471ebcbca30fd0202cd5adc1` passed
+`git diff --check`, strict patch-scoped `checkpatch.pl` with zero diagnostics,
+native and static PowerPC client builds with `-Wall -Wextra -Werror`, focused
+PowerPC `W=1` builds of `gcn_drm_render.o`, `gcn_drm_drv.o`, and `gcn-gx.o`,
+and a clean full PowerPC `zImage modules -j16` build. The exact
+`gcn_drm_render` KUnit suite passed all 8 tests and the `gcn_gx_mem1` suite
+passed all 3 tests.
+
+The checksum-pinned hardware candidate artifacts are:
+
+- `dtbImage.wii`/`zImage`:
+  `2c4d55f1407e44d87c453dc01468dd5ac0fdc2f9568e798a1a4cdf969c6909dc`
+- `gcn-gx.ko`:
+  `2bc39accc19de582c5e2bd44769d1415b0a3c156eb423e91e5ee8cbe2ef88ffd`
+- static PowerPC `wii-gcn-render-test`:
+  `ab6b9a211b7c0a1a7b83de8ab0a1b16bd381e6097a1f47d1f0b94ca11e2a08a9`
+
+An incremental post-commit rebuild reproduced all three hashes exactly. These
+are the only artifacts eligible for this stage's hardware acceptance result.
+
+Hardware result: passed; accept same-object RGB565 rectangle blit. Boot ID
+`13e300ba-dfda-4b78-a0a2-6c0929930fbd` ran the checksum-pinned kernel and
+independently verified the matching module and static-client hashes above.
+Provider-absent discovery passed before the first load and after every final
+unload. Loading GX reported FIFO `0x01684000`, texture workspaces
+`0x01300000`/`0x013c0000`, and render capacity `524288/0/524288`.
+
+The complete client passed twice across a clean module unload and reload. It
+retained every prior allocator, mapping, context, PRIME, wait, syncobj, copy,
+fill, rectangle-fill, equal-dimension blit, and unequal-dimension blit
+control. Full-copy alias rejection remained intact. For each same-object
+case, the client reseeded all 65536 tiled pixels with a unique coordinate
+value and verified the entire object after completion. Identical-region,
+non-overlap, right, left, down, up, and diagonal-overlap cases all matched the
+pre-operation snapshot oracle, including every pixel outside the destination
+rectangle. This is 458752 exhaustive pixel checks per complete client pass.
+Capacity returned to `524288/0/524288` after object release, and no aliased
+reservation deadlock or redundant-fence failure occurred.
+
+The accepted visual fixture completed its initial frame and 40 page flips in
+both formats. RGB565 advanced exactly 41 generated frames and 82 PE finishes.
+XRGB8888 advanced 42 generated frames, 84 PE finishes, and 41 conversions;
+the one concurrent CPU-console restoration frame retained exactly two PE
+finishes per generated frame. Neither fixture retained a DRM holder.
+
+An independent `offscreen_probe=1 debug_capture=1` load completed one
+EFB-to-tiled-RGB565 copy, changed all 153600 destination words, and replayed
+the texture 45 times. Its counter was exactly
+`92 = 2 * (1 copy + 45 replays)`. The 614400-byte, 640 by 480 post-token XFB
+snapshot had SHA-256
+`2c488feb9b32a2510a6912f85c8187e021e0fe3d7b228f8431395502b57cd075`,
+byte-identical to the accepted crisp four-quadrant reference.
+
+The complete live GX OF-property manifest remained
+`cfc9a93ba4135f31d45faf7fdb2d8615b2304080163b7348a590e6df7ea197a0`
+and the packed FDT remained
+`e76a396b09be52f0a5ea3bd3cc5a58ed5af6bc59597fe039e0a420030556c51b`.
+Final module unload restored provider absence and CPU fallback completed 20
+XRGB8888 flips. The final post-baseline log is preserved at
+`/tmp/dmesg-gx-same-object-8521fef2d-final.txt`, with 32 lines and SHA-256
+`56cf49b875acf99df9486b72be6791947d60fe71e8183f053e3555279e9a685b`.
+Its exact GX/DRM timeout, stall, failure, oops, panic, and machine-check audit
+is empty. The same-object RGB565 rectangle-blit stage is fully accepted, and
+the Wii remains online with GX unloaded in CPU fallback.
