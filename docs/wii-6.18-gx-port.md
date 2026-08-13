@@ -9775,3 +9775,12 @@ use the established unscaled texture transform to draw the requested source
 rectangle into EFB origin under a crop-sized scissor, then copy from aligned
 EFB `(0,0)` into the private tiled texture. This reuses the already accepted
 translated rectangle sampling path and leaves scaling isolated to pass two.
+
+Aligned-origin crop module SHA-256
+`cb9f67f7ebfd68bc9948fa1bfd7a4e15444b7da9f59dbe8f7b56361cc56e69f7`
+passed no-scale, exact 2x enlargement, exact 2x reduction, and one-pixel crop
+bounding reached by the diagnostic. The strict client then reproduced the
+zero-bias fractional failure at mixed-axis destination `(176,17)`, returning
+`0x1846` instead of `0x1845`. Add a scaled-only signed eighth-texel module
+parameter, defaulting to zero, so phase can be swept without changing accepted
+unscaled rendering or rebuilding between hardware trials.
