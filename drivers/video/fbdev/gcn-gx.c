@@ -1681,8 +1681,9 @@ static void gx_copy_efb_to_xfb(u32 xfb_phys, u16 width, u16 height, bool clear)
 	gx_load_bp_reg(0x45000002);
 }
 
-static void gx_copy_efb_to_rgb565_texture(void *dest, u16 width, u16 height,
-					  bool clear)
+static void gx_copy_efb_rect_to_rgb565_texture(void *dest, u16 left, u16 top,
+					       u16 width, u16 height,
+					       bool clear)
 {
 	u32 ctrl;
 
@@ -1691,8 +1692,10 @@ static void gx_copy_efb_to_rgb565_texture(void *dest, u16 width, u16 height,
 		gx_load_bp_reg(0x41000018);
 	}
 
-	/* GX_SetTexCopySrc(0, 0, width, height). */
-	gx_load_bp_reg((BP_DISP_COPY_TL << 24) | 0);
+	/* GX_SetTexCopySrc(left, top, width, height). */
+	gx_load_bp_reg((BP_DISP_COPY_TL << 24) |
+		       (((u32)top & 0x3ff) << 10) |
+		       ((u32)left & 0x3ff));
 	gx_load_bp_reg((BP_DISP_COPY_WH << 24) |
 		       (((u32)(height - 1) & 0x3ff) << 10) |
 		       ((u32)(width - 1) & 0x3ff));
@@ -1707,6 +1710,13 @@ static void gx_copy_efb_to_rgb565_texture(void *dest, u16 width, u16 height,
 	       (clear ? COPY_CTRL_CLEAR : 0);
 	gx_load_bp_reg(ctrl);
 	gx_load_bp_reg(0x45000002);
+}
+
+static void gx_copy_efb_to_rgb565_texture(void *dest, u16 width, u16 height,
+					  bool clear)
+{
+	gx_copy_efb_rect_to_rgb565_texture(dest, 0, 0, width, height,
+					   clear);
 }
 
 static void __maybe_unused gcn_gx_copy_efb_to_xfb(u32 xfb_phys, u16 width,
@@ -3147,6 +3157,7 @@ static int gcn_gx_drm_blit_scaled_rgb565(void *src_allocation,
 {
 	struct gx_mem1_allocation *src = src_allocation;
 	struct gx_mem1_allocation *dst = dst_allocation;
+	void *crop = gx_tex_buf_alt;
 	struct gx_scaled_rect rect = {
 		.src_x = src_x,
 		.src_y = src_y,
@@ -3158,6 +3169,7 @@ static int gcn_gx_drm_blit_scaled_rgb565(void *src_allocation,
 		.dst_height = dst_rect_height,
 	};
 	u32 finish_count;
+	size_t crop_bytes;
 	size_t dst_bytes;
 	size_t src_bytes;
 	long completed;
@@ -3180,6 +3192,8 @@ static int gcn_gx_drm_blit_scaled_rgb565(void *src_allocation,
 		return -E2BIG;
 	if (!READ_ONCE(gx_accel_ready))
 		return -ENODEV;
+	crop_bytes = (size_t)DIV_ROUND_UP(src_rect_width, 4) *
+		     DIV_ROUND_UP(src_rect_height, 4) * 32;
 
 	mutex_lock(&gx_submit_lock);
 	if (src != dst)
@@ -3187,6 +3201,40 @@ static int gcn_gx_drm_blit_scaled_rgb565(void *src_allocation,
 				   (unsigned long)src->cpu_addr + src_bytes);
 	flush_dcache_range((unsigned long)dst->cpu_addr,
 			   (unsigned long)dst->cpu_addr + dst_bytes);
+	flush_dcache_range((unsigned long)crop,
+			   (unsigned long)crop + crop_bytes);
+
+	/*
+	 * Snapshot the requested source rectangle into a private texture first.
+	 * GX_CLAMP applies to the bound texture, not an interior source rectangle;
+	 * isolating the rectangle prevents nearest sampling from escaping its
+	 * edges and preserves same-object overlap semantics.
+	 */
+	finish_count = READ_ONCE(gx_pe_finish_count);
+	fifo_pos = 0;
+	gx_load_libogc_init_preamble();
+	gx_setup_display_copy_state();
+	gx_setup_rgb565_texture_state(src_width, src_height);
+	gx_setup_texture_rgb565(src->cpu_addr, src_width, src_height);
+	gx_draw_color_quad(src_width, src_height, 0xff, 0xff, 0xff);
+	gx_load_bp_reg(0x45000002);
+	for (i = 0; i < 32; i++)
+		gx_wr8(0);
+	gx_set_copy_clear_rgb(0x00, 0x00, 0x00);
+	gx_copy_efb_rect_to_rgb565_texture(crop, src_x, src_y,
+					   src_rect_width, src_rect_height,
+					   true);
+	ret = gx_submit_cmds("render-blit-scaled-crop");
+	if (ret)
+		goto out_unlock;
+
+	completed = gx_wait_for_pe_finishes(finish_count,
+					    GX_DRM_FRAME_PE_FINISHES);
+	if (!completed) {
+		pr_warn_ratelimited("gcn-gx: scaled blit timed out waiting for source crop\n");
+		ret = -ETIMEDOUT;
+		goto out_unlock;
+	}
 
 	finish_count = READ_ONCE(gx_pe_finish_count);
 	fifo_pos = 0;
@@ -3200,9 +3248,11 @@ static int gcn_gx_drm_blit_scaled_rgb565(void *src_allocation,
 	for (i = 0; i < 32; i++)
 		gx_wr8(0);
 
+	rect.src_x = 0;
+	rect.src_y = 0;
 	gx_setup_rgb565_texture_state(dst_width, dst_height);
-	gx_load_pos_to_tex_mtx0_scaled(src_width, src_height, &rect);
-	gx_setup_texture_rgb565(src->cpu_addr, src_width, src_height);
+	gx_load_pos_to_tex_mtx0_scaled(src_rect_width, src_rect_height, &rect);
+	gx_setup_texture_rgb565(crop, src_rect_width, src_rect_height);
 	gx_set_scissor(dst_x, dst_y, dst_rect_width, dst_rect_height);
 	gx_draw_color_quad(dst_width, dst_height, 0xff, 0xff, 0xff);
 	gx_load_bp_reg(0x45000002);
