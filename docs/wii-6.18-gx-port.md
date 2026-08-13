@@ -9313,3 +9313,70 @@ MEM1 capacity and OF/FDT ownership hashes, clean module unload/reload, normal
 RGB565 and XRGB8888 scanout, the accepted offscreen full-frame hash, and CPU
 fallback. Reject any changed outside pixel, incorrect source coordinate,
 timeout, capacity leak, ownership change, oops, panic, or machine check.
+
+Candidate commit `b894b9cda` passed strict diff-scoped checkpatch with no
+errors, warnings, or checks; `git diff --check`; focused PowerPC `W=1`
+compilation; native and static UAPI clients with `-Wall -Wextra -Werror`; all
+11 focused allocator/render KUnit tests under UML; and a complete PowerPC
+`zImage modules` build with `-j16`. The exported submit ABI remains 32 bytes.
+The checksum-pinned artifacts were:
+
+- `dtbImage.wii` / `zImage` SHA-256:
+  `f9d065ce761a4fa47cc5632836d98b8f97e4a599ecd1b169405c0b1aaf819ea8`
+- `gcn-gx.ko` SHA-256:
+  `6c8e3bb4198a574c9e6f58f015b6128c4201ab1a0f89f69a6954e4b8e1d0aaaf`
+- static `wii-gcn-render-test` SHA-256:
+  `0ba65372e3dd0dcb1544e408328f0d28edefc0f28afba8aeb1d815d7a4416cee`
+- unchanged visual fixture SHA-256:
+  `d2aa7acc2fc097fb695d06b318543725c01ed39c5c6b53745a07849229430b50`
+
+Hardware result: passed; accept bounded RGB565 rectangle blit. Fresh boot ID
+`d25857ad-008b-438c-97c9-db6919331df7` ran the exact candidate kernel and
+verified the module and static-client hashes above. Provider-absent discovery
+passed before module load. Loading GX reported FIFO `0x01684000`, texture
+workspaces `0x01300000`/`0x013c0000`, and render capacity
+`524288/0/524288`.
+
+The unchanged client retained every previous allocator, mapping, context,
+PRIME, wait, syncobj, copy, full-fill, and bounded-fill control. It then
+translated the odd 67 by 53 rectangle from source `(101,29)` to destination
+`(11,97)`: all 65536 tiled destination pixels matched the coordinate-dependent
+oracle and every outside pixel retained its sentinel. It next copied only
+source `(255,255)` to destination `(255,255)` and again matched all 65536
+pixels. Invalid source bounds, destination bounds, reserved data bits, and
+same-handle aliasing were rejected. Destination reservation and binary syncobj
+waits completed, and capacity returned to `524288/0/524288` after object
+release.
+
+The complete client passed twice across a clean module unload and reload. Each
+measured run advanced the PE-finish interrupt counter by 25 while concurrent
+scanout continued. This is consistent with coalesced level-triggered finish
+events and is not used as the content oracle; the final unique PE token and
+the two exhaustive destination readbacks independently prove completion and
+copyback.
+
+The RGB565 fixture completed its initial frame and 40 page flips with exactly
+41 generated frames and 82 PE finishes. XRGB8888 completed 40 page flips and
+exactly 41 conversions; one concurrent CPU-console restoration frame made the
+global deltas 42 frames and 84 finishes in two repeat runs, preserving exactly
+two finishes for every generated frame. No fixture left a DRM holder.
+
+An independent `offscreen_probe=1 debug_capture=1` load completed one
+EFB-to-tiled-RGB565 copy, changed all 153600 destination words, and replayed
+the captured texture 46 times. Its final counter was exactly
+`94 = 2 * (1 copy + 46 replays)`. The 614400-byte post-token XFB snapshot had
+SHA-256
+`2c488feb9b32a2510a6912f85c8187e021e0fe3d7b228f8431395502b57cd075`,
+byte-identical to the accepted crisp four-quadrant reference.
+
+The live GX OF-property manifest remained
+`cfc9a93ba4135f31d45faf7fdb2d8615b2304080163b7348a590e6df7ea197a0`
+and the packed FDT remained
+`e76a396b09be52f0a5ea3bd3cc5a58ed5af6bc59597fe039e0a420030556c51b`
+before load, through unload/reload, and after final unload. Provider absence
+then passed again and CPU fallback completed 20 XRGB8888 flips. The final
+post-baseline log is preserved at
+`/tmp/dmesg-gx-rect-blit-b894b9cda-final.txt`, with 23 lines and SHA-256
+`29bd2a856909e72fbb33f8264aae85320c3a879177c834426c656b3ef3b15dc2`.
+Its exact GX/DRM timeout, stall, failure, oops, panic, and machine-check audit
+is empty. The bounded RGB565 rectangle-blit stage is fully accepted.
