@@ -9705,3 +9705,32 @@ phase-only fix. The next candidate must first isolate the requested source
 rectangle into a private tiled texture so clamp mode cannot sample adjacent
 source pixels, then characterize or eliminate the remaining internal
 fixed-point phase difference.
+
+Candidate commit `b95462466ddb4dded65d5a9b45b3b72bd99cc163` implements
+that bounded-source design as two ordered GX submissions. The first submission
+restores the source object into EFB and texture-copies only the requested
+source rectangle into the reserved alternate RGB565 workspace. It waits for
+both PE finishes before the second submission restores the destination, binds
+the isolated crop with GX_CLAMP, draws the scaled rectangle, and copies the
+complete destination back. The exact tile-rounded workspace range is flushed
+before GPU overwrite so dirty CPU initialization lines cannot corrupt the
+crop. The zero-bias center mapping remains unchanged to isolate source-edge
+correctness from internal fractional phase behavior.
+
+Strict diff-scoped checkpatch and `git diff --check` passed with zero
+diagnostics. Native and static PowerPC clients compile with
+`-Wall -Wextra -Werror`. The focused PowerPC `W=1` GX object build and complete
+PowerPC `zImage modules -j16` build passed. The exact UML
+`gcn_drm_render` suite passed 9/9 and `gcn_gx_mem1` passed 3/3. A clean-tree
+incremental rebuild produced the hardware candidate artifacts:
+
+- `dtbImage.wii` / `zImage` SHA-256:
+  `938a5e651e37d6b6e02b4ca48dc8b3445d26dec0e96b9dc80328ce02243e1000`
+- `gcn-gx.ko` SHA-256:
+  `79c9d7720ec1a5f9b82f1cf6374e02cb0076ea90f09c9bb7797441c7bb606486`
+- static PowerPC `wii-gcn-render-test` SHA-256:
+  `c4742d18a11d8748ddb079085b94dae9464a6836eef78a15b14106855f41a2b3`
+
+The module vermagic is `6.18.40-wii+ preempt mod_unload`, matching the running
+Wii kernel. These are the only artifacts eligible for the bounded-crop
+hardware result.
