@@ -58,6 +58,158 @@ struct same_object_blit_case {
 	uint16_t height;
 };
 
+struct scaled_blit_case {
+	const char *name;
+	uint16_t src_x;
+	uint16_t src_y;
+	uint16_t src_width;
+	uint16_t src_height;
+	uint16_t dst_x;
+	uint16_t dst_y;
+	uint16_t dst_width;
+	uint16_t dst_height;
+	bool same_object;
+};
+
+static unsigned int scaled_source_offset(unsigned int dst_offset,
+					 unsigned int src_extent,
+					 unsigned int dst_extent)
+{
+	int64_t numerator = 2LL * (2 * dst_offset + 1) * src_extent -
+			    dst_extent;
+	unsigned int offset;
+
+	if (numerator <= 0)
+		return 0;
+	offset = numerator / (4 * dst_extent);
+	return offset < src_extent ? offset : src_extent - 1;
+}
+
+static int test_scaled_blit_case(int fd, uint32_t ctx_id,
+				 uint32_t syncobj, uint32_t src_handle,
+				 uint32_t dst_handle, uint16_t *src_map,
+				 uint16_t *dst_map,
+				 const struct scaled_blit_case *test)
+{
+	struct drm_gcn_blit_scaled blit = {
+		.ctx_id = ctx_id,
+		.src_handle = test->same_object ? dst_handle : src_handle,
+		.dst_handle = dst_handle,
+		.out_syncobj = syncobj,
+		.src_x = test->src_x,
+		.src_y = test->src_y,
+		.src_width = test->src_width,
+		.src_height = test->src_height,
+		.dst_x = test->dst_x,
+		.dst_y = test->dst_y,
+		.dst_width = test->dst_width,
+		.dst_height = test->dst_height,
+	};
+
+	for (unsigned int y = 0; y < TEST_HEIGHT; y++) {
+		for (unsigned int x = 0; x < TEST_WIDTH; x++) {
+			size_t pixel = tiled_rgb565_index(x, y, TEST_WIDTH);
+
+			src_map[pixel] = same_object_pattern(x, y);
+			dst_map[pixel] = test->same_object ?
+				same_object_pattern(x, y) : 0x18e3;
+		}
+	}
+
+	if (ioctl(fd, DRM_IOCTL_GCN_BLIT_SCALED, &blit)) {
+		fail(test->name);
+		return -1;
+	}
+
+	for (unsigned int y = 0; y < TEST_HEIGHT; y++) {
+		for (unsigned int x = 0; x < TEST_WIDTH; x++) {
+			uint16_t expected = test->same_object ?
+				same_object_pattern(x, y) : 0x18e3;
+			size_t pixel = tiled_rgb565_index(x, y, TEST_WIDTH);
+
+			if (x >= test->dst_x &&
+			    x < test->dst_x + test->dst_width &&
+			    y >= test->dst_y &&
+			    y < test->dst_y + test->dst_height) {
+				unsigned int source_x = test->src_x +
+					scaled_source_offset(x - test->dst_x,
+							     test->src_width,
+							     test->dst_width);
+				unsigned int source_y = test->src_y +
+					scaled_source_offset(y - test->dst_y,
+							     test->src_height,
+							     test->dst_height);
+
+				expected = same_object_pattern(source_x, source_y);
+			}
+			if (dst_map[pixel] != expected) {
+				fprintf(stderr,
+					"FAIL: %s mismatch at (%u,%u): got=0x%04x expected=0x%04x\n",
+					test->name, x, y, dst_map[pixel], expected);
+				failures++;
+				return -1;
+			}
+		}
+	}
+
+	printf("SCALED: %s preserved all sampled and outside pixels\n",
+	       test->name);
+	return 0;
+}
+
+static void test_scaled_blit_rejections(int fd, uint32_t ctx_id,
+					uint32_t src_handle,
+					uint32_t dst_handle)
+{
+	struct drm_gcn_blit_scaled blit = {
+		.ctx_id = ctx_id,
+		.src_handle = src_handle,
+		.dst_handle = dst_handle,
+		.src_x = 17,
+		.src_y = 19,
+		.src_width = 73,
+		.src_height = 61,
+		.dst_x = 29,
+		.dst_y = 31,
+		.dst_width = 113,
+		.dst_height = 97,
+	};
+
+	blit.src_width = 0;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_BLIT_SCALED, &blit) || errno != EINVAL)
+		fail("zero-width scaled blit should return EINVAL");
+	blit.src_width = 240;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_BLIT_SCALED, &blit) || errno != EINVAL)
+		fail("source-out-of-bounds scaled blit should return EINVAL");
+	blit.src_width = 73;
+	blit.dst_height = 226;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_BLIT_SCALED, &blit) || errno != EINVAL)
+		fail("destination-out-of-bounds scaled blit should return EINVAL");
+	blit.dst_height = 97;
+	blit.flags = 1;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_BLIT_SCALED, &blit) || errno != EINVAL)
+		fail("flagged scaled blit should return EINVAL");
+	blit.flags = 0;
+	blit.pad = 1;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_BLIT_SCALED, &blit) || errno != EINVAL)
+		fail("padded scaled blit should return EINVAL");
+	blit.pad = 0;
+	blit.ctx_id = 0xffffffffU;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_BLIT_SCALED, &blit) || errno != ENOENT)
+		fail("unknown-context scaled blit should return ENOENT");
+	blit.ctx_id = ctx_id;
+	blit.src_handle = 0;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_BLIT_SCALED, &blit) || errno != EINVAL)
+		fail("missing-source scaled blit should return EINVAL");
+}
+
 static int test_same_object_blit_case(int fd, struct drm_gcn_submit *submit,
 				      uint16_t *map,
 				      const struct same_object_blit_case *test)
@@ -343,6 +495,15 @@ static void test_submit(int fd, int other_fd)
 		{ "same-object down-overlap blit", 29, 19, 29, 47, 91, 117 },
 		{ "same-object up-overlap blit", 29, 47, 29, 19, 91, 117 },
 		{ "same-object diagonal-overlap blit", 23, 27, 47, 51, 129, 111 },
+	};
+	static const struct scaled_blit_case scaled_cases[] = {
+		{ "no-scale control", 37, 41, 83, 71, 113, 127, 83, 71, false },
+		{ "two-times upscale", 17, 19, 53, 47, 101, 109, 106, 94, false },
+		{ "two-times downscale", 29, 31, 122, 98, 11, 13, 61, 49, false },
+		{ "mixed-axis scale", 43, 23, 67, 106, 131, 17, 113, 53, false },
+		{ "odd-ratio scale", 59, 61, 73, 67, 7, 9, 119, 101, false },
+		{ "one-pixel replication", 211, 199, 1, 1, 31, 37, 89, 79, false },
+		{ "same-object overlapping scale", 17, 31, 73, 67, 43, 47, 113, 101, true },
 	};
 	struct drm_syncobj_create sync = {};
 	struct drm_syncobj_destroy destroy;
@@ -736,6 +897,15 @@ rect_done:
 	}
 	puts("SUBMIT: same-object RGB565 blits passed in all overlap directions");
 
+	test_scaled_blit_rejections(fd, ctx.id, src.handle, dst.handle);
+	for (i = 0; i < ARRAY_SIZE(scaled_cases); i++) {
+		if (test_scaled_blit_case(fd, ctx.id, sync.handle, src.handle,
+					  dst.handle, src_map, dst_map,
+					  &scaled_cases[i]))
+			goto blit_done;
+	}
+	puts("SCALED: RGB565 nearest blits passed all scale and alias cases");
+
 blit_done:
 	wait_args.timeout_ns = monotonic_ns() + 1000000000ULL;
 	if (ioctl(fd, DRM_IOCTL_GCN_WAIT, &wait_args))
@@ -969,13 +1139,15 @@ int main(int argc, char **argv)
 				 DRM_GCN_FEATURE_FILL_RECT_RGB565 |
 				 DRM_GCN_FEATURE_BLIT_RECT_RGB565 |
 				 DRM_GCN_FEATURE_BLIT_RECT_RGB565_UNEQUAL_DIMS |
-				 DRM_GCN_FEATURE_BLIT_RECT_RGB565_SAME_OBJECT)) ==
+				 DRM_GCN_FEATURE_BLIT_RECT_RGB565_SAME_OBJECT |
+				 DRM_GCN_FEATURE_BLIT_SCALED_RGB565)) ==
 		    (DRM_GCN_FEATURE_SUBMIT_RGB565 |
 		     DRM_GCN_FEATURE_FILL_RGB565 |
 		     DRM_GCN_FEATURE_FILL_RECT_RGB565 |
 		     DRM_GCN_FEATURE_BLIT_RECT_RGB565 |
 		     DRM_GCN_FEATURE_BLIT_RECT_RGB565_UNEQUAL_DIMS |
-		     DRM_GCN_FEATURE_BLIT_RECT_RGB565_SAME_OBJECT))
+		     DRM_GCN_FEATURE_BLIT_RECT_RGB565_SAME_OBJECT |
+		     DRM_GCN_FEATURE_BLIT_SCALED_RGB565))
 			test_submit(fd, other_fd);
 		else
 			fail_value("RGB565 render features", features,
@@ -984,7 +1156,8 @@ int main(int argc, char **argv)
 				   DRM_GCN_FEATURE_FILL_RECT_RGB565 |
 				   DRM_GCN_FEATURE_BLIT_RECT_RGB565 |
 				   DRM_GCN_FEATURE_BLIT_RECT_RGB565_UNEQUAL_DIMS |
-				   DRM_GCN_FEATURE_BLIT_RECT_RGB565_SAME_OBJECT);
+				   DRM_GCN_FEATURE_BLIT_RECT_RGB565_SAME_OBJECT |
+				   DRM_GCN_FEATURE_BLIT_SCALED_RGB565);
 	}
 
 	close(other_fd);

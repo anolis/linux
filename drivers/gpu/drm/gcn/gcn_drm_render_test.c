@@ -15,7 +15,8 @@ static void gcn_drm_render_uapi_layout(struct kunit *test)
 	KUNIT_EXPECT_EQ(test, sizeof(struct drm_gcn_ctx_free), 8U);
 	KUNIT_EXPECT_EQ(test, sizeof(struct drm_gcn_wait), 16U);
 	KUNIT_EXPECT_EQ(test, sizeof(struct drm_gcn_submit), 32U);
-	KUNIT_EXPECT_EQ(test, DRM_GCN_NUM_IOCTLS, 7);
+	KUNIT_EXPECT_EQ(test, sizeof(struct drm_gcn_blit_scaled), 40U);
+	KUNIT_EXPECT_EQ(test, DRM_GCN_NUM_IOCTLS, 8);
 	KUNIT_EXPECT_EQ(test, DRM_GCN_PARAM_FEATURES, 9);
 	KUNIT_EXPECT_EQ(test,
 			DRM_GCN_FEATURE_BLIT_RECT_RGB565_UNEQUAL_DIMS,
@@ -23,6 +24,50 @@ static void gcn_drm_render_uapi_layout(struct kunit *test)
 	KUNIT_EXPECT_EQ(test,
 			DRM_GCN_FEATURE_BLIT_RECT_RGB565_SAME_OBJECT,
 			1ULL << 9);
+	KUNIT_EXPECT_EQ(test, DRM_GCN_FEATURE_BLIT_SCALED_RGB565, 1ULL << 10);
+}
+
+static void gcn_drm_render_validates_scaled_blit(struct kunit *test)
+{
+	struct drm_gcn_blit_scaled args = {
+		.ctx_id = 1,
+		.src_handle = 2,
+		.dst_handle = 3,
+		.src_x = 17,
+		.src_y = 19,
+		.src_width = 73,
+		.src_height = 61,
+		.dst_x = 29,
+		.dst_y = 31,
+		.dst_width = 113,
+		.dst_height = 97,
+	};
+	int ret;
+
+	ret = gcn_drm_render_validate_scaled(&args, 320, 192, 256, 256);
+	KUNIT_EXPECT_EQ(test, ret, 0);
+	args.src_width = 304;
+	ret = gcn_drm_render_validate_scaled(&args, 320, 192, 256, 256);
+	KUNIT_EXPECT_EQ(test, ret, -EINVAL);
+	args.src_width = 73;
+	args.dst_height = 226;
+	ret = gcn_drm_render_validate_scaled(&args, 320, 192, 256, 256);
+	KUNIT_EXPECT_EQ(test, ret, -EINVAL);
+	args.dst_height = 97;
+	args.src_handle = args.dst_handle;
+	ret = gcn_drm_render_validate_scaled(&args, 256, 256, 256, 256);
+	KUNIT_EXPECT_EQ(test, ret, 0);
+	args.flags = 1;
+	ret = gcn_drm_render_validate_scaled(&args, 256, 256, 256, 256);
+	KUNIT_EXPECT_EQ(test, ret, -EINVAL);
+	args.flags = 0;
+	args.pad = 1;
+	ret = gcn_drm_render_validate_scaled(&args, 256, 256, 256, 256);
+	KUNIT_EXPECT_EQ(test, ret, -EINVAL);
+	args.pad = 0;
+	args.src_width = 0;
+	ret = gcn_drm_render_validate_scaled(&args, 256, 256, 256, 256);
+	KUNIT_EXPECT_EQ(test, ret, -EINVAL);
 }
 
 static void gcn_drm_render_validates_copy_submit(struct kunit *test)
@@ -223,6 +268,7 @@ static struct kunit_case gcn_drm_render_test_cases[] = {
 	KUNIT_CASE(gcn_drm_render_validates_fill_submit),
 	KUNIT_CASE(gcn_drm_render_validates_rect_fill_submit),
 	KUNIT_CASE(gcn_drm_render_validates_rect_blit_submit),
+	KUNIT_CASE(gcn_drm_render_validates_scaled_blit),
 	{}
 };
 

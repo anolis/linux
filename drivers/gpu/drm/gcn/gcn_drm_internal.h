@@ -33,6 +33,11 @@ int gcn_drm_provider_blit_rect(const struct gcn_drm_accel_ops *provider,
 			       u16 src_width, u16 src_height, u16 dst_width,
 			       u16 dst_height, u16 src_x, u16 src_y, u16 dst_x,
 			       u16 dst_y, u16 rect_width, u16 rect_height);
+int gcn_drm_provider_blit_scaled(const struct gcn_drm_accel_ops *provider,
+				 void *src_allocation, void *dst_allocation,
+				 u16 src_width, u16 src_height, u16 dst_width,
+				 u16 dst_height,
+				 const struct drm_gcn_blit_scaled *args);
 
 int gcn_drm_render_open(struct drm_device *drm, struct drm_file *file);
 void gcn_drm_render_postclose(struct drm_device *drm, struct drm_file *file);

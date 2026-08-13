@@ -426,11 +426,11 @@ static u32 f32_from_u16(u16 n)
 }
 
 /*
- * f32_div_u16 - compute num/den as IEEE 754 bits using 64-bit fixed-point.
+ * f32_div_u32 - compute num/den as IEEE 754 bits using 64-bit fixed-point.
  * Precision: ~40 significant bits; error < 2^-17 relative (adequate for
  * GPU viewport and projection math).
  */
-static u32 f32_div_u16(u16 num, u16 den)
+static u32 f32_div_u32(u32 num, u32 den)
 {
 	u64 q;
 	int msb, exp;
@@ -451,6 +451,11 @@ static u32 f32_div_u16(u16 num, u16 den)
 	else
 		mant = (u32)((q << (23 - msb)) & 0x7FFFFF);
 	return ((u32)exp << 23) | mant;
+}
+
+static u32 f32_div_u16(u16 num, u16 den)
+{
+	return f32_div_u32(num, den);
 }
 
 static void gx_load_identity_pos_mtx0(void)
@@ -537,6 +542,60 @@ static void gx_load_pos_to_tex_mtx0_offset(u16 width, u16 height,
 static void gx_load_pos_to_tex_mtx0(u16 width, u16 height)
 {
 	gx_load_pos_to_tex_mtx0_offset(width, height, 0, 0);
+}
+
+struct gx_scaled_rect {
+	u16 src_x;
+	u16 src_y;
+	u16 src_width;
+	u16 src_height;
+	u16 dst_x;
+	u16 dst_y;
+	u16 dst_width;
+	u16 dst_height;
+};
+
+static void gx_load_pos_to_tex_mtx0_scaled(u16 texture_width,
+					   u16 texture_height,
+					   const struct gx_scaled_rect *rect)
+{
+	s64 s_numerator = ((s64)rect->src_x * rect->dst_width -
+			   (s64)rect->dst_x * rect->src_width) * 8 +
+			  (s64)gx_texel_bias_eighths * rect->dst_width;
+	s64 t_numerator = ((s64)rect->src_y * rect->dst_height -
+			   (s64)rect->dst_y * rect->src_height) * 8 +
+			  (s64)gx_texel_bias_eighths * rect->dst_height;
+	u32 s_denominator = (u32)rect->dst_width * 8;
+	u32 t_denominator = (u32)rect->dst_height * 8;
+	u32 s_scale = f32_div_u32(rect->src_width, rect->dst_width);
+	u32 t_scale = f32_div_u32(rect->src_height, rect->dst_height);
+	u32 s_bias = f32_div_u32(abs(s_numerator), s_denominator);
+	u32 t_bias = f32_div_u32(abs(t_numerator), t_denominator);
+
+	if (!gx_use_texel_space) {
+		s_denominator = (u32)rect->dst_width * texture_width;
+		t_denominator = (u32)rect->dst_height * texture_height;
+		s_scale = f32_div_u32(rect->src_width, s_denominator);
+		t_scale = f32_div_u32(rect->src_height, t_denominator);
+		s_denominator *= 8;
+		t_denominator *= 8;
+		s_bias = f32_div_u32(abs(s_numerator), s_denominator);
+		t_bias = f32_div_u32(abs(t_numerator), t_denominator);
+	}
+
+	if (s_numerator < 0)
+		s_bias = F32_NEG(s_bias);
+	if (t_numerator < 0)
+		t_bias = F32_NEG(t_bias);
+
+	gx_load_xf_regs_n(0x0078, 8);
+	wg_f32_bits(s_scale);  wg_f32_bits(F32_ZERO);
+	wg_f32_bits(F32_ZERO); wg_f32_bits(s_bias);
+	wg_f32_bits(F32_ZERO); wg_f32_bits(t_scale);
+	wg_f32_bits(F32_ZERO); wg_f32_bits(t_bias);
+
+	gx_load_cp_reg(0x30, 30 << 6);
+	gx_load_xf_reg(0x1018, 30 << 6);
 }
 
 static u32 gx_direct_texcoord_bits(u16 extent, u16 multiple)
@@ -2710,7 +2769,8 @@ static int gcn_gx_drm_mem1_info(struct gcn_drm_mem1_info *info)
 			 DRM_GCN_FEATURE_FILL_RECT_RGB565 |
 			 DRM_GCN_FEATURE_BLIT_RECT_RGB565 |
 			 DRM_GCN_FEATURE_BLIT_RECT_RGB565_UNEQUAL_DIMS |
-			 DRM_GCN_FEATURE_BLIT_RECT_RGB565_SAME_OBJECT;
+			 DRM_GCN_FEATURE_BLIT_RECT_RGB565_SAME_OBJECT |
+			 DRM_GCN_FEATURE_BLIT_SCALED_RGB565;
 	mutex_unlock(&gx_mem1_lock);
 	return 0;
 }
@@ -3078,6 +3138,100 @@ out_unlock:
 	return ret;
 }
 
+static int gcn_gx_drm_blit_scaled_rgb565(void *src_allocation,
+					 void *dst_allocation, u16 src_width,
+					 u16 src_height, u16 dst_width,
+					 u16 dst_height, u16 src_x, u16 src_y,
+					 u16 src_rect_width,
+					 u16 src_rect_height, u16 dst_x,
+					 u16 dst_y, u16 dst_rect_width,
+					 u16 dst_rect_height)
+{
+	struct gx_mem1_allocation *src = src_allocation;
+	struct gx_mem1_allocation *dst = dst_allocation;
+	struct gx_scaled_rect rect = {
+		.src_x = src_x,
+		.src_y = src_y,
+		.src_width = src_rect_width,
+		.src_height = src_rect_height,
+		.dst_x = dst_x,
+		.dst_y = dst_y,
+		.dst_width = dst_rect_width,
+		.dst_height = dst_rect_height,
+	};
+	u32 finish_count;
+	size_t dst_bytes;
+	size_t src_bytes;
+	long completed;
+	int ret;
+	int i;
+
+	if (!src || !dst || !src_width || !src_height || !dst_width ||
+	    !dst_height || (src_width & 3) || (src_height & 3) ||
+	    (dst_width & 3) || (dst_height & 3) || !src_rect_width ||
+	    !src_rect_height || !dst_rect_width || !dst_rect_height ||
+	    src_x >= src_width || src_y >= src_height || dst_x >= dst_width ||
+	    dst_y >= dst_height || src_rect_width > src_width - src_x ||
+	    src_rect_height > src_height - src_y ||
+	    dst_rect_width > dst_width - dst_x ||
+	    dst_rect_height > dst_height - dst_y)
+		return -EINVAL;
+	src_bytes = (size_t)src_width * src_height * sizeof(u16);
+	dst_bytes = (size_t)dst_width * dst_height * sizeof(u16);
+	if (src_bytes > src->size || dst_bytes > dst->size)
+		return -E2BIG;
+	if (!READ_ONCE(gx_accel_ready))
+		return -ENODEV;
+
+	mutex_lock(&gx_submit_lock);
+	if (src != dst)
+		flush_dcache_range((unsigned long)src->cpu_addr,
+				   (unsigned long)src->cpu_addr + src_bytes);
+	flush_dcache_range((unsigned long)dst->cpu_addr,
+			   (unsigned long)dst->cpu_addr + dst_bytes);
+
+	finish_count = READ_ONCE(gx_pe_finish_count);
+	fifo_pos = 0;
+	gx_load_libogc_init_preamble();
+	gx_setup_display_copy_state();
+
+	gx_setup_rgb565_texture_state(dst_width, dst_height);
+	gx_setup_texture_rgb565(dst->cpu_addr, dst_width, dst_height);
+	gx_draw_color_quad(dst_width, dst_height, 0xff, 0xff, 0xff);
+	gx_load_bp_reg(0x45000002);
+	for (i = 0; i < 32; i++)
+		gx_wr8(0);
+
+	gx_setup_rgb565_texture_state(dst_width, dst_height);
+	gx_load_pos_to_tex_mtx0_scaled(src_width, src_height, &rect);
+	gx_setup_texture_rgb565(src->cpu_addr, src_width, src_height);
+	gx_set_scissor(dst_x, dst_y, dst_rect_width, dst_rect_height);
+	gx_draw_color_quad(dst_width, dst_height, 0xff, 0xff, 0xff);
+	gx_load_bp_reg(0x45000002);
+	for (i = 0; i < 32; i++)
+		gx_wr8(0);
+
+	gx_set_copy_clear_rgb(0x00, 0x00, 0x00);
+	gx_copy_efb_to_rgb565_texture(dst->cpu_addr, dst_width, dst_height, true);
+	ret = gx_submit_cmds("render-blit-scaled");
+	if (ret)
+		goto out_unlock;
+
+	completed = gx_wait_for_pe_finishes(finish_count, 1);
+	if (!completed) {
+		pr_warn_ratelimited("gcn-gx: scaled blit timed out waiting for final PE finish\n");
+		ret = -ETIMEDOUT;
+		goto out_unlock;
+	}
+
+	invalidate_dcache_range((unsigned long)dst->cpu_addr,
+				(unsigned long)dst->cpu_addr + dst_bytes);
+
+out_unlock:
+	mutex_unlock(&gx_submit_lock);
+	return ret;
+}
+
 static const struct gcn_drm_accel_ops gcn_gx_drm_accel_ops = {
 	.name = "gcn-gx",
 	.owner = THIS_MODULE,
@@ -3091,6 +3245,7 @@ static const struct gcn_drm_accel_ops gcn_gx_drm_accel_ops = {
 	.fill_rgb565 = gcn_gx_drm_fill_rgb565,
 	.fill_rect_rgb565 = gcn_gx_drm_fill_rect_rgb565,
 	.blit_rect_rgb565 = gcn_gx_drm_blit_rect_rgb565,
+	.blit_scaled_rgb565 = gcn_gx_drm_blit_scaled_rgb565,
 };
 #endif
 

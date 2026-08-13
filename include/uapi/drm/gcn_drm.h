@@ -36,6 +36,7 @@ enum drm_gcn_param {
 #define DRM_GCN_FEATURE_BLIT_RECT_RGB565	(1ULL << 7)
 #define DRM_GCN_FEATURE_BLIT_RECT_RGB565_UNEQUAL_DIMS	(1ULL << 8)
 #define DRM_GCN_FEATURE_BLIT_RECT_RGB565_SAME_OBJECT	(1ULL << 9)
+#define DRM_GCN_FEATURE_BLIT_SCALED_RGB565	(1ULL << 10)
 
 struct drm_gcn_get_param {
 	__u32 param;
@@ -168,6 +169,30 @@ struct drm_gcn_submit {
 	};
 };
 
+/*
+ * Scale one source rectangle into one destination rectangle using nearest
+ * sampling. Source and destination may name the same object.
+ */
+struct drm_gcn_blit_scaled {
+	__u32 ctx_id;
+	__u32 src_handle;
+	__u32 dst_handle;
+	/* Optional binary syncobj replaced with the completion fence. */
+	__u32 out_syncobj;
+	/* Must be zero. */
+	__u32 flags;
+	__u16 src_x;
+	__u16 src_y;
+	__u16 src_width;
+	__u16 src_height;
+	__u16 dst_x;
+	__u16 dst_y;
+	__u16 dst_width;
+	__u16 dst_height;
+	/* Must be zero. */
+	__u32 pad;
+};
+
 #define DRM_GCN_GET_PARAM	0x00
 #define DRM_GCN_GEM_CREATE	0x01
 #define DRM_GCN_GEM_MMAP	0x02
@@ -175,7 +200,8 @@ struct drm_gcn_submit {
 #define DRM_GCN_CTX_FREE	0x04
 #define DRM_GCN_WAIT		0x05
 #define DRM_GCN_SUBMIT		0x06
-#define DRM_GCN_NUM_IOCTLS	0x07
+#define DRM_GCN_BLIT_SCALED	0x07
+#define DRM_GCN_NUM_IOCTLS	0x08
 
 #define DRM_IOCTL_GCN_GET_PARAM \
 	DRM_IOWR(DRM_COMMAND_BASE + DRM_GCN_GET_PARAM, \
@@ -196,6 +222,9 @@ struct drm_gcn_submit {
 	DRM_IOW(DRM_COMMAND_BASE + DRM_GCN_WAIT, struct drm_gcn_wait)
 #define DRM_IOCTL_GCN_SUBMIT \
 	DRM_IOW(DRM_COMMAND_BASE + DRM_GCN_SUBMIT, struct drm_gcn_submit)
+#define DRM_IOCTL_GCN_BLIT_SCALED \
+	DRM_IOW(DRM_COMMAND_BASE + DRM_GCN_BLIT_SCALED, \
+		struct drm_gcn_blit_scaled)
 
 #if defined(__cplusplus)
 }

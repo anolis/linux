@@ -40,6 +40,12 @@ struct gcn_drm_accel_ops {
 				u16 src_width, u16 src_height, u16 dst_width,
 				u16 dst_height, u16 src_x, u16 src_y, u16 dst_x,
 				u16 dst_y, u16 rect_width, u16 rect_height);
+	int (*blit_scaled_rgb565)(void *src_allocation, void *dst_allocation,
+				  u16 src_width, u16 src_height,
+				  u16 dst_width, u16 dst_height, u16 src_x,
+				  u16 src_y, u16 src_rect_width,
+				  u16 src_rect_height, u16 dst_x, u16 dst_y,
+				  u16 dst_rect_width, u16 dst_rect_height);
 };
 
 int gcn_drm_register_accel(const struct gcn_drm_accel_ops *ops);

@@ -29,6 +29,24 @@ struct gcn_drm_render_blit_rect {
 	u16 height;
 };
 
+static inline int
+gcn_drm_render_validate_scaled(const struct drm_gcn_blit_scaled *args,
+			       u16 src_width, u16 src_height,
+			       u16 dst_width, u16 dst_height)
+{
+	if (!args || !args->ctx_id || !args->src_handle || !args->dst_handle ||
+	    args->flags || args->pad || !args->src_width || !args->src_height ||
+	    !args->dst_width || !args->dst_height || args->src_x >= src_width ||
+	    args->src_y >= src_height || args->src_width > src_width - args->src_x ||
+	    args->src_height > src_height - args->src_y ||
+	    args->dst_x >= dst_width || args->dst_y >= dst_height ||
+	    args->dst_width > dst_width - args->dst_x ||
+	    args->dst_height > dst_height - args->dst_y)
+		return -EINVAL;
+
+	return 0;
+}
+
 static inline void
 gcn_drm_render_decode_blit_rect(u64 data,
 				struct gcn_drm_render_blit_rect *rect)

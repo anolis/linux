@@ -446,6 +446,109 @@ out_put:
 	return ret;
 }
 
+static int gcn_drm_ioctl_blit_scaled(struct drm_device *drm, void *data,
+				     struct drm_file *file)
+{
+	struct gcn_drm_render_file *render = file->driver_priv;
+	struct drm_gcn_blit_scaled *args = data;
+	struct drm_gem_object *src_gem = NULL;
+	struct drm_gem_object *dst_gem = NULL;
+	struct drm_syncobj *out_syncobj = NULL;
+	struct dma_fence *fence = NULL;
+	struct gcn_drm_bo *src;
+	struct gcn_drm_bo *dst;
+	struct drm_exec exec;
+	int ret;
+
+	(void)drm;
+
+	if (!args->ctx_id || !args->src_handle || !args->dst_handle ||
+	    args->flags || args->pad || !args->src_width || !args->src_height ||
+	    !args->dst_width || !args->dst_height)
+		return -EINVAL;
+	if (!xa_load(&render->contexts, args->ctx_id))
+		return -ENOENT;
+
+	if (args->out_syncobj) {
+		out_syncobj = drm_syncobj_find(file, args->out_syncobj);
+		if (!out_syncobj)
+			return -ENOENT;
+	}
+
+	src_gem = drm_gem_object_lookup(file, args->src_handle);
+	dst_gem = drm_gem_object_lookup(file, args->dst_handle);
+	if (!src_gem || !dst_gem) {
+		ret = -ENOENT;
+		goto out_put;
+	}
+	if (!gcn_drm_is_mem1_bo(src_gem) || !gcn_drm_is_mem1_bo(dst_gem)) {
+		ret = -EINVAL;
+		goto out_put;
+	}
+
+	src = to_gcn_drm_bo(src_gem);
+	dst = to_gcn_drm_bo(dst_gem);
+	if (src->provider != dst->provider || src->format != dst->format ||
+	    src->layout != dst->layout ||
+	    src->format != DRM_GCN_GEM_FORMAT_RGB565 ||
+	    src->layout != DRM_GCN_GEM_LAYOUT_TILED_4X4) {
+		ret = -EINVAL;
+		goto out_put;
+	}
+	ret = gcn_drm_render_validate_scaled(args, src->width, src->height,
+					     dst->width, dst->height);
+	if (ret)
+		goto out_put;
+
+	drm_exec_init(&exec, DRM_EXEC_INTERRUPTIBLE_WAIT,
+		      src_gem != dst_gem ? 2 : 1);
+	drm_exec_until_all_locked(&exec) {
+		ret = drm_exec_prepare_obj(&exec, src_gem, 1);
+		drm_exec_retry_on_contention(&exec);
+		if (ret)
+			break;
+		if (src_gem != dst_gem) {
+			ret = drm_exec_prepare_obj(&exec, dst_gem, 1);
+			drm_exec_retry_on_contention(&exec);
+			if (ret)
+				break;
+		}
+	}
+	if (ret)
+		goto out_exec;
+
+	fence = dma_fence_allocate_private_stub(ktime_get());
+	if (!fence) {
+		ret = -ENOMEM;
+		goto out_exec;
+	}
+
+	ret = gcn_drm_provider_blit_scaled(src->provider, src->allocation,
+					   dst->allocation, src->width,
+					  src->height, dst->width,
+					  dst->height, args);
+	if (ret)
+		goto out_exec;
+
+	if (src_gem != dst_gem)
+		dma_resv_add_fence(src_gem->resv, fence, DMA_RESV_USAGE_READ);
+	dma_resv_add_fence(dst_gem->resv, fence, DMA_RESV_USAGE_WRITE);
+	if (out_syncobj)
+		drm_syncobj_replace_fence(out_syncobj, fence);
+
+out_exec:
+	drm_exec_fini(&exec);
+out_put:
+	dma_fence_put(fence);
+	if (dst_gem)
+		drm_gem_object_put(dst_gem);
+	if (src_gem)
+		drm_gem_object_put(src_gem);
+	if (out_syncobj)
+		drm_syncobj_put(out_syncobj);
+	return ret;
+}
+
 const struct drm_ioctl_desc gcn_drm_render_ioctls[DRM_GCN_NUM_IOCTLS] = {
 	DRM_IOCTL_DEF_DRV(GCN_GET_PARAM, gcn_drm_ioctl_get_param,
 			  DRM_RENDER_ALLOW),
@@ -459,6 +562,8 @@ const struct drm_ioctl_desc gcn_drm_render_ioctls[DRM_GCN_NUM_IOCTLS] = {
 			  DRM_RENDER_ALLOW),
 	DRM_IOCTL_DEF_DRV(GCN_WAIT, gcn_drm_ioctl_wait, DRM_RENDER_ALLOW),
 	DRM_IOCTL_DEF_DRV(GCN_SUBMIT, gcn_drm_ioctl_submit, DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(GCN_BLIT_SCALED, gcn_drm_ioctl_blit_scaled,
+			  DRM_RENDER_ALLOW),
 };
 
 int gcn_drm_render_open(struct drm_device *drm, struct drm_file *file)

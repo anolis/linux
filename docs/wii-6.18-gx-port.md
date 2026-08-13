@@ -9592,3 +9592,61 @@ XRGB8888 flips. The final post-baseline log is preserved at
 Its exact GX/DRM timeout, stall, failure, oops, panic, and machine-check audit
 is empty. The same-object RGB565 rectangle-blit stage is fully accepted, and
 the Wii remains online with GX unloaded in CPU fallback.
+
+### Stage scaled RGB565 rectangle blit
+
+- Test branch: `test/wii-gx-scaled-blit`
+
+Add a typed `DRM_IOCTL_GCN_BLIT_SCALED` operation without changing render ABI
+version 1 or any existing structure, opcode, ioctl number, or behavior. The
+new fixed-width 40-byte `drm_gcn_blit_scaled` structure carries independent
+source and destination handles, coordinates, and extents. Feature bit
+`DRM_GCN_FEATURE_BLIT_SCALED_RGB565` advertises the operation independently.
+Flags and padding are reserved and must be zero. Both objects must use the
+same GX provider and tiled RGB565 format, and every rectangle must be nonempty
+and independently bounded by its surface.
+
+Scaling uses nearest-neighbor sampling with the existing calibrated GX
+quarter-texel phase. For destination-relative coordinate `d`, source extent
+`s`, and destination extent `n`, the expected source-relative texel is the
+clamped integer result of `(2 * (2 * d + 1) * s - n) / (4 * n)`. This is the
+nearest texel at the destination pixel center after applying the accepted
+negative quarter-texel texture-coordinate bias. The no-scale case must reduce
+to the established unscaled rectangle blit exactly.
+
+The GX provider first restores the complete destination surface into EFB,
+then draws the scaled source through a destination-rectangle scissor, and
+finally copies the complete EFB back to the destination. This preserves all
+pixels outside the destination rectangle. Equal source and destination
+handles are valid and retain snapshot semantics because MEM1 is not modified
+until the final copyback. DRM locks an aliased reservation once and publishes
+one write fence; distinct objects receive a source read fence and destination
+write fence. The optional output syncobj receives the same completion fence.
+
+The userspace oracle reseeds complete 256 by 256 surfaces before each case and
+checks every one of the 65536 destination pixels, including unchanged outside
+pixels. Cases cover no scaling, exact 2x enlargement, exact 2x reduction,
+opposite horizontal and vertical scale directions, odd ratios, one-pixel
+replication, and overlapping same-object scaling. Negative controls cover
+zero extent, source and destination overruns, nonzero flags and padding,
+unknown context, and missing source handle. Existing copy, fill, bounded blit,
+unequal-dimension blit, alias, wait, syncobj, mapping, PRIME, and ownership
+controls remain unchanged.
+
+Host validation passed `git diff --check` and strict patch-scoped checkpatch
+with zero diagnostics. Native and static PowerPC clients compile with
+`-Wall -Wextra -Werror`. Focused PowerPC `W=1` builds of
+`gcn_drm_render.o`, `gcn_drm_drv.o`, and `gcn-gx.o` are clean. The exact
+DRM-enabled UML `gcn_drm_render` KUnit suite passed all 9 tests, including the
+new scaled validator, and `gcn_gx_mem1` passed all 3 allocator tests. The UML
+configuration requires `CONFIG_KUNIT_UML_PCI=y`, which supplies UML DMA and
+I/O-memory emulation so DRM and the two suites are actually linked; an empty
+`1..0` filter result is not a test pass.
+
+Hardware acceptance requires checksum-pinned artifacts, provider-absent
+discovery, exhaustive success for all seven scale and alias cases twice across
+module reload, complete MEM1 recovery, normal RGB565 and XRGB8888 scanout, the
+accepted offscreen XFB hash, unchanged OF/FDT ownership, final CPU fallback,
+and an empty exact fault audit. Reject any source-phase mismatch, changed
+outside pixel, overlap propagation, timeout, capacity leak, ownership change,
+oops, panic, or machine check.
