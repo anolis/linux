@@ -3214,6 +3214,7 @@ static int gcn_gx_drm_blit_scaled_rgb565(void *src_allocation,
 	gx_load_libogc_init_preamble();
 	gx_setup_display_copy_state();
 	gx_setup_rgb565_texture_state(src_width, src_height);
+	gx_load_pos_to_tex_mtx0_offset(src_width, src_height, 1, -1);
 	gx_setup_texture_rgb565(src->cpu_addr, src_width, src_height);
 	gx_draw_color_quad(src_width, src_height, 0xff, 0xff, 0xff);
 	gx_load_bp_reg(0x45000002);

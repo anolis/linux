@@ -9753,3 +9753,14 @@ For the crop boundary, use the stronger signal already returned by
 `gx_submit_cmds()`: its unique token is emitted after every preceding command
 and was observed successfully in both failed runs. No additional finish IRQ is
 required between the crop and replay submissions.
+
+With the token-only crop fence, module SHA-256
+`f48fcf7ed53704094d5583172bae9e9ac5f96e03373e9d981424837f4e0469ee`
+completed both submissions and reached content validation. The no-scale case
+failed at its first destination pixel `(113,127)`: hardware returned `0x2a24`
+instead of `0x2925`. Because the source pattern encodes `y` in the high byte
+and `x` in the low byte, this is an exact source `(36,42)` observation where
+`(37,41)` was requested. Libogc confirms BP 0x49 uses `y<<10 | x`, so the EFB
+copy coordinate packing is correct. Compensate the full-source restore matrix
+by `(+1,-1)` before copying the interior crop; do not alter copy coordinates or
+the second-pass scale matrix.
