@@ -9429,4 +9429,62 @@ are:
 - `gcn-gx.ko` SHA-256:
   `6d0ea60c9d901f02727ccfe59c6884a3e4cce86bcdafcc45dfc2f060a4128ce4`
 - static `wii-gcn-render-test` SHA-256:
-  `09f57544123aa42a5ccb71a6f660ba8cdf138f26306f61cae64bda579d086c3d`
+  `064e2bc29eeab60e473c71760228c4cc78dc776ff6bc8f5bb7e5fd74b1e08809`
+
+The initially recorded static-client artifact with SHA-256
+`09f57544123aa42a5ccb71a6f660ba8cdf138f26306f61cae64bda579d086c3d`
+was rejected before provider testing. Its exported UAPI tree had been produced
+without `ARCH=powerpc`, so `asm/ioctl.h` used generic direction bits instead
+of PowerPC's architecture-specific `_IOC_WRITE=4` encoding. Read/write ioctls
+therefore worked while write-only submit, context-free, wait, and core GEM
+close requests dispatched incorrectly. The previous accepted client passed
+unchanged against the candidate kernel and module, isolating the problem to
+that userspace artifact. Re-exporting with `ARCH=powerpc`, confirming the
+resulting `asm/ioctl.h` was byte-identical to the accepted PowerPC header, and
+rebuilding with `-Wall -Wextra -Werror -static` produced the corrected hash
+above. No kernel source changed.
+
+Hardware result: passed; accept unequal-dimension RGB565 rectangle blit. Fresh
+boot ID `8b40e3c3-a5bc-4705-8e02-3bc2eebb7c66` ran the checksum-pinned kernel
+and verified the corrected static client and module hashes above. The client
+passed provider-absent discovery before module load. Loading GX reported FIFO
+`0x01684000`, texture workspaces `0x01300000`/`0x013c0000`, and render capacity
+`524288/0/524288`.
+
+The complete client passed twice across a clean module unload and reload. It
+retained all prior allocator, mapping, context, PRIME, wait, syncobj, copy,
+full-fill, rectangle-fill, and equal-dimension rectangle-blit controls. A
+full-surface copy between the 320 by 192 source and 256 by 256 destination was
+rejected. The odd 67 by 53 blit from source `(241,103)` to destination
+`(11,97)` then matched all 65536 destination pixels against the unique source
+coordinate oracle while preserving every sentinel outside the rectangle. A
+second blit copied source `(319,191)` to destination `(255,255)` and again
+matched the entire retained destination. MEM1 capacity returned to
+`524288/0/524288` after every run. The second measured client pass advanced 29
+PE-finish interrupts while normal scanout continued; final-token waits and
+the two exhaustive destination readbacks are the content and completion
+oracles.
+
+The accepted visual fixture completed its initial frame and 40 page flips in
+both formats. RGB565 advanced exactly 41 generated frames and 82 PE finishes.
+XRGB8888 advanced exactly 41 generated frames, 82 PE finishes, and 41 format
+conversions. Neither fixture retained a DRM holder.
+
+An independent `offscreen_probe=1 debug_capture=1` load completed one
+EFB-to-tiled-RGB565 copy, changed all 153600 destination words, and replayed
+the texture 45 times. Its final counter was exactly
+`92 = 2 * (1 copy + 45 replays)`. The 614400-byte, 640 by 480 post-token XFB
+snapshot had SHA-256
+`2c488feb9b32a2510a6912f85c8187e021e0fe3d7b228f8431395502b57cd075`,
+byte-identical to the accepted crisp four-quadrant reference.
+
+The live GX OF-property manifest remained
+`cfc9a93ba4135f31d45faf7fdb2d8615b2304080163b7348a590e6df7ea197a0`
+and the packed FDT remained
+`e76a396b09be52f0a5ea3bd3cc5a58ed5af6bc59597fe039e0a420030556c51b`.
+Final module unload restored provider absence, and CPU fallback completed 20
+XRGB8888 flips. The final 39-line log is preserved at
+`/tmp/dmesg-gx-unequal-81fa85934-final.txt`, SHA-256
+`d13e070affe1df8307efdb0ea5c231146288c0e226c20f25956c55589e1d4b25`;
+its exact GX/DRM timeout, stall, failure, oops, panic, and machine-check audit
+is empty. The unequal-dimension rectangle-blit stage is fully accepted.
