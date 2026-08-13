@@ -256,6 +256,11 @@ module_param_named(scaled_bias_256ths, gx_scaled_bias_256ths, int, 0444);
 MODULE_PARM_DESC(scaled_bias_256ths,
 		 "Scaled-blit translation in 1/256ths of a source texel");
 
+static int gx_scaled_scale_ulps;
+module_param_named(scaled_scale_ulps, gx_scaled_scale_ulps, int, 0444);
+MODULE_PARM_DESC(scaled_scale_ulps,
+		 "Signed float-ULP adjustment to scaled-blit coordinate slopes");
+
 static char *gx_texcoord_space = "normalized";
 module_param_named(texcoord_space, gx_texcoord_space, charp, 0444);
 MODULE_PARM_DESC(texcoord_space,
@@ -586,6 +591,10 @@ static void gx_load_pos_to_tex_mtx0_scaled(u16 texture_width,
 		t_denominator *= 256;
 		s_bias = f32_div_u32(abs(s_numerator), s_denominator);
 		t_bias = f32_div_u32(abs(t_numerator), t_denominator);
+	}
+	if (gx_scaled_scale_ulps) {
+		s_scale += gx_scaled_scale_ulps;
+		t_scale += gx_scaled_scale_ulps;
 	}
 
 	if (s_numerator < 0)

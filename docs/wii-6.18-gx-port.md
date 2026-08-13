@@ -9791,3 +9791,10 @@ failed mixed-axis scaling, and `+2` failed 2x enlargement. The required
 fractional correction is therefore smaller than one eighth texel. Replace the
 diagnostic parameter with signed 1/256-texel units and preserve zero as the
 default.
+
+The 1/256-texel sweep also rejects translation. Every tested negative value
+from `-2` through `-8` failed the first 2x-downscale pixel, while zero passes
+that exact case and misses only a later mixed-axis fractional boundary. This
+requires a slope correction anchored at the first destination pixel. Add a
+separate signed float-ULP adjustment for both scaled matrix slopes so the
+hardware effect of the final coefficient rounding can be tested directly.
