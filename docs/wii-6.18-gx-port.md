@@ -9764,3 +9764,14 @@ and `x` in the low byte, this is an exact source `(36,42)` observation where
 copy coordinate packing is correct. Compensate the full-source restore matrix
 by `(+1,-1)` before copying the interior crop; do not alter copy coordinates or
 the second-pass scale matrix.
+
+Module SHA-256
+`1d9f52f22e7d8d4765ae7a539bad7898b254c68d8f1371054f189245910e36bf`
+with the restore compensation matched the first 15 no-scale pixels, then
+returned `0xe0ff` at destination `(128,127)` instead of `0x2934`. The abrupt
+failure at crop-relative x=15 rejects a uniform restore-phase explanation and
+implicates the unaligned interior EFB texture-copy source. Avoid that path:
+use the established unscaled texture transform to draw the requested source
+rectangle into EFB origin under a crop-sized scissor, then copy from aligned
+EFB `(0,0)` into the private tiled texture. This reuses the already accepted
+translated rectangle sampling path and leaves scaling isolated to pass two.

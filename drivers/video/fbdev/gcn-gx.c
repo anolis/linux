@@ -3214,14 +3214,15 @@ static int gcn_gx_drm_blit_scaled_rgb565(void *src_allocation,
 	gx_load_libogc_init_preamble();
 	gx_setup_display_copy_state();
 	gx_setup_rgb565_texture_state(src_width, src_height);
-	gx_load_pos_to_tex_mtx0_offset(src_width, src_height, 1, -1);
+	gx_load_pos_to_tex_mtx0_offset(src_width, src_height, src_x, src_y);
 	gx_setup_texture_rgb565(src->cpu_addr, src_width, src_height);
+	gx_set_scissor(0, 0, src_rect_width, src_rect_height);
 	gx_draw_color_quad(src_width, src_height, 0xff, 0xff, 0xff);
 	gx_load_bp_reg(0x45000002);
 	for (i = 0; i < 32; i++)
 		gx_wr8(0);
 	gx_set_copy_clear_rgb(0x00, 0x00, 0x00);
-	gx_copy_efb_rect_to_rgb565_texture(crop, src_x, src_y,
+	gx_copy_efb_rect_to_rgb565_texture(crop, 0, 0,
 					   src_rect_width, src_rect_height,
 					   true);
 	ret = gx_submit_cmds("render-blit-scaled-crop");
