@@ -9547,3 +9547,48 @@ The checksum-pinned hardware candidate artifacts are:
 
 An incremental post-commit rebuild reproduced all three hashes exactly. These
 are the only artifacts eligible for this stage's hardware acceptance result.
+
+Hardware result: passed; accept same-object RGB565 rectangle blit. Boot ID
+`13e300ba-dfda-4b78-a0a2-6c0929930fbd` ran the checksum-pinned kernel and
+independently verified the matching module and static-client hashes above.
+Provider-absent discovery passed before the first load and after every final
+unload. Loading GX reported FIFO `0x01684000`, texture workspaces
+`0x01300000`/`0x013c0000`, and render capacity `524288/0/524288`.
+
+The complete client passed twice across a clean module unload and reload. It
+retained every prior allocator, mapping, context, PRIME, wait, syncobj, copy,
+fill, rectangle-fill, equal-dimension blit, and unequal-dimension blit
+control. Full-copy alias rejection remained intact. For each same-object
+case, the client reseeded all 65536 tiled pixels with a unique coordinate
+value and verified the entire object after completion. Identical-region,
+non-overlap, right, left, down, up, and diagonal-overlap cases all matched the
+pre-operation snapshot oracle, including every pixel outside the destination
+rectangle. This is 458752 exhaustive pixel checks per complete client pass.
+Capacity returned to `524288/0/524288` after object release, and no aliased
+reservation deadlock or redundant-fence failure occurred.
+
+The accepted visual fixture completed its initial frame and 40 page flips in
+both formats. RGB565 advanced exactly 41 generated frames and 82 PE finishes.
+XRGB8888 advanced 42 generated frames, 84 PE finishes, and 41 conversions;
+the one concurrent CPU-console restoration frame retained exactly two PE
+finishes per generated frame. Neither fixture retained a DRM holder.
+
+An independent `offscreen_probe=1 debug_capture=1` load completed one
+EFB-to-tiled-RGB565 copy, changed all 153600 destination words, and replayed
+the texture 45 times. Its counter was exactly
+`92 = 2 * (1 copy + 45 replays)`. The 614400-byte, 640 by 480 post-token XFB
+snapshot had SHA-256
+`2c488feb9b32a2510a6912f85c8187e021e0fe3d7b228f8431395502b57cd075`,
+byte-identical to the accepted crisp four-quadrant reference.
+
+The complete live GX OF-property manifest remained
+`cfc9a93ba4135f31d45faf7fdb2d8615b2304080163b7348a590e6df7ea197a0`
+and the packed FDT remained
+`e76a396b09be52f0a5ea3bd3cc5a58ed5af6bc59597fe039e0a420030556c51b`.
+Final module unload restored provider absence and CPU fallback completed 20
+XRGB8888 flips. The final post-baseline log is preserved at
+`/tmp/dmesg-gx-same-object-8521fef2d-final.txt`, with 32 lines and SHA-256
+`56cf49b875acf99df9486b72be6791947d60fe71e8183f053e3555279e9a685b`.
+Its exact GX/DRM timeout, stall, failure, oops, panic, and machine-check audit
+is empty. The same-object RGB565 rectangle-blit stage is fully accepted, and
+the Wii remains online with GX unloaded in CPU fallback.
