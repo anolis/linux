@@ -9380,3 +9380,39 @@ post-baseline log is preserved at
 `29bd2a856909e72fbb33f8264aae85320c3a879177c834426c656b3ef3b15dc2`.
 Its exact GX/DRM timeout, stall, failure, oops, panic, and machine-check audit
 is empty. The bounded RGB565 rectangle-blit stage is fully accepted.
+
+### Stage unequal-dimension RGB565 rectangle blit
+
+- Test branch: `test/wii-gx-unequal-rect-blit`
+
+Extend only the accepted bounded rectangle-blit operation to distinct source
+and destination objects with different dimensions. Advertise support through
+`DRM_GCN_FEATURE_BLIT_RECT_RGB565_UNEQUAL_DIMS` so userspace does not need to
+probe by submission failure. Preserve the version-1 32-byte submit structure,
+existing packed rectangle data, unscaled and unrotated semantics, tiled
+RGB565 format, distinct-object requirement, and source-read/destination-write
+fencing. Full-surface copy continues to require equal dimensions.
+
+Pass both source and destination dimensions through the internal provider
+contract. Destination dimensions define viewport, scissor, EFB restore, and
+copyback. Source dimensions define texture binding and normalized
+position-derived texture coordinates. Continue mapping each destination pixel
+to `source + destination_position - destination_origin`, retaining the
+accepted negative quarter-texel phase.
+
+The unchanged client must retain every prior control and exact all-pixel
+oracle. Add a 320 by 192 source object against the existing 256 by 256
+destination, reject full-surface copy between them, then translate an odd 67
+by 53 rectangle from source `(241,103)` to destination `(11,97)`. Check every
+destination pixel against a source pattern that uniquely encodes all 61440
+source coordinates, and require the sentinel outside the rectangle to remain
+unchanged. Copy source `(319,191)` to destination `(255,255)` and again check
+all 65536 destination pixels. KUnit must independently validate unequal source
+and destination bounds and both final coordinates.
+
+Hardware acceptance requires checksum-pinned artifacts, advertised capability,
+provider absence, two complete client passes across module reload, unchanged
+MEM1 capacity and OF/FDT hashes, normal RGB565/XRGB8888 scanout, the accepted
+offscreen XFB hash, final CPU fallback, and an empty exact fault audit. Reject
+any scaling, source-coordinate error, changed outside pixel, timeout, leak,
+ownership change, oops, panic, or machine check.

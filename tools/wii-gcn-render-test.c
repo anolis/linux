@@ -16,6 +16,8 @@
 
 #define TEST_WIDTH 256U
 #define TEST_HEIGHT 256U
+#define UNEQUAL_SRC_WIDTH 320U
+#define UNEQUAL_SRC_HEIGHT 192U
 #define MAX_OBJECTS 1024U
 #define ARRAY_SIZE(array) (sizeof(array) / sizeof((array)[0]))
 
@@ -32,6 +34,11 @@ static uint16_t source_pattern(unsigned int x, unsigned int y)
 {
 	return ((x & 0x1f) << 11) | ((y & 0x3f) << 5) |
 	       ((x ^ y) & 0x1f);
+}
+
+static uint16_t unequal_source_pattern(unsigned int x, unsigned int y)
+{
+	return y * UNEQUAL_SRC_WIDTH + x;
 }
 
 static void fail(const char *what)
@@ -59,14 +66,20 @@ static int get_param(int fd, uint32_t param, uint64_t *value)
 	return 0;
 }
 
-static int create_bo(int fd, struct drm_gcn_gem_create *args)
+static int create_bo_size(int fd, struct drm_gcn_gem_create *args,
+			  uint32_t width, uint32_t height)
 {
 	memset(args, 0, sizeof(*args));
-	args->width = TEST_WIDTH;
-	args->height = TEST_HEIGHT;
+	args->width = width;
+	args->height = height;
 	args->format = DRM_GCN_GEM_FORMAT_RGB565;
 	args->layout = DRM_GCN_GEM_LAYOUT_TILED_4X4;
 	return ioctl(fd, DRM_IOCTL_GCN_GEM_CREATE, args);
+}
+
+static int create_bo(int fd, struct drm_gcn_gem_create *args)
+{
+	return create_bo_size(fd, args, TEST_WIDTH, TEST_HEIGHT);
 }
 
 static void *map_bo(int fd, const struct drm_gcn_gem_create *bo)
@@ -263,12 +276,14 @@ static void test_submit(int fd, int other_fd)
 	struct drm_gcn_ctx_free free_ctx;
 	struct drm_gcn_gem_create src;
 	struct drm_gcn_gem_create dst;
+	struct drm_gcn_gem_create unequal_src = {};
 	struct drm_gcn_submit submit;
 	struct drm_gcn_wait wait_args;
 	struct drm_syncobj_wait sync_wait;
 	uint32_t sync_handle;
 	uint16_t *src_map = MAP_FAILED;
 	uint16_t *dst_map = MAP_FAILED;
+	uint16_t *unequal_src_map = MAP_FAILED;
 	size_t pixels;
 	size_t i;
 
@@ -558,6 +573,89 @@ rect_done:
 	}
 	puts("SUBMIT: blitted bottom-right RGB565 pixel with prior surface preserved");
 
+	if (create_bo_size(fd, &unequal_src, UNEQUAL_SRC_WIDTH,
+			   UNEQUAL_SRC_HEIGHT)) {
+		fail("create unequal-dimension blit source");
+		goto blit_done;
+	}
+	unequal_src_map = map_bo(fd, &unequal_src);
+	if (unequal_src_map == MAP_FAILED) {
+		fail("map unequal-dimension blit source");
+		goto blit_done;
+	}
+	for (unsigned int y = 0; y < UNEQUAL_SRC_HEIGHT; y++) {
+		for (unsigned int x = 0; x < UNEQUAL_SRC_WIDTH; x++) {
+			size_t pixel = tiled_rgb565_index(x, y,
+						   UNEQUAL_SRC_WIDTH);
+
+			unequal_src_map[pixel] = unequal_source_pattern(x, y);
+		}
+	}
+	submit.op = DRM_GCN_RENDER_OP_COPY_RGB565;
+	submit.src_handle = unequal_src.handle;
+	submit.data = 0;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_SUBMIT, &submit) || errno != EINVAL)
+		fail("full copy with unequal dimensions should return EINVAL");
+	submit.op = DRM_GCN_RENDER_OP_BLIT_RECT_RGB565;
+	for (unsigned int y = 0; y < TEST_HEIGHT; y++) {
+		for (unsigned int x = 0; x < TEST_WIDTH; x++) {
+			size_t pixel = tiled_rgb565_index(x, y, TEST_WIDTH);
+
+			dst_map[pixel] = 0x2104;
+		}
+	}
+	submit.src_handle = unequal_src.handle;
+	submit.data = DRM_GCN_BLIT_RECT_DATA(241, 103, 11, 97, 67, 53);
+	if (ioctl(fd, DRM_IOCTL_GCN_SUBMIT, &submit)) {
+		fail("submit unequal-dimension RGB565 rectangle blit");
+		goto blit_done;
+	}
+	for (unsigned int y = 0; y < TEST_HEIGHT; y++) {
+		for (unsigned int x = 0; x < TEST_WIDTH; x++) {
+			uint16_t expected = 0x2104;
+			size_t pixel = tiled_rgb565_index(x, y, TEST_WIDTH);
+
+			if (x >= 11 && x < 78 && y >= 97 && y < 150)
+				expected = unequal_source_pattern(x + 230, y + 6);
+			if (dst_map[pixel] != expected) {
+				fprintf(stderr,
+					"FAIL: unequal-dimension blit mismatch at (%u,%u): got=0x%04x expected=0x%04x\n",
+					x, y, dst_map[pixel], expected);
+				failures++;
+				goto blit_done;
+			}
+		}
+	}
+	puts("SUBMIT: blitted from 320x192 source into 256x256 destination");
+	puts("SUBMIT: unequal-dimension outside pixels preserved");
+
+	submit.data = DRM_GCN_BLIT_RECT_DATA(319, 191, 255, 255, 1, 1);
+	if (ioctl(fd, DRM_IOCTL_GCN_SUBMIT, &submit)) {
+		fail("submit unequal-dimension bottom-right pixel blit");
+		goto blit_done;
+	}
+	for (unsigned int y = 0; y < TEST_HEIGHT; y++) {
+		for (unsigned int x = 0; x < TEST_WIDTH; x++) {
+			uint16_t expected = 0x2104;
+			size_t pixel = tiled_rgb565_index(x, y, TEST_WIDTH);
+
+			if (x == 255 && y == 255)
+				expected = unequal_source_pattern(319, 191);
+			else if (x >= 11 && x < 78 && y >= 97 && y < 150)
+				expected = unequal_source_pattern(x + 230, y + 6);
+			if (dst_map[pixel] != expected) {
+				fprintf(stderr,
+					"FAIL: unequal-dimension edge blit mismatch at (%u,%u): got=0x%04x expected=0x%04x\n",
+					x, y, dst_map[pixel], expected);
+				failures++;
+				goto blit_done;
+			}
+		}
+	}
+	puts("SUBMIT: blitted unequal source and destination bottom-right pixels");
+	puts("SUBMIT: unequal-dimension prior surface preserved");
+
 blit_done:
 	wait_args.timeout_ns = monotonic_ns() + 1000000000ULL;
 	if (ioctl(fd, DRM_IOCTL_GCN_WAIT, &wait_args))
@@ -577,6 +675,9 @@ out_ctx:
 	if (ioctl(fd, DRM_IOCTL_GCN_CTX_FREE, &free_ctx))
 		fail("free submit context");
 out:
+	if (unequal_src_map != MAP_FAILED &&
+	    munmap(unequal_src_map, unequal_src.size))
+		fail("unmap unequal-dimension blit source");
 	if (dst_map != MAP_FAILED && munmap(dst_map, dst.size))
 		fail("unmap render-copy destination");
 	if (src_map != MAP_FAILED && munmap(src_map, src.size))
@@ -585,6 +686,8 @@ out:
 		fail("close render-copy destination");
 	if (close_bo(fd, src.handle))
 		fail("close render-copy source");
+	if (unequal_src.handle && close_bo(fd, unequal_src.handle))
+		fail("close unequal-dimension blit source");
 }
 
 static int hold_mapping(const char *node)
@@ -784,18 +887,21 @@ int main(int argc, char **argv)
 		if ((features & (DRM_GCN_FEATURE_SUBMIT_RGB565 |
 				 DRM_GCN_FEATURE_FILL_RGB565 |
 				 DRM_GCN_FEATURE_FILL_RECT_RGB565 |
-				 DRM_GCN_FEATURE_BLIT_RECT_RGB565)) ==
+				 DRM_GCN_FEATURE_BLIT_RECT_RGB565 |
+				 DRM_GCN_FEATURE_BLIT_RECT_RGB565_UNEQUAL_DIMS)) ==
 		    (DRM_GCN_FEATURE_SUBMIT_RGB565 |
 		     DRM_GCN_FEATURE_FILL_RGB565 |
 		     DRM_GCN_FEATURE_FILL_RECT_RGB565 |
-		     DRM_GCN_FEATURE_BLIT_RECT_RGB565))
+		     DRM_GCN_FEATURE_BLIT_RECT_RGB565 |
+		     DRM_GCN_FEATURE_BLIT_RECT_RGB565_UNEQUAL_DIMS))
 			test_submit(fd, other_fd);
 		else
 			fail_value("RGB565 render features", features,
 				   DRM_GCN_FEATURE_SUBMIT_RGB565 |
 				   DRM_GCN_FEATURE_FILL_RGB565 |
 				   DRM_GCN_FEATURE_FILL_RECT_RGB565 |
-				   DRM_GCN_FEATURE_BLIT_RECT_RGB565);
+				   DRM_GCN_FEATURE_BLIT_RECT_RGB565 |
+				   DRM_GCN_FEATURE_BLIT_RECT_RGB565_UNEQUAL_DIMS);
 	}
 
 	close(other_fd);
