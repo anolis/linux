@@ -9665,3 +9665,43 @@ exactly. The checksum-pinned hardware candidate artifacts are:
 
 These are the only artifacts eligible for this stage's hardware acceptance
 result.
+
+Hardware result for candidate `90e05350d42a`: rejected. Boot ID
+`1ae15e2a-e48d-4361-88b3-b2f6ffcbaf20` ran the checksum-pinned kernel.
+Provider-absent discovery passed, and every retained legacy operation plus the
+no-scale, exact 2x enlargement, and exact 2x reduction cases passed their full
+65536-pixel comparisons. The mixed-axis case failed deterministically at
+destination `(141,17)`: hardware returned `0x1731` where the quarter-texel
+oracle required `0x1730`. The module unloaded cleanly with no GX timeout,
+kernel fault, or MEM1 leak. The first-run log is preserved at
+`/tmp/dmesg-gx-scaled-90e05350d-first.txt`, SHA-256
+`8616901da90ad29b2dc8a40559563a663bc8509344526850f7a38a14d26fce8f`.
+
+Two checksum-pinned diagnostic clients then characterized the mismatch without
+changing the driver. The three-oracle client, SHA-256
+`ab505e480222d07feccf0bc7094b1f9e3590b5ca315dbd8e9dfe12c976588b68`,
+showed that no single tested center phase matched every ratio and that a
+one-pixel source rectangle sampled outside its requested bounds. The
+axis-specific phase-sweep client, SHA-256
+`50db9288bb50244b686dd920f28ec92c2bcf21f15bdda03caf833cecf689fd39`,
+found deterministic, separable best phases: no-scale `64/256`, 2x enlargement
+`128/256`, 2x reduction `32/256`, mixed-axis `143/256` horizontally and
+`32/256` vertically, odd-ratio `133/256` and `131/256`, and same-object
+`135/256` and `131/256`. Row and column variation were zero in every case.
+The one-pixel case still had 22 horizontal and 20 vertical mismatches at its
+best tested phase. These results identify fixed-point sampling phase and
+unbounded source-rectangle clamping, not FIFO corruption or nondeterminism.
+
+A second driver candidate removed the inherited negative quarter-texel bias
+from the scaled matrix and changed the strict client to the conventional
+destination-pixel-center oracle `(2*d+1)*s/(2*n)`. Its module SHA-256 was
+`2d3c1c6dcf1efd1e11d0a3bcb2ab3d97fa828b3d981901a58cff2ea52019991e`;
+the matching static client SHA-256 was
+`c4742d18a11d8748ddb079085b94dae9464a6836eef78a15b14106855f41a2b3`.
+All retained controls and the first three scale cases passed, but mixed-axis
+scaling failed at `(176,17)`: hardware returned `0x1846` instead of expected
+`0x1845`. It also unloaded cleanly. Zero bias is therefore rejected as a
+phase-only fix. The next candidate must first isolate the requested source
+rectangle into a private tiled texture so clamp mode cannot sample adjacent
+source pixels, then characterize or eliminate the remaining internal
+fixed-point phase difference.

@@ -560,11 +560,9 @@ static void gx_load_pos_to_tex_mtx0_scaled(u16 texture_width,
 					   const struct gx_scaled_rect *rect)
 {
 	s64 s_numerator = ((s64)rect->src_x * rect->dst_width -
-			   (s64)rect->dst_x * rect->src_width) * 8 +
-			  (s64)gx_texel_bias_eighths * rect->dst_width;
+			   (s64)rect->dst_x * rect->src_width) * 8;
 	s64 t_numerator = ((s64)rect->src_y * rect->dst_height -
-			   (s64)rect->dst_y * rect->src_height) * 8 +
-			  (s64)gx_texel_bias_eighths * rect->dst_height;
+			   (s64)rect->dst_y * rect->src_height) * 8;
 	u32 s_denominator = (u32)rect->dst_width * 8;
 	u32 t_denominator = (u32)rect->dst_height * 8;
 	u32 s_scale = f32_div_u32(rect->src_width, rect->dst_width);

@@ -75,13 +75,9 @@ static unsigned int scaled_source_offset(unsigned int dst_offset,
 					 unsigned int src_extent,
 					 unsigned int dst_extent)
 {
-	int64_t numerator = 2LL * (2 * dst_offset + 1) * src_extent -
-			    dst_extent;
-	unsigned int offset;
+	uint64_t numerator = (uint64_t)(2 * dst_offset + 1) * src_extent;
+	unsigned int offset = numerator / (2 * dst_extent);
 
-	if (numerator <= 0)
-		return 0;
-	offset = numerator / (4 * dst_extent);
 	return offset < src_extent ? offset : src_extent - 1;
 }
 
