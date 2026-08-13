@@ -28,6 +28,12 @@ static size_t tiled_rgb565_index(unsigned int x, unsigned int y,
 	       (y & 3) * 4 + (x & 3);
 }
 
+static uint16_t source_pattern(unsigned int x, unsigned int y)
+{
+	return ((x & 0x1f) << 11) | ((y & 0x3f) << 5) |
+	       ((x ^ y) & 0x1f);
+}
+
 static void fail(const char *what)
 {
 	fprintf(stderr, "FAIL: %s: %s\n", what, strerror(errno));
@@ -473,6 +479,93 @@ rect_done:
 	if (ioctl(fd, DRM_IOCTL_SYNCOBJ_WAIT, &sync_wait))
 		fail("wait for rectangle-fill syncobj");
 
+	/* Validate translated source sampling and exact outside preservation. */
+	for (unsigned int y = 0; y < TEST_HEIGHT; y++) {
+		for (unsigned int x = 0; x < TEST_WIDTH; x++) {
+			size_t pixel = tiled_rgb565_index(x, y, TEST_WIDTH);
+
+			src_map[pixel] = source_pattern(x, y);
+			dst_map[pixel] = 0x39e7;
+		}
+	}
+	submit.op = DRM_GCN_RENDER_OP_BLIT_RECT_RGB565;
+	submit.src_handle = src.handle;
+	submit.data = DRM_GCN_BLIT_RECT_DATA(255, 255, 0, 0, 2, 1);
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_SUBMIT, &submit) || errno != EINVAL)
+		fail("source-out-of-bounds rectangle blit should return EINVAL");
+	submit.data = DRM_GCN_BLIT_RECT_DATA(0, 0, 255, 255, 1, 2);
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_SUBMIT, &submit) || errno != EINVAL)
+		fail("destination-out-of-bounds rectangle blit should return EINVAL");
+	submit.data = DRM_GCN_BLIT_RECT_DATA(101, 29, 11, 97, 67, 53) |
+		      DRM_GCN_BLIT_RESERVED_MASK;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_SUBMIT, &submit) || errno != EINVAL)
+		fail("rectangle blit with reserved bits should return EINVAL");
+	submit.data = DRM_GCN_BLIT_RECT_DATA(101, 29, 11, 97, 67, 53);
+	submit.dst_handle = src.handle;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_SUBMIT, &submit) || errno != EINVAL)
+		fail("aliased rectangle blit should return EINVAL");
+	submit.dst_handle = dst.handle;
+	if (ioctl(fd, DRM_IOCTL_GCN_SUBMIT, &submit)) {
+		fail("submit interior RGB565 rectangle blit");
+		goto out_sync;
+	}
+	for (unsigned int y = 0; y < TEST_HEIGHT; y++) {
+		for (unsigned int x = 0; x < TEST_WIDTH; x++) {
+			uint16_t expected = 0x39e7;
+			size_t pixel = tiled_rgb565_index(x, y, TEST_WIDTH);
+
+			if (x >= 11 && x < 78 && y >= 97 && y < 150)
+				expected = source_pattern(x - 11 + 101,
+							  y - 97 + 29);
+			if (dst_map[pixel] != expected) {
+				fprintf(stderr,
+					"FAIL: rectangle blit mismatch at (%u,%u): got=0x%04x expected=0x%04x\n",
+					x, y, dst_map[pixel], expected);
+				failures++;
+				goto blit_done;
+			}
+		}
+	}
+	puts("SUBMIT: blitted translated 67x53 RGB565 rectangle with all outside pixels preserved");
+
+	submit.data = DRM_GCN_BLIT_RECT_DATA(255, 255, 255, 255, 1, 1);
+	if (ioctl(fd, DRM_IOCTL_GCN_SUBMIT, &submit)) {
+		fail("submit bottom-right one-pixel rectangle blit");
+		goto out_sync;
+	}
+	for (unsigned int y = 0; y < TEST_HEIGHT; y++) {
+		for (unsigned int x = 0; x < TEST_WIDTH; x++) {
+			uint16_t expected = 0x39e7;
+			size_t pixel = tiled_rgb565_index(x, y, TEST_WIDTH);
+
+			if (x == 255 && y == 255)
+				expected = source_pattern(255, 255);
+			else if (x >= 11 && x < 78 && y >= 97 && y < 150)
+				expected = source_pattern(x - 11 + 101,
+							  y - 97 + 29);
+			if (dst_map[pixel] != expected) {
+				fprintf(stderr,
+					"FAIL: one-pixel blit mismatch at (%u,%u): got=0x%04x expected=0x%04x\n",
+					x, y, dst_map[pixel], expected);
+				failures++;
+				goto blit_done;
+			}
+		}
+	}
+	puts("SUBMIT: blitted bottom-right RGB565 pixel with prior surface preserved");
+
+blit_done:
+	wait_args.timeout_ns = monotonic_ns() + 1000000000ULL;
+	if (ioctl(fd, DRM_IOCTL_GCN_WAIT, &wait_args))
+		fail("wait for rectangle-blit destination");
+	sync_wait.timeout_nsec = (int64_t)(monotonic_ns() + 1000000000ULL);
+	if (ioctl(fd, DRM_IOCTL_SYNCOBJ_WAIT, &sync_wait))
+		fail("wait for rectangle-blit syncobj");
+
 out_sync:
 	destroy.handle = sync.handle;
 	destroy.pad = 0;
@@ -690,16 +783,19 @@ int main(int argc, char **argv)
 		test_provider(fd, other_fd, free_bytes);
 		if ((features & (DRM_GCN_FEATURE_SUBMIT_RGB565 |
 				 DRM_GCN_FEATURE_FILL_RGB565 |
-				 DRM_GCN_FEATURE_FILL_RECT_RGB565)) ==
+				 DRM_GCN_FEATURE_FILL_RECT_RGB565 |
+				 DRM_GCN_FEATURE_BLIT_RECT_RGB565)) ==
 		    (DRM_GCN_FEATURE_SUBMIT_RGB565 |
 		     DRM_GCN_FEATURE_FILL_RGB565 |
-		     DRM_GCN_FEATURE_FILL_RECT_RGB565))
+		     DRM_GCN_FEATURE_FILL_RECT_RGB565 |
+		     DRM_GCN_FEATURE_BLIT_RECT_RGB565))
 			test_submit(fd, other_fd);
 		else
 			fail_value("RGB565 render features", features,
 				   DRM_GCN_FEATURE_SUBMIT_RGB565 |
 				   DRM_GCN_FEATURE_FILL_RGB565 |
-				   DRM_GCN_FEATURE_FILL_RECT_RGB565);
+				   DRM_GCN_FEATURE_FILL_RECT_RGB565 |
+				   DRM_GCN_FEATURE_BLIT_RECT_RGB565);
 	}
 
 	close(other_fd);

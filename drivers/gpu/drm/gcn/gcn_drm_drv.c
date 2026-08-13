@@ -327,6 +327,25 @@ int gcn_drm_provider_fill_rect(const struct gcn_drm_accel_ops *provider,
 	return ret;
 }
 
+int gcn_drm_provider_blit_rect(const struct gcn_drm_accel_ops *provider,
+			       void *src_allocation, void *dst_allocation,
+			       u16 width, u16 height, u16 src_x, u16 src_y,
+			       u16 dst_x, u16 dst_y, u16 rect_width,
+			       u16 rect_height)
+{
+	int ret = -ENODEV;
+
+	mutex_lock(&gcn_drm_accel_lock);
+	if (gcn_drm_accel == provider && provider->blit_rect_rgb565)
+		ret = provider->blit_rect_rgb565(src_allocation, dst_allocation,
+						 width, height, src_x, src_y,
+						 dst_x, dst_y, rect_width,
+						 rect_height);
+	mutex_unlock(&gcn_drm_accel_lock);
+
+	return ret;
+}
+
 static int gcn_drm_accel_rgb565(const void *src, u32 src_pitch,
 				u32 xfb_phys, u16 width, u16 height)
 {

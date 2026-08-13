@@ -28,6 +28,11 @@ int gcn_drm_provider_fill_rect(const struct gcn_drm_accel_ops *provider,
 			       void *dst_allocation, u16 width, u16 height,
 			       u16 x, u16 y, u16 rect_width,
 			       u16 rect_height, u16 color);
+int gcn_drm_provider_blit_rect(const struct gcn_drm_accel_ops *provider,
+			       void *src_allocation, void *dst_allocation,
+			       u16 width, u16 height, u16 src_x, u16 src_y,
+			       u16 dst_x, u16 dst_y, u16 rect_width,
+			       u16 rect_height);
 
 int gcn_drm_render_open(struct drm_device *drm, struct drm_file *file);
 void gcn_drm_render_postclose(struct drm_device *drm, struct drm_file *file);

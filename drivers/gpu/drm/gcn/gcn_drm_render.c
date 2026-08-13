@@ -311,6 +311,7 @@ static int gcn_drm_ioctl_submit(struct drm_device *drm, void *data,
 	struct gcn_drm_bo *src = NULL;
 	struct gcn_drm_bo *dst;
 	struct gcn_drm_render_rect rect;
+	struct gcn_drm_render_blit_rect blit_rect;
 	struct drm_exec exec;
 	int ret;
 
@@ -363,6 +364,14 @@ static int gcn_drm_ioctl_submit(struct drm_device *drm, void *data,
 			goto out_put;
 		}
 	}
+	if (args->op == DRM_GCN_RENDER_OP_BLIT_RECT_RGB565) {
+		ret = gcn_drm_render_validate_blit_rect(args->data, src->width,
+							src->height, dst->width,
+							dst->height);
+		if (ret)
+			goto out_put;
+		gcn_drm_render_decode_blit_rect(args->data, &blit_rect);
+	}
 
 	drm_exec_init(&exec, DRM_EXEC_INTERRUPTIBLE_WAIT, src_gem ? 2 : 1);
 	drm_exec_until_all_locked(&exec) {
@@ -394,11 +403,18 @@ static int gcn_drm_ioctl_submit(struct drm_device *drm, void *data,
 		ret = gcn_drm_provider_fill(dst->provider, dst->allocation,
 					    dst->width, dst->height,
 					    (u16)args->data);
-	else
+	else if (args->op == DRM_GCN_RENDER_OP_FILL_RECT_RGB565)
 		ret = gcn_drm_provider_fill_rect(dst->provider, dst->allocation,
 						 dst->width, dst->height,
 						 rect.x, rect.y, rect.width,
 						 rect.height, rect.color);
+	else
+		ret = gcn_drm_provider_blit_rect(src->provider, src->allocation,
+						 dst->allocation, dst->width,
+						 dst->height, blit_rect.src_x,
+						 blit_rect.src_y, blit_rect.dst_x,
+						 blit_rect.dst_y, blit_rect.width,
+						 blit_rect.height);
 	if (ret)
 		goto out_exec;
 

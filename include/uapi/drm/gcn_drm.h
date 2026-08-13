@@ -33,6 +33,7 @@ enum drm_gcn_param {
 #define DRM_GCN_FEATURE_SUBMIT_RGB565	(1ULL << 4)
 #define DRM_GCN_FEATURE_FILL_RGB565	(1ULL << 5)
 #define DRM_GCN_FEATURE_FILL_RECT_RGB565	(1ULL << 6)
+#define DRM_GCN_FEATURE_BLIT_RECT_RGB565	(1ULL << 7)
 
 struct drm_gcn_get_param {
 	__u32 param;
@@ -99,6 +100,7 @@ enum drm_gcn_render_op {
 	DRM_GCN_RENDER_OP_COPY_RGB565 = 1,
 	DRM_GCN_RENDER_OP_FILL_RGB565 = 2,
 	DRM_GCN_RENDER_OP_FILL_RECT_RGB565 = 3,
+	DRM_GCN_RENDER_OP_BLIT_RECT_RGB565 = 4,
 };
 
 #define DRM_GCN_RECT_COLOR_SHIFT	0
@@ -120,6 +122,29 @@ enum drm_gcn_render_op {
 	 (((__u64)((height) - 1) & DRM_GCN_RECT_FIELD_MASK) << \
 	  DRM_GCN_RECT_HEIGHT_SHIFT))
 
+#define DRM_GCN_BLIT_SRC_X_SHIFT	0
+#define DRM_GCN_BLIT_SRC_Y_SHIFT	10
+#define DRM_GCN_BLIT_DST_X_SHIFT	20
+#define DRM_GCN_BLIT_DST_Y_SHIFT	30
+#define DRM_GCN_BLIT_WIDTH_SHIFT	40
+#define DRM_GCN_BLIT_HEIGHT_SHIFT	50
+#define DRM_GCN_BLIT_FIELD_MASK		0x3ffULL
+#define DRM_GCN_BLIT_RESERVED_MASK	(0xfULL << 60)
+
+/* Width and height must be in the inclusive range 1..1024. */
+#define DRM_GCN_BLIT_RECT_DATA(src_x, src_y, dst_x, dst_y, width, height) \
+	(((__u64)(src_x) & DRM_GCN_BLIT_FIELD_MASK) | \
+	 (((__u64)(src_y) & DRM_GCN_BLIT_FIELD_MASK) << \
+	  DRM_GCN_BLIT_SRC_Y_SHIFT) | \
+	 (((__u64)(dst_x) & DRM_GCN_BLIT_FIELD_MASK) << \
+	  DRM_GCN_BLIT_DST_X_SHIFT) | \
+	 (((__u64)(dst_y) & DRM_GCN_BLIT_FIELD_MASK) << \
+	  DRM_GCN_BLIT_DST_Y_SHIFT) | \
+	 (((__u64)((width) - 1) & DRM_GCN_BLIT_FIELD_MASK) << \
+	  DRM_GCN_BLIT_WIDTH_SHIFT) | \
+	 (((__u64)((height) - 1) & DRM_GCN_BLIT_FIELD_MASK) << \
+	  DRM_GCN_BLIT_HEIGHT_SHIFT))
+
 /*
  * Submit one validated operation between driver-owned MEM1 GEM objects.
  * No command bytes, register values, or physical addresses are accepted.
@@ -133,7 +158,7 @@ struct drm_gcn_submit {
 	__u32 out_syncobj;
 	/* Must be zero. */
 	__u32 flags;
-	/* Operation-specific data; see DRM_GCN_RECT_DATA for rectangle fill. */
+	/* Operation-specific data; see the rectangle packing macros above. */
 	union {
 		__u64 data;
 		/* Legacy name retained for source compatibility. */

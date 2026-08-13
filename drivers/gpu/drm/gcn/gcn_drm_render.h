@@ -20,6 +20,53 @@ struct gcn_drm_render_rect {
 	u16 color;
 };
 
+struct gcn_drm_render_blit_rect {
+	u16 src_x;
+	u16 src_y;
+	u16 dst_x;
+	u16 dst_y;
+	u16 width;
+	u16 height;
+};
+
+static inline void
+gcn_drm_render_decode_blit_rect(u64 data,
+				struct gcn_drm_render_blit_rect *rect)
+{
+	rect->src_x = data & DRM_GCN_BLIT_FIELD_MASK;
+	rect->src_y = (data >> DRM_GCN_BLIT_SRC_Y_SHIFT) &
+		      DRM_GCN_BLIT_FIELD_MASK;
+	rect->dst_x = (data >> DRM_GCN_BLIT_DST_X_SHIFT) &
+		      DRM_GCN_BLIT_FIELD_MASK;
+	rect->dst_y = (data >> DRM_GCN_BLIT_DST_Y_SHIFT) &
+		      DRM_GCN_BLIT_FIELD_MASK;
+	rect->width = ((data >> DRM_GCN_BLIT_WIDTH_SHIFT) &
+		       DRM_GCN_BLIT_FIELD_MASK) + 1;
+	rect->height = ((data >> DRM_GCN_BLIT_HEIGHT_SHIFT) &
+			DRM_GCN_BLIT_FIELD_MASK) + 1;
+}
+
+static inline int
+gcn_drm_render_validate_blit_rect(u64 data, u16 src_width, u16 src_height,
+				  u16 dst_width, u16 dst_height)
+{
+	struct gcn_drm_render_blit_rect rect;
+
+	if (data & DRM_GCN_BLIT_RESERVED_MASK)
+		return -EINVAL;
+
+	gcn_drm_render_decode_blit_rect(data, &rect);
+	if (rect.src_x >= src_width || rect.src_y >= src_height ||
+	    rect.width > src_width - rect.src_x ||
+	    rect.height > src_height - rect.src_y ||
+	    rect.dst_x >= dst_width || rect.dst_y >= dst_height ||
+	    rect.width > dst_width - rect.dst_x ||
+	    rect.height > dst_height - rect.dst_y)
+		return -EINVAL;
+
+	return 0;
+}
+
 static inline void gcn_drm_render_decode_rect(u64 data,
 					      struct gcn_drm_render_rect *rect)
 {
@@ -109,6 +156,12 @@ gcn_drm_render_validate_submit(const struct drm_gcn_submit *args)
 	case DRM_GCN_RENDER_OP_FILL_RECT_RGB565:
 		if (args->src_handle ||
 		    args->data & DRM_GCN_RECT_RESERVED_MASK)
+			return -EINVAL;
+		return 0;
+	case DRM_GCN_RENDER_OP_BLIT_RECT_RGB565:
+		if (!args->src_handle ||
+		    args->src_handle == args->dst_handle ||
+		    args->data & DRM_GCN_BLIT_RESERVED_MASK)
 			return -EINVAL;
 		return 0;
 	default:

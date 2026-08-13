@@ -97,6 +97,44 @@ static void gcn_drm_render_validates_rect_fill_submit(struct kunit *test)
 	KUNIT_EXPECT_EQ(test, gcn_drm_render_validate_submit(&args), -EINVAL);
 }
 
+static void gcn_drm_render_validates_rect_blit_submit(struct kunit *test)
+{
+	struct gcn_drm_render_blit_rect rect;
+	int ret;
+	struct drm_gcn_submit args = {
+		.ctx_id = 1,
+		.op = DRM_GCN_RENDER_OP_BLIT_RECT_RGB565,
+		.src_handle = 1,
+		.dst_handle = 2,
+		.data = DRM_GCN_BLIT_RECT_DATA(101, 29, 11, 97, 67, 53),
+	};
+
+	KUNIT_EXPECT_EQ(test, gcn_drm_render_validate_submit(&args), 0);
+	ret = gcn_drm_render_validate_blit_rect(args.data, 256, 256, 256, 256);
+	KUNIT_EXPECT_EQ(test, ret, 0);
+	gcn_drm_render_decode_blit_rect(args.data, &rect);
+	KUNIT_EXPECT_EQ(test, rect.src_x, (u16)101);
+	KUNIT_EXPECT_EQ(test, rect.src_y, (u16)29);
+	KUNIT_EXPECT_EQ(test, rect.dst_x, (u16)11);
+	KUNIT_EXPECT_EQ(test, rect.dst_y, (u16)97);
+	KUNIT_EXPECT_EQ(test, rect.width, (u16)67);
+	KUNIT_EXPECT_EQ(test, rect.height, (u16)53);
+
+	args.data |= 1ULL << 63;
+	KUNIT_EXPECT_EQ(test, gcn_drm_render_validate_submit(&args), -EINVAL);
+	args.data = DRM_GCN_BLIT_RECT_DATA(255, 255, 0, 0, 2, 1);
+	ret = gcn_drm_render_validate_blit_rect(args.data, 256, 256, 256, 256);
+	KUNIT_EXPECT_EQ(test, ret, -EINVAL);
+	args.data = DRM_GCN_BLIT_RECT_DATA(0, 0, 255, 255, 1, 2);
+	ret = gcn_drm_render_validate_blit_rect(args.data, 256, 256, 256, 256);
+	KUNIT_EXPECT_EQ(test, ret, -EINVAL);
+	args.data = DRM_GCN_BLIT_RECT_DATA(255, 255, 255, 255, 1, 1);
+	ret = gcn_drm_render_validate_blit_rect(args.data, 256, 256, 256, 256);
+	KUNIT_EXPECT_EQ(test, ret, 0);
+	args.dst_handle = args.src_handle;
+	KUNIT_EXPECT_EQ(test, gcn_drm_render_validate_submit(&args), -EINVAL);
+}
+
 static void gcn_drm_render_accepts_tiled_rgb565(struct kunit *test)
 {
 	struct drm_gcn_gem_create args = {
@@ -168,6 +206,7 @@ static struct kunit_case gcn_drm_render_test_cases[] = {
 	KUNIT_CASE(gcn_drm_render_validates_copy_submit),
 	KUNIT_CASE(gcn_drm_render_validates_fill_submit),
 	KUNIT_CASE(gcn_drm_render_validates_rect_fill_submit),
+	KUNIT_CASE(gcn_drm_render_validates_rect_blit_submit),
 	{}
 };
 

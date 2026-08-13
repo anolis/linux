@@ -486,27 +486,29 @@ static void gx_load_identity_pos_mtx0(void)
 	wg_f32_bits(F32_ZERO); wg_f32_bits(F32_ZERO);
 }
 
-static void gx_load_pos_to_tex_mtx0(u16 width, u16 height)
+static void gx_load_pos_to_tex_mtx0_offset(u16 width, u16 height,
+					   int x_offset, int y_offset)
 {
-	u16 magnitude = abs(gx_texel_bias_eighths);
+	int s_numerator = x_offset * 8 + gx_texel_bias_eighths;
+	int t_numerator = y_offset * 8 + gx_texel_bias_eighths;
 	u32 s_scale, t_scale, s_bias, t_bias;
 
 	if (gx_use_texel_space) {
 		s_scale = F32_ONE;
 		t_scale = F32_ONE;
-		s_bias = f32_div_u16(magnitude, 8);
-		t_bias = s_bias;
+		s_bias = f32_div_u16(abs(s_numerator), 8);
+		t_bias = f32_div_u16(abs(t_numerator), 8);
 	} else {
 		s_scale = f32_div_u16(1, width);
 		t_scale = f32_div_u16(1, height);
-		s_bias = f32_div_u16(magnitude, width * 8);
-		t_bias = f32_div_u16(magnitude, height * 8);
+		s_bias = f32_div_u16(abs(s_numerator), width * 8);
+		t_bias = f32_div_u16(abs(t_numerator), height * 8);
 	}
 
-	if (gx_texel_bias_eighths < 0) {
+	if (s_numerator < 0)
 		s_bias = F32_NEG(s_bias);
+	if (t_numerator < 0)
 		t_bias = F32_NEG(t_bias);
-	}
 
 	/*
 	 * TEXMTX0 for GX_TG_POS maps object-space quad positions to either
@@ -530,6 +532,11 @@ static void gx_load_pos_to_tex_mtx0(u16 width, u16 height)
 	 */
 	gx_load_cp_reg(0x30, 30 << 6);
 	gx_load_xf_reg(0x1018, 30 << 6);
+}
+
+static void gx_load_pos_to_tex_mtx0(u16 width, u16 height)
+{
+	gx_load_pos_to_tex_mtx0_offset(width, height, 0, 0);
 }
 
 static u32 gx_direct_texcoord_bits(u16 extent, u16 multiple)
@@ -2700,7 +2707,8 @@ static int gcn_gx_drm_mem1_info(struct gcn_drm_mem1_info *info)
 	info->layouts = DRM_GCN_LAYOUT_TILED_4X4;
 	info->features = DRM_GCN_FEATURE_SUBMIT_RGB565 |
 			 DRM_GCN_FEATURE_FILL_RGB565 |
-			 DRM_GCN_FEATURE_FILL_RECT_RGB565;
+			 DRM_GCN_FEATURE_FILL_RECT_RGB565 |
+			 DRM_GCN_FEATURE_BLIT_RECT_RGB565;
 	mutex_unlock(&gx_mem1_lock);
 	return 0;
 }
@@ -2982,6 +2990,85 @@ out_unlock:
 	return ret;
 }
 
+static int gcn_gx_drm_blit_rect_rgb565(void *src_allocation,
+				       void *dst_allocation, u16 width,
+				       u16 height, u16 src_x, u16 src_y,
+				       u16 dst_x, u16 dst_y, u16 rect_width,
+				       u16 rect_height)
+{
+	struct gx_mem1_allocation *src = src_allocation;
+	struct gx_mem1_allocation *dst = dst_allocation;
+	u32 finish_count;
+	size_t bytes;
+	long completed;
+	int ret;
+	int i;
+
+	if (!src || !dst || src == dst || !width || !height ||
+	    (width & 3) || (height & 3) || !rect_width || !rect_height ||
+	    src_x >= width || src_y >= height || dst_x >= width ||
+	    dst_y >= height || rect_width > width - src_x ||
+	    rect_height > height - src_y || rect_width > width - dst_x ||
+	    rect_height > height - dst_y)
+		return -EINVAL;
+	bytes = (size_t)width * height * sizeof(u16);
+	if (bytes > src->size || bytes > dst->size)
+		return -E2BIG;
+	if (!READ_ONCE(gx_accel_ready))
+		return -ENODEV;
+
+	mutex_lock(&gx_submit_lock);
+	flush_dcache_range((unsigned long)src->cpu_addr,
+			   (unsigned long)src->cpu_addr + bytes);
+	flush_dcache_range((unsigned long)dst->cpu_addr,
+			   (unsigned long)dst->cpu_addr + bytes);
+
+	finish_count = READ_ONCE(gx_pe_finish_count);
+	fifo_pos = 0;
+	gx_load_libogc_init_preamble();
+	gx_setup_display_copy_state();
+
+	/* Restore the complete destination before overlaying the source region. */
+	gx_setup_rgb565_texture_state(width, height);
+	gx_setup_texture_rgb565(dst->cpu_addr, width, height);
+	gx_draw_color_quad(width, height, 0xff, 0xff, 0xff);
+	gx_load_bp_reg(0x45000002);
+	for (i = 0; i < 32; i++)
+		gx_wr8(0);
+
+	/* Translate screen positions into source coordinates under dst scissor. */
+	gx_setup_rgb565_texture_state(width, height);
+	gx_load_pos_to_tex_mtx0_offset(width, height, src_x - dst_x,
+				       src_y - dst_y);
+	gx_setup_texture_rgb565(src->cpu_addr, width, height);
+	gx_set_scissor(dst_x, dst_y, rect_width, rect_height);
+	gx_draw_color_quad(width, height, 0xff, 0xff, 0xff);
+	gx_load_bp_reg(0x45000002);
+	for (i = 0; i < 32; i++)
+		gx_wr8(0);
+
+	gx_set_copy_clear_rgb(0x00, 0x00, 0x00);
+	gx_copy_efb_to_rgb565_texture(dst->cpu_addr, width, height, true);
+	ret = gx_submit_cmds("render-blit-rect");
+	if (ret)
+		goto out_unlock;
+
+	/* The unique final token orders after copyback; finish IRQs may coalesce. */
+	completed = gx_wait_for_pe_finishes(finish_count, 1);
+	if (!completed) {
+		pr_warn_ratelimited("gcn-gx: rectangle blit timed out waiting for final PE finish\n");
+		ret = -ETIMEDOUT;
+		goto out_unlock;
+	}
+
+	invalidate_dcache_range((unsigned long)dst->cpu_addr,
+				(unsigned long)dst->cpu_addr + bytes);
+
+out_unlock:
+	mutex_unlock(&gx_submit_lock);
+	return ret;
+}
+
 static const struct gcn_drm_accel_ops gcn_gx_drm_accel_ops = {
 	.name = "gcn-gx",
 	.owner = THIS_MODULE,
@@ -2994,6 +3081,7 @@ static const struct gcn_drm_accel_ops gcn_gx_drm_accel_ops = {
 	.submit_rgb565 = gcn_gx_drm_submit_rgb565,
 	.fill_rgb565 = gcn_gx_drm_fill_rgb565,
 	.fill_rect_rgb565 = gcn_gx_drm_fill_rect_rgb565,
+	.blit_rect_rgb565 = gcn_gx_drm_blit_rect_rgb565,
 };
 #endif
 
