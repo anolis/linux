@@ -20,6 +20,9 @@ static void gcn_drm_render_uapi_layout(struct kunit *test)
 	KUNIT_EXPECT_EQ(test,
 			DRM_GCN_FEATURE_BLIT_RECT_RGB565_UNEQUAL_DIMS,
 			1ULL << 8);
+	KUNIT_EXPECT_EQ(test,
+			DRM_GCN_FEATURE_BLIT_RECT_RGB565_SAME_OBJECT,
+			1ULL << 9);
 }
 
 static void gcn_drm_render_validates_copy_submit(struct kunit *test)
@@ -143,8 +146,9 @@ static void gcn_drm_render_validates_rect_blit_submit(struct kunit *test)
 	args.data = DRM_GCN_BLIT_RECT_DATA(319, 191, 255, 255, 2, 1);
 	ret = gcn_drm_render_validate_blit_rect(args.data, 320, 192, 256, 256);
 	KUNIT_EXPECT_EQ(test, ret, -EINVAL);
+	args.data = DRM_GCN_BLIT_RECT_DATA(17, 31, 43, 31, 113, 79);
 	args.dst_handle = args.src_handle;
-	KUNIT_EXPECT_EQ(test, gcn_drm_render_validate_submit(&args), -EINVAL);
+	KUNIT_EXPECT_EQ(test, gcn_drm_render_validate_submit(&args), 0);
 }
 
 static void gcn_drm_render_accepts_tiled_rgb565(struct kunit *test)

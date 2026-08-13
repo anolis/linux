@@ -9488,3 +9488,42 @@ XRGB8888 flips. The final 39-line log is preserved at
 `d13e070affe1df8307efdb0ea5c231146288c0e226c20f25956c55589e1d4b25`;
 its exact GX/DRM timeout, stall, failure, oops, panic, and machine-check audit
 is empty. The unequal-dimension rectangle-blit stage is fully accepted.
+
+### Stage same-object RGB565 rectangle blit
+
+- Test branch: `test/wii-gx-same-object-blit`
+
+Extend only `DRM_GCN_RENDER_OP_BLIT_RECT_RGB565` to permit equal source and
+destination GEM handles. Advertise this independently through
+`DRM_GCN_FEATURE_BLIT_RECT_RGB565_SAME_OBJECT`. Preserve the version-1
+32-byte submit ABI, packed rectangle fields, tiled RGB565 layout, unscaled and
+unrotated semantics, and all distinct-object behavior. Full-surface copy
+continues to reject aliased handles.
+
+Same-object blits have snapshot/memmove semantics: every destination pixel is
+sampled from the source surface as it existed before the operation, regardless
+of overlap direction. The established GX sequence already provides this
+ordering. It restores the complete MEM1 object into EFB, samples the still
+unchanged MEM1 object through the bounded source texture draw, and copies the
+completed EFB back to MEM1 only after rasterization. The DRM path must lock the
+aliased GEM reservation object once, reserve one fence slot, and publish only
+a write fence for the operation. It must not prepare the same reservation
+twice or attach redundant read and write fences to one object.
+
+The unchanged client must retain every prior control and exhaustive oracle.
+Add an exact-region no-op, a non-overlapping copy, horizontal overlap in both
+directions, vertical overlap in both directions, and diagonal overlap. Reseed
+the complete 256 by 256 object before every case with a unique 16-bit value for
+each coordinate, then verify all 65536 tiled pixels against a pre-operation
+snapshot oracle. This detects directional propagation, stale cache lines,
+incorrect source coordinates, and damage outside the destination rectangle.
+KUnit must independently retain full-copy alias rejection while accepting a
+structurally valid same-object bounded blit.
+
+Hardware acceptance requires checksum-pinned artifacts, the advertised
+capability, provider absence, two complete client passes across module reload,
+full MEM1 capacity recovery, normal RGB565/XRGB8888 scanout, the accepted
+offscreen XFB hash, unchanged OF/FDT ownership, final CPU fallback, and an
+empty exact fault audit. Reject any overlap-direction dependency, changed
+source or outside pixel, deadlock, duplicate-reservation failure, timeout,
+capacity leak, ownership change, oops, panic, or machine check.
