@@ -500,6 +500,22 @@ static void test_submit(int fd, int other_fd)
 		{ "odd-ratio scale", 59, 61, 73, 67, 7, 9, 119, 101, false },
 		{ "one-pixel replication", 211, 199, 1, 1, 31, 37, 89, 79, false },
 		{ "same-object overlapping scale", 17, 31, 73, 67, 43, 47, 113, 101, true },
+		{ "small prime upscale", 13, 17, 3, 5, 31, 29, 7, 11, false },
+		{ "prime upscale", 19, 23, 7, 11, 41, 43, 19, 23, false },
+		{ "prime downscale", 17, 19, 127, 113, 131, 137, 101, 89, false },
+		{ "prime enlargement", 23, 29, 101, 89, 109, 103, 127, 113, false },
+		{ "opposed prime down-up", 31, 37, 127, 61, 17, 19, 89, 131, false },
+		{ "opposed prime up-down", 37, 31, 61, 127, 19, 17, 131, 89, false },
+		{ "near-identity reduction", 29, 31, 127, 131, 83, 79, 126, 130, false },
+		{ "near-identity enlargement", 31, 29, 126, 130, 79, 83, 127, 131, false },
+		{ "full-width reduction", 0, 47, 256, 73, 0, 101, 255, 73, false },
+		{ "full-width enlargement", 0, 43, 255, 79, 0, 97, 256, 79, false },
+		{ "horizontal one-pixel replication", 173, 71, 1, 83, 0, 151, 256, 83, false },
+		{ "vertical one-pixel replication", 67, 211, 97, 1, 151, 0, 97, 256, false },
+		{ "extreme horizontal reduction", 0, 53, 255, 71, 101, 113, 2, 71, false },
+		{ "extreme vertical reduction", 59, 0, 73, 255, 109, 101, 73, 2, false },
+		{ "same-object near-identity overlap", 17, 19, 127, 113, 31, 37, 126, 112, true },
+		{ "same-object opposed scale", 43, 47, 61, 127, 17, 23, 131, 89, true },
 	};
 	struct drm_syncobj_create sync = {};
 	struct drm_syncobj_destroy destroy;

@@ -9812,3 +9812,17 @@ constant: the seven-case suite is too sparse to establish that one raw IEEE
 754 ULP adjustment correctly compensates every ratio and exponent. Broaden
 the deterministic ratio matrix before selecting a default or changing the
 documented nearest-neighbor contract.
+
+An expanded strict matrix then added small and larger prime ratios,
+near-identity scaling in both directions, opposed horizontal/vertical scale
+directions, full-width edge cases, one-axis one-pixel replication, extreme
+reductions, and two more overlapping same-object cases. Static PowerPC client
+SHA-256 `689c4e83b6d7ec47f831d7084e687ced47699b8f2c4fdf59028cc6e7a354f5c3`
+was checksum-verified on the Wii. Each of the three previously passing
+adjustments (`-2784`, `-2800`, and `-2816`) passed the original seven cases and
+the new 3:7 and 7:19 enlargement cases, then failed the new 127:101 reduction
+at destination `(214,137)`: hardware returned `0x137a` where conventional
+pixel-center nearest required `0x1379`. The automated render cycle repeated
+the `-2800` failure and restored the CPU console after unloading the module.
+This rejects the narrow interval as a general fix. The required correction is
+ratio-dependent; do not select a global raw-float ULP default.
