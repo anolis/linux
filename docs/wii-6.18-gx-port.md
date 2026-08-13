@@ -9734,3 +9734,14 @@ incremental rebuild produced the hardware candidate artifacts:
 The module vermagic is `6.18.40-wii+ preempt mod_unload`, matching the running
 Wii kernel. These are the only artifacts eligible for the bounded-crop
 hardware result.
+
+Hardware result for `b95462466`: rejected for completion accounting, not GX
+content. Provider absence passed and every retained operation through all
+same-object rectangle-blit cases passed. The first no-scale scaled case then
+returned `ETIMEDOUT`; dmesg identified only `scaled blit timed out waiting for
+source crop`, followed by a clean provider unregister and CPU-scanout restore.
+The crop submission's unique final PE token had already been observed by
+`gx_submit_cmds()`, but the caller incorrectly required two finish IRQs. PE
+finish status is level-triggered, so the draw and texture-copy finish events
+may coalesce. Require one finish IRQ like the established final-copyback paths;
+the unique token supplies ordering after the crop command.

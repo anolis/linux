@@ -2607,8 +2607,8 @@ static int gx_drm_offscreen_capture(u16 width, u16 height)
 	if (ret)
 		return ret;
 
-	completed = gx_wait_for_pe_finishes(finish_count,
-					    GX_DRM_FRAME_PE_FINISHES);
+	/* The unique submit token orders after the crop; finish IRQs may coalesce. */
+	completed = gx_wait_for_pe_finishes(finish_count, 1);
 	if (!completed) {
 		pr_warn("gcn-gx: offscreen texture copy timed out waiting for final PE finish\n");
 		return -ETIMEDOUT;
