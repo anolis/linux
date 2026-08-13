@@ -238,6 +238,14 @@ remote_status()
 	remote_exec "printf '<6>gx-cycle: %s\\n' '$1' > /dev/kmsg"
 }
 
+remote_notice()
+{
+	remote_exec "
+		printf '<6>gx-cycle: %s\\n' '$1' > /dev/kmsg
+		printf '\\n=== GX CYCLE: %s ===\\n' '$1' > /dev/tty0 2>/dev/null || true
+	"
+}
+
 retrieve_debugfs_frame()
 {
 	local remote_file=$1
@@ -288,9 +296,10 @@ retrieve_debugfs_frame()
 	   $local_sha == "$remote_sha" ]]
 }
 
-remote_status "unloading prior accelerator"
+remote_notice "connected; preparing test cycle"
+remote_notice "unloading prior accelerator"
 remote_exec "if grep -q '^gcn_gx ' /proc/modules; then rmmod gcn_gx; fi"
-remote_exec "printf '\\n=== GX UNLOADED: CPU CONSOLE LIVE ===\\n' > /dev/tty0"
+remote_notice "accelerator unloaded; CPU console live"
 
 if (( unload_only )); then
 	printf 'GX unloaded; CPU console active on %s\n' "$remote"
@@ -312,15 +321,17 @@ if (( reuse_remote )); then
 		exit 1
 	fi
 else
-	remote_status "receiving module $commit $module_sha"
+	remote_notice "downloading module $commit"
 	remote_exec "cat > $remote_module.new" < "$module"
 	remote_sha=$(remote_exec "sha256sum $remote_module.new | cut -d' ' -f1")
 	if [[ $remote_sha != "$module_sha" ]]; then
+		remote_notice "module checksum failed"
 		remote_exec "rm -f $remote_module.new"
 		echo "Remote module checksum mismatch: local=$module_sha remote=$remote_sha" >&2
 		exit 1
 	fi
 	remote_exec "mv -f $remote_module.new $remote_module"
+	remote_notice "module download verified"
 fi
 
 module_args="renderer=$renderer texture_source=$texture_source"
@@ -330,12 +341,12 @@ module_args+=" direct_primitive=$direct_primitive direct_pattern=$direct_pattern
 module_args+=" texcoord_space=$texcoord_space"
 module_args+=" texel_bias_eighths=$texel_bias_eighths hold_frame=$hold_frame"
 module_args+=" debug_capture=$capture_frames"
-remote_status "loading $module_args"
+remote_notice "loading accelerator module"
 remote_exec "grep -q ' /sys/kernel/debug ' /proc/mounts || mount -t debugfs debugfs /sys/kernel/debug"
 remote_exec "insmod $remote_module $module_args"
 console_status="GX LOADED: $renderer source=$texture_source"
 console_status+=" bias8=$texel_bias_eighths"
-remote_exec "printf '\\n=== $console_status ===\\n' > /dev/tty0"
+remote_notice "$console_status"
 
 printf '\nGX live cycle complete\n'
 printf '  commit:    %s\n' "$commit"
@@ -354,12 +365,15 @@ remote_exec "grep '^gcn_gx ' /proc/modules; dmesg | grep -E 'gcn-gx:|gcnfb:' | t
 
 capture=/tmp/wii-gx-${commit}-${renderer}-${texture_source}-s${probe_seed}-t${texcoord_source}-m${texcoord_mapping}-p${direct_primitive}-d${direct_pattern}-c${texcoord_space}-b${texel_bias_eighths}-h${hold_frame}.yuyv
 if (( ! capture_frames )); then
+	remote_notice "cycle complete; capture skipped"
 	printf '  debugfs capture skipped\n'
 	printf '\a'
 	exit 0
 fi
+remote_notice "waiting for debug capture"
 capture_ready=$(remote_exec "i=0; while [ \$i -lt 5 ] && [ \"\$(cat /sys/kernel/debug/gcn_gx/xfb_width 2>/dev/null || echo 0)\" -eq 0 ]; do sleep 1; i=\$((i + 1)); done; cat /sys/kernel/debug/gcn_gx/xfb_width 2>/dev/null || echo 0")
 if [[ $capture_ready == 640 ]]; then
+	remote_notice "downloading debug capture"
 	printf '  retrieving compressed, checksum-verified XFB\n'
 	capture_ok=0
 	if retrieve_debugfs_frame /sys/kernel/debug/gcn_gx/xfb_yuyv "$capture"; then
@@ -396,4 +410,5 @@ if [[ $capture_ready == 640 ]]; then
 else
 	printf '  XFB capture unavailable (remote width %s, expected 640)\n' "$capture_ready"
 fi
+remote_notice "cycle complete"
 printf '\a'
