@@ -251,10 +251,10 @@ module_param_named(texel_bias_eighths, gx_texel_bias_eighths, int, 0444);
 MODULE_PARM_DESC(texel_bias_eighths,
 		 "Texture-coordinate translation in eighths of a texel");
 
-static int gx_scaled_bias_eighths;
-module_param_named(scaled_bias_eighths, gx_scaled_bias_eighths, int, 0444);
-MODULE_PARM_DESC(scaled_bias_eighths,
-		 "Scaled-blit translation in eighths of a source texel");
+static int gx_scaled_bias_256ths;
+module_param_named(scaled_bias_256ths, gx_scaled_bias_256ths, int, 0444);
+MODULE_PARM_DESC(scaled_bias_256ths,
+		 "Scaled-blit translation in 1/256ths of a source texel");
 
 static char *gx_texcoord_space = "normalized";
 module_param_named(texcoord_space, gx_texcoord_space, charp, 0444);
@@ -565,13 +565,13 @@ static void gx_load_pos_to_tex_mtx0_scaled(u16 texture_width,
 					   const struct gx_scaled_rect *rect)
 {
 	s64 s_numerator = ((s64)rect->src_x * rect->dst_width -
-			   (s64)rect->dst_x * rect->src_width) * 8 +
-			  (s64)gx_scaled_bias_eighths * rect->dst_width;
+			   (s64)rect->dst_x * rect->src_width) * 256 +
+			  (s64)gx_scaled_bias_256ths * rect->dst_width;
 	s64 t_numerator = ((s64)rect->src_y * rect->dst_height -
-			   (s64)rect->dst_y * rect->src_height) * 8 +
-			  (s64)gx_scaled_bias_eighths * rect->dst_height;
-	u32 s_denominator = (u32)rect->dst_width * 8;
-	u32 t_denominator = (u32)rect->dst_height * 8;
+			   (s64)rect->dst_y * rect->src_height) * 256 +
+			  (s64)gx_scaled_bias_256ths * rect->dst_height;
+	u32 s_denominator = (u32)rect->dst_width * 256;
+	u32 t_denominator = (u32)rect->dst_height * 256;
 	u32 s_scale = f32_div_u32(rect->src_width, rect->dst_width);
 	u32 t_scale = f32_div_u32(rect->src_height, rect->dst_height);
 	u32 s_bias = f32_div_u32(abs(s_numerator), s_denominator);
@@ -582,8 +582,8 @@ static void gx_load_pos_to_tex_mtx0_scaled(u16 texture_width,
 		t_denominator = (u32)rect->dst_height * texture_height;
 		s_scale = f32_div_u32(rect->src_width, s_denominator);
 		t_scale = f32_div_u32(rect->src_height, t_denominator);
-		s_denominator *= 8;
-		t_denominator *= 8;
+		s_denominator *= 256;
+		t_denominator *= 256;
 		s_bias = f32_div_u32(abs(s_numerator), s_denominator);
 		t_bias = f32_div_u32(abs(t_numerator), t_denominator);
 	}

@@ -9784,3 +9784,10 @@ zero-bias fractional failure at mixed-axis destination `(176,17)`, returning
 `0x1846` instead of `0x1845`. Add a scaled-only signed eighth-texel module
 parameter, defaulting to zero, so phase can be swept without changing accepted
 unscaled rendering or rebuilding between hardware trials.
+
+The eighth-texel sweep found no global solution. Biases `-1` and `-2` failed
+the first 2x-downscale pixel, `-3` already failed 2x enlargement, `+1` still
+failed mixed-axis scaling, and `+2` failed 2x enlargement. The required
+fractional correction is therefore smaller than one eighth texel. Replace the
+diagnostic parameter with signed 1/256-texel units and preserve zero as the
+default.
