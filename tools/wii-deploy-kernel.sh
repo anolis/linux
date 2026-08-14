@@ -7,7 +7,7 @@ usage()
 {
 	cat <<'EOF'
 Usage: tools/wii-deploy-kernel.sh [--no-build] [--allow-dirty] [--keep-mounted]
-                                  [--host HOST] [--reboot]
+                                  [--host HOST] [--backup MODE] [--reboot]
 
 Build and deploy the Wii zImage through a local BOOTWII mount or SSH.
 
@@ -17,6 +17,10 @@ Environment overrides:
   WII_ROOT_MOUNT       root mountpoint (default: /media/$USER/WII-LINUX-NGX)
   WII_KERNEL_DEST      deployed image path (default: $mount/gumboot/zImage.ngx)
   WII_DEPLOY_ARCHIVE   host backup directory (default: /tmp/wii-kernel-deploy-backups)
+  WII_DEPLOY_BACKUP_MODE
+                       backup mode: remote, host, or none (default: remote)
+  WII_DEPLOY_CHUNK_BYTES
+                       repair chunk size (default: 524288)
   WII_SSH_HOST         Wii hostname/address, equivalent to --host
   WII_SSH_KEY          SSH private key (default: $HOME/.ssh/id_rsa)
 EOF
@@ -27,6 +31,7 @@ allow_dirty=0
 keep_mounted=0
 ssh_host=${WII_SSH_HOST:-}
 remote_reboot=0
+backup_mode=${WII_DEPLOY_BACKUP_MODE:-remote}
 while (($#)); do
 	case "$1" in
 	--no-build)
@@ -46,6 +51,14 @@ while (($#)); do
 		ssh_host=$2
 		shift
 		;;
+	--backup)
+		if (($# < 2)); then
+			echo "--backup requires remote, host, or none" >&2
+			exit 2
+		fi
+		backup_mode=$2
+		shift
+		;;
 	--reboot)
 		remote_reboot=1
 		;;
@@ -61,6 +74,15 @@ while (($#)); do
 	esac
 	shift
 done
+
+case $backup_mode in
+remote|host|none)
+	;;
+*)
+	echo "Invalid backup mode: $backup_mode" >&2
+	exit 2
+	;;
+esac
 
 repo=$(git rev-parse --show-toplevel)
 cd "$repo"
@@ -159,7 +181,11 @@ if [[ -n $ssh_host ]]; then
 	}
 	trap cleanup_remote EXIT
 
-	chunk_bytes=32768
+	chunk_bytes=${WII_DEPLOY_CHUNK_BYTES:-524288}
+	if [[ ! $chunk_bytes =~ ^[1-9][0-9]*$ ]]; then
+		echo "Invalid repair chunk size: $chunk_bytes" >&2
+		exit 2
+	fi
 	remote_upload()
 	{
 		local source=$1
@@ -184,14 +210,14 @@ if [[ -n $ssh_host ]]; then
 			if ((index % 16 == 0)); then
 				printf '  upload:   checked %d/%d chunks\r' "$index" "$chunks"
 			fi
-			local_chunk_hash=$(dd if="$source" bs=$chunk_bytes skip="$index" \
+			local_chunk_hash=$(dd if="$source" bs="$chunk_bytes" skip="$index" \
 				count=1 2>/dev/null | sha256sum | awk '{print $1}')
 			remote_chunk_hash=$(remote_exec \
 				"dd if=$target bs=$chunk_bytes skip=$index count=1 2>/dev/null | sha256sum | cut -d' ' -f1" || true)
 			if [[ $remote_chunk_hash != "$local_chunk_hash" ]]; then
 				upload_command="dd of=$target bs=$chunk_bytes"
 				upload_command+=" seek=$index conv=notrunc 2>/dev/null"
-				dd if="$source" bs=$chunk_bytes skip="$index" count=1 2>/dev/null |
+				dd if="$source" bs="$chunk_bytes" skip="$index" count=1 2>/dev/null |
 					remote_exec "$upload_command"
 			fi
 		done
@@ -231,7 +257,7 @@ if [[ -n $ssh_host ]]; then
 			if ((index % 16 == 0)); then
 				printf '  download: checked %d/%d chunks\r' "$index" "$chunks"
 			fi
-			local_chunk_hash=$(dd if="$target" bs=$chunk_bytes skip="$index" \
+			local_chunk_hash=$(dd if="$target" bs="$chunk_bytes" skip="$index" \
 				count=1 2>/dev/null | sha256sum | awk '{print $1}')
 			remote_chunk_hash=$(remote_exec \
 				"dd if=$source bs=$chunk_bytes skip=$index count=1 2>/dev/null | sha256sum | cut -d' ' -f1")
@@ -239,7 +265,7 @@ if [[ -n $ssh_host ]]; then
 				download_command="dd if=$source bs=$chunk_bytes"
 				download_command+=" skip=$index count=1 2>/dev/null"
 				remote_exec "$download_command" > "$chunk_file"
-				dd if="$chunk_file" of="$target" bs=$chunk_bytes seek="$index" \
+				dd if="$chunk_file" of="$target" bs="$chunk_bytes" seek="$index" \
 					conv=notrunc 2>/dev/null
 			fi
 		done
@@ -275,17 +301,35 @@ if [[ -n $ssh_host ]]; then
 	remote_staged=$remote_destination.new
 	if remote_exec "test -f $remote_destination"; then
 		previous_sha=$(remote_exec "sha256sum $remote_destination | cut -d' ' -f1")
-		previous=$archive/zImage.ngx.$previous_sha
-		if [[ ! -f $previous ]]; then
-			previous_tmp=$previous.new
-			remote_download "$remote_destination" "$previous_tmp"
-			if [[ $(sha256sum "$previous_tmp" | awk '{print $1}') != "$previous_sha" ]]; then
-				rm -f "$previous_tmp"
-				echo "Remote kernel backup checksum mismatch" >&2
+		case $backup_mode in
+		host)
+			previous=$archive/zImage.ngx.$previous_sha
+			if [[ ! -f $previous ]]; then
+				previous_tmp=$previous.new
+				remote_download "$remote_destination" "$previous_tmp"
+				if [[ $(sha256sum "$previous_tmp" | awk '{print $1}') != "$previous_sha" ]]; then
+					rm -f "$previous_tmp"
+					echo "Remote kernel backup checksum mismatch" >&2
+					exit 1
+				fi
+				mv "$previous_tmp" "$previous"
+			fi
+			;;
+		remote)
+			remote_backup=$remote_destination.backup.$previous_sha
+			if ! remote_exec "test -f $remote_backup"; then
+				remote_exec "cp $remote_destination $remote_backup; sync $remote_backup"
+			fi
+			backup_sha=$(remote_exec "sha256sum $remote_backup | cut -d' ' -f1")
+			if [[ $backup_sha != "$previous_sha" ]]; then
+				echo "On-card kernel backup checksum mismatch" >&2
 				exit 1
 			fi
-			mv "$previous_tmp" "$previous"
-		fi
+			printf '  backup:   on-card checksum verified\n'
+			;;
+		none)
+			;;
+		esac
 	fi
 
 	remote_status "receiving zImage $source_sha"
@@ -335,11 +379,18 @@ fi
 
 mkdir -p "$(dirname "$destination")"
 
-if [[ -f $destination ]]; then
+if [[ -f $destination && $backup_mode == host ]]; then
 	previous_sha=$(sha256sum "$destination" | awk '{print $1}')
 	previous=$archive/zImage.ngx.$previous_sha
 	if [[ ! -f $previous ]]; then
 		cp "$destination" "$previous"
+	fi
+elif [[ -f $destination && $backup_mode == remote ]]; then
+	previous_sha=$(sha256sum "$destination" | awk '{print $1}')
+	previous=$destination.backup.$previous_sha
+	if [[ ! -f $previous ]]; then
+		cp "$destination" "$previous"
+		sync "$previous"
 	fi
 fi
 
