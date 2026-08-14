@@ -10068,8 +10068,20 @@ The checksum-pinned candidate artifacts are:
 - static PowerPC `wii-gcn-render-test` SHA-256:
   `547c214093f5079b662516f30afc9dc8b82bccfd5819913c3868fef8b7322740`
 
-Host validation so far passes `git diff --check`, strict patch-scoped
-checkpatch with zero diagnostics, warning-clean native and static PowerPC
-clients, focused PowerPC `W=1` compilation of both changed DRM objects and the
-GX module, a complete PowerPC modules build, and a linked `zImage`. UML KUnit
-and hardware validation remain pending for this candidate.
+Host validation passes `git diff --check`, strict patch-scoped checkpatch with
+zero diagnostics, warning-clean native and static PowerPC clients, focused
+PowerPC `W=1` compilation of both changed DRM objects and the GX module, a
+complete PowerPC modules build, and a linked `zImage`. A clean detached UML
+build with `CONFIG_KUNIT_UML_PCI=y` passed all 9 `gcn_drm_render` tests and all
+3 `gcn_gx_mem1` tests.
+
+Hardware result: accepted. The checksum-verified kernel booted as
+`6.18.40-wii+` with boot ID `ed719297-4114-4e6c-9c19-1a67ecf4afd6`.
+The exact module and static client passed twice across clean GX unload and
+reload. Every retained allocator, copy, fill, rectangle, unequal-dimension,
+same-object, and 25-case scaled control remained byte-exact. The new system
+320 by 240 to 640 by 480 operation matched all 307200 destination pixels on
+both runs. MEM1 free space remained exactly 524288 bytes while both system
+objects existed and after they were closed. Both runs ended with
+`PASS: GCN render UAPI`, unloaded GX, and restored the CPU console without a
+timeout, stall, oops, panic, or machine check.
