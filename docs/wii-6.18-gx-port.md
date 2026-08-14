@@ -10139,14 +10139,13 @@ of both changed DRM objects and `gcn-gx.ko`, a complete `make -j16 modules
 zImage`, and a clean UML KUnit run. KUnit passed all 10 `gcn_drm_render` tests
 and all 3 `gcn_gx_mem1` tests.
 
-Hardware acceptance remains pending. Deploy the exact kernel, then run the
-strict render cycle with both checksum-pinned clients. Require every retained
-test plus both 307200-pixel tiled and linear full-screen oracles to pass with
-MEM1 remaining at 524288 free bytes. The presentation phase must show the
-expected red, green, blue, and white quadrants with black grid lines and the
-magenta/gold center checkerboard, then restore a clear live console. Require a
-clean module unload and no GX/DRM timeout, FIFO stall, oops, panic, or machine
-check.
+Hardware acceptance required the exact kernel and checksum-pinned clients.
+Every retained test plus both 307200-pixel tiled and linear full-screen oracles
+had to pass with MEM1 remaining at 524288 free bytes. The presentation phase
+had to show the expected red, green, blue, and white quadrants with black grid
+lines and the magenta/gold center checkerboard, then restore a clear live
+console. A clean module unload and no GX/DRM timeout, FIFO stall, oops, panic,
+or machine check were also required.
 
 The first hardware attempt used static client checksums `333905a8adee...` and
 `446bccdd03ea...`. Those artifacts were invalid: they had been compiled with
@@ -10162,8 +10161,7 @@ same kernel and module. This rules out a kernel or GX regression.
 `tools/wii-gcn-build-clients.sh` now installs a sanitized PowerPC UAPI header
 tree with `ARCH=powerpc headers_install` and builds both static clients only
 against that tree. The corrected checksums above encode PowerPC write-only
-ioctls and supersede the two invalid client checksums. Hardware validation of
-the corrected strict and KMS clients remains pending.
+ioctls and supersede the two invalid client checksums.
 
 The corrected strict client passed on hardware. Every retained operation
 remained byte-exact, and both tiled and linear system-memory 320 by 240 to 640
@@ -10173,5 +10171,22 @@ pixels, then failed before presentation with `GETRESOURCES` returning
 `EFAULT`. Its second resource query retained nonzero framebuffer and encoder
 counts from the sizing query without supplying arrays for those unneeded IDs.
 Set both unrequested counts to zero while requesting only the allocated CRTC
-and connector arrays. KMS presentation and console restoration remain pending
-for a rebuilt client checksum.
+and connector arrays.
+
+Hardware result: accepted. Kernel image `beebf5f730aa...` booted as
+`6.18.40-wii+` with boot ID `c1b2c510-591b-4cc9-bafc-be03866e0265`.
+The exact module `740a5092395e...`, corrected strict client `e93c2f853790...`,
+and fixed KMS client `697c7c53f03b...` completed in one clean transaction.
+Every retained allocator, copy, fill, rectangle, alias, and scaled operation
+remained byte-exact. Both tiled and linear 320 by 240 to 640 by 480 oracles
+matched all 307200 destination pixels, and MEM1 remained exactly 524288 bytes
+free after each test.
+
+The KMS client independently matched all 307200 linear pixels, attached the
+render destination as a framebuffer, displayed it for eight seconds, restored
+the previous console CRTC, and exited successfully. Visual inspection reported
+red top-left, green top-right, blue bottom-left, white bottom-right, and the
+magenta/gold center checkerboard. The cycle then unloaded GX and restored the
+CPU console. The post-test kernel log contained no GX/DRM timeout, FIFO stall,
+oops, panic, or machine check. This accepts linear system render objects as KMS
+framebuffers and closes this test branch.
