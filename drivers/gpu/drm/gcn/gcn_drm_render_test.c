@@ -208,7 +208,11 @@ static void gcn_drm_render_accepts_tiled_rgb565(struct kunit *test)
 
 	KUNIT_EXPECT_EQ(test, gcn_drm_render_bo_size(&args, &size), 0);
 	KUNIT_EXPECT_EQ(test, size, 614400ULL);
+	args.flags = DRM_GCN_GEM_CREATE_SYSTEM;
+	KUNIT_EXPECT_EQ(test, gcn_drm_render_bo_size(&args, &size), 0);
+	KUNIT_EXPECT_EQ(test, size, 614400ULL);
 
+	args.flags = 0;
 	args.width = 64;
 	args.height = 64;
 	KUNIT_EXPECT_EQ(test, gcn_drm_render_bo_size(&args, &size), 0);
@@ -225,7 +229,7 @@ static void gcn_drm_render_rejects_invalid_objects(struct kunit *test)
 	};
 	u64 size;
 
-	args.flags = 1;
+	args.flags = 2;
 	KUNIT_EXPECT_EQ(test, gcn_drm_render_bo_size(&args, &size), -EINVAL);
 	args.flags = 0;
 	args.width = 639;

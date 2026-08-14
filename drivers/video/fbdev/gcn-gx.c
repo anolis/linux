@@ -742,6 +742,31 @@ static void gx_tile_rgb565(const u16 *src, u16 *dst, u32 width, u32 height,
 	}
 }
 
+static size_t gx_tiled_rgb565_index(u16 x, u16 y, u16 width)
+{
+	return ((size_t)(y >> 2) * (width >> 2) + (x >> 2)) * 16 +
+	       (y & 3) * 4 + (x & 3);
+}
+
+static void gx_copy_tiled_rgb565_rect(const u16 *src, u16 src_width,
+				      u16 src_x, u16 src_y, u16 *dst,
+				      u16 dst_width, u16 dst_height,
+				      u16 rect_width, u16 rect_height)
+{
+	u16 x;
+	u16 y;
+
+	memset(dst, 0, (size_t)dst_width * dst_height * sizeof(*dst));
+	for (y = 0; y < rect_height; y++) {
+		for (x = 0; x < rect_width; x++) {
+			dst[gx_tiled_rgb565_index(x, y, dst_width)] =
+				src[gx_tiled_rgb565_index(src_x + x,
+							  src_y + y,
+							  src_width)];
+		}
+	}
+}
+
 static u16 gx_reference_rgb565_pixel(u32 x, u32 y, u32 width, u32 height)
 {
 	u16 color;
@@ -2870,7 +2895,9 @@ static int gcn_gx_drm_mem1_info(struct gcn_drm_mem1_info *info)
 			 DRM_GCN_FEATURE_BLIT_RECT_RGB565 |
 			 DRM_GCN_FEATURE_BLIT_RECT_RGB565_UNEQUAL_DIMS |
 			 DRM_GCN_FEATURE_BLIT_RECT_RGB565_SAME_OBJECT |
-			 DRM_GCN_FEATURE_BLIT_SCALED_RGB565;
+			 DRM_GCN_FEATURE_BLIT_SCALED_RGB565 |
+			 DRM_GCN_FEATURE_SYSTEM_GEM |
+			 DRM_GCN_FEATURE_BLIT_SCALED_SYSTEM_RGB565;
 	mutex_unlock(&gx_mem1_lock);
 	return 0;
 }
@@ -3237,17 +3264,16 @@ out_unlock:
 	return ret;
 }
 
-static int gcn_gx_drm_blit_scaled_rgb565(void *src_allocation,
-					 void *dst_allocation, u16 src_width,
-					 u16 src_height, u16 dst_width,
-					 u16 dst_height, u16 src_x, u16 src_y,
-					 u16 src_rect_width,
-					 u16 src_rect_height, u16 dst_x,
-					 u16 dst_y, u16 dst_rect_width,
-					 u16 dst_rect_height)
+static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
+					      void *dst_addr, u16 src_width,
+					      u16 src_height, u16 dst_width,
+					      u16 dst_height, u16 src_x,
+					      u16 src_y, u16 src_rect_width,
+					      u16 src_rect_height, u16 dst_x,
+					      u16 dst_y, u16 dst_rect_width,
+					      u16 dst_rect_height,
+					      bool system_memory)
 {
-	struct gx_mem1_allocation *src = src_allocation;
-	struct gx_mem1_allocation *dst = dst_allocation;
 	void *crop = gx_tex_buf_alt;
 	void *horizontal = gx_tex_buf;
 	u32 finish_count;
@@ -3264,15 +3290,7 @@ static int gcn_gx_drm_blit_scaled_rgb565(void *src_allocation,
 	int ret;
 	int i;
 
-	if (src_rect_width == dst_rect_width &&
-	    src_rect_height == dst_rect_height)
-		return gcn_gx_drm_blit_rect_rgb565(src_allocation,
-				dst_allocation, src_width, src_height,
-				dst_width, dst_height, src_x, src_y,
-				dst_x, dst_y, src_rect_width,
-				src_rect_height);
-
-	if (!src || !dst || !src_width || !src_height || !dst_width ||
+	if (!src_addr || !dst_addr || !src_width || !src_height || !dst_width ||
 	    !dst_height || (src_width & 3) || (src_height & 3) ||
 	    (dst_width & 3) || (dst_height & 3) || !src_rect_width ||
 	    !src_rect_height || !dst_rect_width || !dst_rect_height ||
@@ -3284,8 +3302,6 @@ static int gcn_gx_drm_blit_scaled_rgb565(void *src_allocation,
 		return -EINVAL;
 	src_bytes = (size_t)src_width * src_height * sizeof(u16);
 	dst_bytes = (size_t)dst_width * dst_height * sizeof(u16);
-	if (src_bytes > src->size || dst_bytes > dst->size)
-		return -E2BIG;
 	if (!READ_ONCE(gx_accel_ready))
 		return -ENODEV;
 	if (src_rect_width > 640 || dst_rect_width > 640 ||
@@ -3304,15 +3320,18 @@ static int gcn_gx_drm_blit_scaled_rgb565(void *src_allocation,
 			   sizeof(u16);
 	if (crop_width > 1024 || horizontal_width > 1024 ||
 	    crop_height > 528 || crop_bytes > GX_TEX_BUF_SLOT_SIZE ||
-	    horizontal_bytes > GX_TEX_BUF_SLOT_SIZE)
+	    horizontal_bytes > GX_TEX_BUF_SLOT_SIZE ||
+	    (system_memory && dst_bytes > GX_TEX_BUF_SLOT_SIZE))
 		return -E2BIG;
 
 	mutex_lock(&gx_submit_lock);
-	if (src != dst)
-		flush_dcache_range((unsigned long)src->cpu_addr,
-				   (unsigned long)src->cpu_addr + src_bytes);
-	flush_dcache_range((unsigned long)dst->cpu_addr,
-			   (unsigned long)dst->cpu_addr + dst_bytes);
+	if (!system_memory) {
+		if (src_addr != dst_addr)
+			flush_dcache_range((unsigned long)src_addr,
+					   (unsigned long)src_addr + src_bytes);
+		flush_dcache_range((unsigned long)dst_addr,
+				   (unsigned long)dst_addr + dst_bytes);
+	}
 	flush_dcache_range((unsigned long)crop,
 			   (unsigned long)crop + crop_bytes);
 	flush_dcache_range((unsigned long)horizontal,
@@ -3324,24 +3343,34 @@ static int gcn_gx_drm_blit_scaled_rgb565(void *src_allocation,
 	 * isolating the rectangle prevents nearest sampling from escaping its
 	 * edges and preserves same-object overlap semantics.
 	 */
-	fifo_pos = 0;
-	gx_load_libogc_init_preamble();
-	gx_setup_display_copy_state();
-	gx_setup_rgb565_texture_state(src_width, src_height);
-	gx_load_pos_to_tex_mtx0_offset(src_width, src_height, src_x, src_y);
-	gx_setup_texture_rgb565(src->cpu_addr, src_width, src_height);
-	gx_set_scissor(0, 0, src_rect_width, src_rect_height);
-	gx_draw_color_quad(src_width, src_height, 0xff, 0xff, 0xff);
-	gx_load_bp_reg(0x45000002);
-	for (i = 0; i < 32; i++)
-		gx_wr8(0);
-	gx_set_copy_clear_rgb(0x00, 0x00, 0x00);
-	gx_copy_efb_rect_to_rgb565_texture_stride(crop, 0, 0,
-						  crop_copy_width, crop_height,
-						  crop_width, true);
-	ret = gx_submit_cmds("render-blit-scaled-crop");
-	if (ret)
-		goto out_unlock;
+	if (system_memory) {
+		gx_copy_tiled_rgb565_rect(src_addr, src_width, src_x, src_y,
+					  crop, crop_width, crop_height,
+					  src_rect_width, src_rect_height);
+		flush_dcache_range((unsigned long)crop,
+				   (unsigned long)crop + crop_bytes);
+	} else {
+		fifo_pos = 0;
+		gx_load_libogc_init_preamble();
+		gx_setup_display_copy_state();
+		gx_setup_rgb565_texture_state(src_width, src_height);
+		gx_load_pos_to_tex_mtx0_offset(src_width, src_height,
+					       src_x, src_y);
+		gx_setup_texture_rgb565((void *)src_addr, src_width, src_height);
+		gx_set_scissor(0, 0, src_rect_width, src_rect_height);
+		gx_draw_color_quad(src_width, src_height, 0xff, 0xff, 0xff);
+		gx_load_bp_reg(0x45000002);
+		for (i = 0; i < 32; i++)
+			gx_wr8(0);
+		gx_set_copy_clear_rgb(0x00, 0x00, 0x00);
+		gx_copy_efb_rect_to_rgb565_texture_stride(crop, 0, 0,
+							  crop_copy_width,
+							  crop_height,
+							  crop_width, true);
+		ret = gx_submit_cmds("render-blit-scaled-crop");
+		if (ret)
+			goto out_unlock;
+	}
 
 	/* Expand or reduce source columns exactly into a private intermediate. */
 	fifo_pos = 0;
@@ -3368,13 +3397,21 @@ static int gcn_gx_drm_blit_scaled_rgb565(void *src_allocation,
 	if (ret)
 		goto out_unlock;
 
+	/* The crop workspace is free once the horizontal snapshot is complete. */
+	if (system_memory) {
+		memcpy(crop, dst_addr, dst_bytes);
+		flush_dcache_range((unsigned long)crop,
+				   (unsigned long)crop + dst_bytes);
+	}
+
 	/* gx_submit_cmds() observed the token ordered after the intermediate. */
 	finish_count = READ_ONCE(gx_pe_finish_count);
 	fifo_pos = 0;
 	gx_load_libogc_init_preamble();
 	gx_setup_display_copy_state();
 	gx_setup_rgb565_texture_state(dst_width, dst_height);
-	gx_setup_texture_rgb565(dst->cpu_addr, dst_width, dst_height);
+	gx_setup_texture_rgb565(system_memory ? crop : dst_addr,
+				dst_width, dst_height);
 	gx_draw_color_quad(dst_width, dst_height, 0xff, 0xff, 0xff);
 	gx_load_bp_reg(0x45000002);
 	for (i = 0; i < 32; i++)
@@ -3394,7 +3431,8 @@ static int gcn_gx_drm_blit_scaled_rgb565(void *src_allocation,
 		gx_wr8(0);
 
 	gx_set_copy_clear_rgb(0x00, 0x00, 0x00);
-	gx_copy_efb_to_rgb565_texture(dst->cpu_addr, dst_width, dst_height, true);
+	gx_copy_efb_to_rgb565_texture(system_memory ? crop : dst_addr,
+				      dst_width, dst_height, true);
 	ret = gx_submit_cmds("render-blit-scaled");
 	if (ret)
 		goto out_unlock;
@@ -3406,12 +3444,70 @@ static int gcn_gx_drm_blit_scaled_rgb565(void *src_allocation,
 		goto out_unlock;
 	}
 
-	invalidate_dcache_range((unsigned long)dst->cpu_addr,
-				(unsigned long)dst->cpu_addr + dst_bytes);
+	if (system_memory) {
+		invalidate_dcache_range((unsigned long)crop,
+					(unsigned long)crop + dst_bytes);
+		memcpy(dst_addr, crop, dst_bytes);
+	} else {
+		invalidate_dcache_range((unsigned long)dst_addr,
+					(unsigned long)dst_addr + dst_bytes);
+	}
 
 out_unlock:
 	mutex_unlock(&gx_submit_lock);
 	return ret;
+}
+
+static int gcn_gx_drm_blit_scaled_rgb565(void *src_allocation,
+					 void *dst_allocation, u16 src_width,
+					 u16 src_height, u16 dst_width,
+					 u16 dst_height, u16 src_x, u16 src_y,
+					 u16 src_rect_width,
+					 u16 src_rect_height, u16 dst_x,
+					 u16 dst_y, u16 dst_rect_width,
+					 u16 dst_rect_height)
+{
+	struct gx_mem1_allocation *src = src_allocation;
+	struct gx_mem1_allocation *dst = dst_allocation;
+	size_t dst_bytes;
+	size_t src_bytes;
+
+	if (!src || !dst)
+		return -EINVAL;
+	if (src_rect_width == dst_rect_width &&
+	    src_rect_height == dst_rect_height)
+		return gcn_gx_drm_blit_rect_rgb565(src_allocation,
+				dst_allocation, src_width, src_height,
+				dst_width, dst_height, src_x, src_y,
+				dst_x, dst_y, src_rect_width,
+				src_rect_height);
+
+	src_bytes = (size_t)src_width * src_height * sizeof(u16);
+	dst_bytes = (size_t)dst_width * dst_height * sizeof(u16);
+	if (src_bytes > src->size || dst_bytes > dst->size)
+		return -E2BIG;
+
+	return gcn_gx_drm_blit_scaled_rgb565_core(src->cpu_addr,
+			dst->cpu_addr, src_width, src_height, dst_width,
+			dst_height, src_x, src_y, src_rect_width,
+			src_rect_height, dst_x, dst_y, dst_rect_width,
+			dst_rect_height, false);
+}
+
+static int gcn_gx_drm_blit_scaled_system_rgb565(const void *src, void *dst,
+						u16 src_width, u16 src_height,
+						u16 dst_width, u16 dst_height,
+						u16 src_x, u16 src_y,
+						u16 src_rect_width,
+						u16 src_rect_height,
+						u16 dst_x, u16 dst_y,
+						u16 dst_rect_width,
+						u16 dst_rect_height)
+{
+	return gcn_gx_drm_blit_scaled_rgb565_core(src, dst, src_width,
+			src_height, dst_width, dst_height, src_x, src_y,
+			src_rect_width, src_rect_height, dst_x, dst_y,
+			dst_rect_width, dst_rect_height, true);
 }
 
 static const struct gcn_drm_accel_ops gcn_gx_drm_accel_ops = {
@@ -3428,6 +3524,7 @@ static const struct gcn_drm_accel_ops gcn_gx_drm_accel_ops = {
 	.fill_rect_rgb565 = gcn_gx_drm_fill_rect_rgb565,
 	.blit_rect_rgb565 = gcn_gx_drm_blit_rect_rgb565,
 	.blit_scaled_rgb565 = gcn_gx_drm_blit_scaled_rgb565,
+	.blit_scaled_system_rgb565 = gcn_gx_drm_blit_scaled_system_rgb565,
 };
 #endif
 

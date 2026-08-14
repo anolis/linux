@@ -10021,3 +10021,55 @@ the new 640 by 240 to 320 by 120 reduction matched all 38400 pixels. Both runs
 ended with `PASS: GCN render UAPI` before restoring the CPU console. This
 accepts padded 1024-texel private source strides for the complete 640-pixel EFB
 width.
+
+### Stage full-screen scaling through system-memory GEM objects
+
+- Test branch: `test/wii-gx-staged-scaled-blit`
+
+The safe MEM1 render pool is 512 KiB, while a tiled 640 by 480 RGB565
+destination alone occupies 614400 bytes. Do not enlarge the render pool or
+reclaim the live FDT window. Add an opt-in `DRM_GCN_GEM_CREATE_SYSTEM` object
+type backed by the DRM shmem helpers instead. Existing zero-flag object
+creation remains physically contiguous MEM1 with unchanged behavior. Two
+feature bits separately advertise system objects and staged scaled RGB565.
+
+The DRM driver owns an extended shmem object containing the render dimensions,
+format, layout, and an explicit render-object marker. KMS dumb buffers use the
+same normal shmem lifecycle but lack that marker and remain invalid render-UAPI
+operands. The scaled ioctl accepts either two established MEM1 objects or two
+marked system objects, rejects mixed storage, locks both reservations, and
+vmaps system pages only while invoking the provider. System objects retain the
+same read/write fence and optional syncobj semantics as MEM1 objects.
+
+The GX provider stages system objects through its two existing 768 KiB private
+workspaces without adding or moving reserved memory. It CPU-copies the tiled
+source rectangle into the padded crop workspace, performs the accepted exact
+horizontal scale into the second workspace, and then reuses the first
+workspace for the complete original destination. After the accepted vertical
+pass, GX copies EFB back into that first workspace and the CPU returns the
+tiled result to shmem. The horizontal snapshot completes before destination
+staging overwrites the crop workspace, preserving same-object semantics. Cache
+maintenance remains confined to the GX-visible workspaces.
+
+The strict positive control creates a 320 by 240 source and 640 by 480
+destination in system memory, verifies that both allocations consume zero
+bytes from the MEM1 render pool, scales the complete source to the complete
+destination, and checks all 307200 destination pixels against the conventional
+center-nearest oracle. It then closes both objects and verifies unchanged MEM1
+capacity. Every accepted MEM1 allocator, fill, blit, alias, and scaled control
+remains in the same client.
+
+The checksum-pinned candidate artifacts are:
+
+- `zImage` / `dtbImage.wii` SHA-256:
+  `3e3a120a42ae0d327ebde7250771c040aff528f0f0083a44fd05efc37bbfb18c`
+- `gcn-gx.ko` SHA-256:
+  `f22bf891d9eeb6ca0b1ce1f0e425ed9f4bc7a58e435be3577df18255ea090a40`
+- static PowerPC `wii-gcn-render-test` SHA-256:
+  `547c214093f5079b662516f30afc9dc8b82bccfd5819913c3868fef8b7322740`
+
+Host validation so far passes `git diff --check`, strict patch-scoped
+checkpatch with zero diagnostics, warning-clean native and static PowerPC
+clients, focused PowerPC `W=1` compilation of both changed DRM objects and the
+GX module, a complete PowerPC modules build, and a linked `zImage`. UML KUnit
+and hardware validation remain pending for this candidate.

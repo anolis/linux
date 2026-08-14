@@ -37,6 +37,8 @@ enum drm_gcn_param {
 #define DRM_GCN_FEATURE_BLIT_RECT_RGB565_UNEQUAL_DIMS	(1ULL << 8)
 #define DRM_GCN_FEATURE_BLIT_RECT_RGB565_SAME_OBJECT	(1ULL << 9)
 #define DRM_GCN_FEATURE_BLIT_SCALED_RGB565	(1ULL << 10)
+#define DRM_GCN_FEATURE_SYSTEM_GEM		(1ULL << 11)
+#define DRM_GCN_FEATURE_BLIT_SCALED_SYSTEM_RGB565	(1ULL << 12)
 
 struct drm_gcn_get_param {
 	__u32 param;
@@ -53,12 +55,14 @@ enum drm_gcn_gem_layout {
 	DRM_GCN_GEM_LAYOUT_TILED_4X4 = 1,
 };
 
+#define DRM_GCN_GEM_CREATE_SYSTEM	(1U << 0)
+
 struct drm_gcn_gem_create {
 	__u32 width;
 	__u32 height;
 	__u32 format;
 	__u32 layout;
-	/* Must be zero. */
+	/* DRM_GCN_GEM_CREATE_* flags. */
 	__u32 flags;
 	/* Must be zero on input; GEM handle on success. */
 	__u32 handle;

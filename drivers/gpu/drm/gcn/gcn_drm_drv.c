@@ -371,6 +371,30 @@ int gcn_drm_provider_blit_scaled(const struct gcn_drm_accel_ops *provider,
 	return ret;
 }
 
+int gcn_drm_provider_blit_scaled_system(const void *src, void *dst,
+					u16 src_width, u16 src_height,
+					u16 dst_width, u16 dst_height,
+					const struct drm_gcn_blit_scaled *args)
+{
+	const struct gcn_drm_accel_ops *provider;
+	int ret = -ENODEV;
+
+	mutex_lock(&gcn_drm_accel_lock);
+	provider = gcn_drm_accel;
+	if (provider && provider->blit_scaled_system_rgb565 &&
+	    try_module_get(provider->owner)) {
+		ret = provider->blit_scaled_system_rgb565(src, dst,
+				src_width, src_height, dst_width, dst_height,
+				args->src_x, args->src_y, args->src_width,
+				args->src_height, args->dst_x, args->dst_y,
+				args->dst_width, args->dst_height);
+		module_put(provider->owner);
+	}
+	mutex_unlock(&gcn_drm_accel_lock);
+
+	return ret;
+}
+
 static int gcn_drm_accel_rgb565(const void *src, u32 src_pitch,
 				u32 xfb_phys, u16 width, u16 height)
 {
@@ -1019,6 +1043,7 @@ static const struct drm_driver gcn_drm_driver = {
 	.prime_handle_to_fd = gcn_drm_prime_handle_to_fd,
 	.prime_fd_to_handle = gcn_drm_prime_fd_to_handle,
 	.fops = &gcn_drm_fops,
+	.gem_create_object = gcn_drm_render_create_object,
 	DRM_GEM_SHMEM_DRIVER_OPS,
 	DRM_FBDEV_SHMEM_DRIVER_OPS,
 	.name = GCN_DRM_NAME,

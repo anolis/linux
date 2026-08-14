@@ -120,7 +120,9 @@ gcn_drm_render_bo_size(const struct drm_gcn_gem_create *args, u64 *size)
 {
 	u64 bytes;
 
-	if (!args || !size || args->flags || !args->width || !args->height ||
+	if (!args || !size ||
+	    (args->flags & ~DRM_GCN_GEM_CREATE_SYSTEM) ||
+	    !args->width || !args->height ||
 	    args->width > GCN_DRM_RENDER_MAX_WIDTH ||
 	    args->height > GCN_DRM_RENDER_MAX_HEIGHT ||
 	    (args->width & 3) || (args->height & 3) ||

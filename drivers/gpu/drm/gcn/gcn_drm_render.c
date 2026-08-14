@@ -2,6 +2,7 @@
 
 #include <linux/dma-resv.h>
 #include <linux/dma-buf.h>
+#include <linux/iosys-map.h>
 #include <linux/ktime.h>
 #include <linux/module.h>
 #include <linux/slab.h>
@@ -12,6 +13,7 @@
 #include <drm/drm_exec.h>
 #include <drm/drm_file.h>
 #include <drm/drm_gem.h>
+#include <drm/drm_gem_shmem_helper.h>
 #include <drm/drm_ioctl.h>
 #include <drm/drm_syncobj.h>
 
@@ -34,9 +36,25 @@ struct gcn_drm_bo {
 	u32 layout;
 };
 
+struct gcn_drm_system_bo {
+	struct drm_gem_shmem_object shmem;
+	u32 width;
+	u32 height;
+	u32 format;
+	u32 layout;
+	bool render_object;
+};
+
 static inline struct gcn_drm_bo *to_gcn_drm_bo(struct drm_gem_object *gem)
 {
 	return container_of(gem, struct gcn_drm_bo, gem);
+}
+
+static inline struct gcn_drm_system_bo *
+to_gcn_drm_system_bo(struct drm_gem_object *gem)
+{
+	return container_of(to_drm_gem_shmem_obj(gem),
+			    struct gcn_drm_system_bo, shmem);
 }
 
 static void gcn_drm_bo_free(struct drm_gem_object *gem)
@@ -77,9 +95,43 @@ static const struct drm_gem_object_funcs gcn_drm_bo_funcs = {
 	.vm_ops = &gcn_drm_bo_vm_ops,
 };
 
+static const struct drm_gem_object_funcs gcn_drm_system_bo_funcs = {
+	.free = drm_gem_shmem_object_free,
+	.print_info = drm_gem_shmem_object_print_info,
+	.pin = drm_gem_shmem_object_pin,
+	.unpin = drm_gem_shmem_object_unpin,
+	.get_sg_table = drm_gem_shmem_object_get_sg_table,
+	.vmap = drm_gem_shmem_object_vmap,
+	.vunmap = drm_gem_shmem_object_vunmap,
+	.mmap = drm_gem_shmem_object_mmap,
+	.vm_ops = &drm_gem_shmem_vm_ops,
+};
+
+struct drm_gem_object *
+gcn_drm_render_create_object(struct drm_device *drm, size_t size)
+{
+	struct gcn_drm_system_bo *bo;
+
+	(void)drm;
+	(void)size;
+
+	bo = kzalloc(sizeof(*bo), GFP_KERNEL);
+	if (!bo)
+		return ERR_PTR(-ENOMEM);
+
+	bo->shmem.base.funcs = &gcn_drm_system_bo_funcs;
+	return &bo->shmem.base;
+}
+
 static bool gcn_drm_is_mem1_bo(const struct drm_gem_object *gem)
 {
 	return gem->funcs == &gcn_drm_bo_funcs;
+}
+
+static bool gcn_drm_is_system_bo(const struct drm_gem_object *gem)
+{
+	return gem->funcs == &gcn_drm_system_bo_funcs &&
+	       to_gcn_drm_system_bo((struct drm_gem_object *)gem)->render_object;
 }
 
 static int gcn_drm_ioctl_get_param(struct drm_device *drm, void *data,
@@ -157,7 +209,10 @@ static int gcn_drm_ioctl_gem_create(struct drm_device *drm, void *data,
 				    struct drm_file *file)
 {
 	struct drm_gcn_gem_create *args = data;
+	struct drm_gem_shmem_object *shmem;
+	struct gcn_drm_system_bo *system_bo;
 	struct gcn_drm_bo *bo;
+	struct gcn_drm_mem1_info info;
 	u64 size;
 	int ret;
 
@@ -166,6 +221,29 @@ static int gcn_drm_ioctl_gem_create(struct drm_device *drm, void *data,
 	ret = gcn_drm_render_bo_size(args, &size);
 	if (ret)
 		return ret;
+
+	if (args->flags & DRM_GCN_GEM_CREATE_SYSTEM) {
+		ret = gcn_drm_provider_info(&info);
+		if (ret)
+			return ret;
+		if (!(info.features & DRM_GCN_FEATURE_SYSTEM_GEM))
+			return -EOPNOTSUPP;
+
+		shmem = drm_gem_shmem_create(drm, size);
+		if (IS_ERR(shmem))
+			return PTR_ERR(shmem);
+		system_bo = container_of(shmem, struct gcn_drm_system_bo, shmem);
+		system_bo->width = args->width;
+		system_bo->height = args->height;
+		system_bo->format = args->format;
+		system_bo->layout = args->layout;
+		system_bo->render_object = true;
+		ret = drm_gem_handle_create(file, &shmem->base, &args->handle);
+		if (!ret)
+			args->size = size;
+		drm_gem_object_put(&shmem->base);
+		return ret;
+	}
 
 	bo = kzalloc(sizeof(*bo), GFP_KERNEL);
 	if (!bo)
@@ -216,7 +294,7 @@ static int gcn_drm_ioctl_gem_mmap(struct drm_device *drm, void *data,
 	gem = drm_gem_object_lookup(file, args->handle);
 	if (!gem)
 		return -ENOENT;
-	if (!gcn_drm_is_mem1_bo(gem)) {
+	if (!gcn_drm_is_mem1_bo(gem) && !gcn_drm_is_system_bo(gem)) {
 		ret = -EINVAL;
 		goto out_put;
 	}
@@ -279,7 +357,7 @@ static int gcn_drm_ioctl_wait(struct drm_device *drm, void *data,
 	gem = drm_gem_object_lookup(file, args->handle);
 	if (!gem)
 		return -ENOENT;
-	if (!gcn_drm_is_mem1_bo(gem)) {
+	if (!gcn_drm_is_mem1_bo(gem) && !gcn_drm_is_system_bo(gem)) {
 		ret = -EINVAL;
 		goto out_put;
 	}
@@ -446,6 +524,49 @@ out_put:
 	return ret;
 }
 
+static int
+gcn_drm_blit_scaled_system_locked(struct drm_gem_object *src_gem,
+				  struct drm_gem_object *dst_gem,
+				  u16 src_width, u16 src_height,
+				  u16 dst_width, u16 dst_height,
+				  const struct drm_gcn_blit_scaled *args)
+{
+	struct gcn_drm_system_bo *src = to_gcn_drm_system_bo(src_gem);
+	struct gcn_drm_system_bo *dst = to_gcn_drm_system_bo(dst_gem);
+	struct iosys_map src_map = IOSYS_MAP_INIT_VADDR(NULL);
+	struct iosys_map dst_map = IOSYS_MAP_INIT_VADDR(NULL);
+	void *dst_addr;
+	int ret;
+
+	ret = drm_gem_shmem_vmap_locked(&src->shmem, &src_map);
+	if (ret)
+		return ret;
+
+	if (src_gem == dst_gem) {
+		dst_addr = src_map.vaddr;
+	} else {
+		ret = drm_gem_shmem_vmap_locked(&dst->shmem, &dst_map);
+		if (ret)
+			goto out_unmap_src;
+		dst_addr = dst_map.vaddr;
+	}
+
+	if (src_map.is_iomem || (src_gem != dst_gem && dst_map.is_iomem)) {
+		ret = -EINVAL;
+		goto out_unmap_dst;
+	}
+	ret = gcn_drm_provider_blit_scaled_system(src_map.vaddr, dst_addr,
+						  src_width, src_height,
+						  dst_width, dst_height, args);
+
+out_unmap_dst:
+	if (src_gem != dst_gem)
+		drm_gem_shmem_vunmap_locked(&dst->shmem, &dst_map);
+out_unmap_src:
+	drm_gem_shmem_vunmap_locked(&src->shmem, &src_map);
+	return ret;
+}
+
 static int gcn_drm_ioctl_blit_scaled(struct drm_device *drm, void *data,
 				     struct drm_file *file)
 {
@@ -455,9 +576,16 @@ static int gcn_drm_ioctl_blit_scaled(struct drm_device *drm, void *data,
 	struct drm_gem_object *dst_gem = NULL;
 	struct drm_syncobj *out_syncobj = NULL;
 	struct dma_fence *fence = NULL;
-	struct gcn_drm_bo *src;
-	struct gcn_drm_bo *dst;
+	struct gcn_drm_system_bo *system_src = NULL;
+	struct gcn_drm_system_bo *system_dst = NULL;
+	struct gcn_drm_bo *mem1_src = NULL;
+	struct gcn_drm_bo *mem1_dst = NULL;
 	struct drm_exec exec;
+	u16 src_width;
+	u16 src_height;
+	u16 dst_width;
+	u16 dst_height;
+	bool system_objects = false;
 	int ret;
 
 	(void)drm;
@@ -481,22 +609,46 @@ static int gcn_drm_ioctl_blit_scaled(struct drm_device *drm, void *data,
 		ret = -ENOENT;
 		goto out_put;
 	}
-	if (!gcn_drm_is_mem1_bo(src_gem) || !gcn_drm_is_mem1_bo(dst_gem)) {
+	if (gcn_drm_is_mem1_bo(src_gem) && gcn_drm_is_mem1_bo(dst_gem)) {
+		mem1_src = to_gcn_drm_bo(src_gem);
+		mem1_dst = to_gcn_drm_bo(dst_gem);
+		if (mem1_src->provider != mem1_dst->provider) {
+			ret = -EINVAL;
+			goto out_put;
+		}
+		src_width = mem1_src->width;
+		src_height = mem1_src->height;
+		dst_width = mem1_dst->width;
+		dst_height = mem1_dst->height;
+		if (mem1_src->format != mem1_dst->format ||
+		    mem1_src->layout != mem1_dst->layout ||
+		    mem1_src->format != DRM_GCN_GEM_FORMAT_RGB565 ||
+		    mem1_src->layout != DRM_GCN_GEM_LAYOUT_TILED_4X4) {
+			ret = -EINVAL;
+			goto out_put;
+		}
+	} else if (gcn_drm_is_system_bo(src_gem) &&
+		   gcn_drm_is_system_bo(dst_gem)) {
+		system_src = to_gcn_drm_system_bo(src_gem);
+		system_dst = to_gcn_drm_system_bo(dst_gem);
+		src_width = system_src->width;
+		src_height = system_src->height;
+		dst_width = system_dst->width;
+		dst_height = system_dst->height;
+		if (system_src->format != system_dst->format ||
+		    system_src->layout != system_dst->layout ||
+		    system_src->format != DRM_GCN_GEM_FORMAT_RGB565 ||
+		    system_src->layout != DRM_GCN_GEM_LAYOUT_TILED_4X4) {
+			ret = -EINVAL;
+			goto out_put;
+		}
+		system_objects = true;
+	} else {
 		ret = -EINVAL;
 		goto out_put;
 	}
-
-	src = to_gcn_drm_bo(src_gem);
-	dst = to_gcn_drm_bo(dst_gem);
-	if (src->provider != dst->provider || src->format != dst->format ||
-	    src->layout != dst->layout ||
-	    src->format != DRM_GCN_GEM_FORMAT_RGB565 ||
-	    src->layout != DRM_GCN_GEM_LAYOUT_TILED_4X4) {
-		ret = -EINVAL;
-		goto out_put;
-	}
-	ret = gcn_drm_render_validate_scaled(args, src->width, src->height,
-					     dst->width, dst->height);
+	ret = gcn_drm_render_validate_scaled(args, src_width, src_height,
+					     dst_width, dst_height);
 	if (ret)
 		goto out_put;
 
@@ -523,10 +675,16 @@ static int gcn_drm_ioctl_blit_scaled(struct drm_device *drm, void *data,
 		goto out_exec;
 	}
 
-	ret = gcn_drm_provider_blit_scaled(src->provider, src->allocation,
-					   dst->allocation, src->width,
-					  src->height, dst->width,
-					  dst->height, args);
+	if (system_objects)
+		ret = gcn_drm_blit_scaled_system_locked(src_gem, dst_gem,
+							src_width, src_height,
+							dst_width, dst_height, args);
+	else
+		ret = gcn_drm_provider_blit_scaled(mem1_src->provider,
+						   mem1_src->allocation,
+						   mem1_dst->allocation,
+						   src_width, src_height,
+						   dst_width, dst_height, args);
 	if (ret)
 		goto out_exec;
 
