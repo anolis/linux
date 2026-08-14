@@ -1762,9 +1762,11 @@ static void gx_copy_efb_to_xfb(u32 xfb_phys, u16 width, u16 height, bool clear)
 	gx_load_bp_reg(0x45000002);
 }
 
-static void gx_copy_efb_rect_to_rgb565_texture(void *dest, u16 left, u16 top,
-					       u16 width, u16 height,
-					       bool clear)
+static void gx_copy_efb_rect_to_rgb565_texture_stride(void *dest, u16 left,
+						      u16 top, u16 width,
+						      u16 height,
+						      u16 dest_width,
+						      bool clear)
 {
 	u32 ctrl;
 
@@ -1782,7 +1784,8 @@ static void gx_copy_efb_rect_to_rgb565_texture(void *dest, u16 left, u16 top,
 		       ((u32)(width - 1) & 0x3ff));
 
 	/* RGB565 uses 4x4 tiles; texture-copy stride is tiles, not bytes. */
-	gx_load_bp_reg((BP_DISP_COPY_DST << 24) | DIV_ROUND_UP(width, 4));
+	gx_load_bp_reg((BP_DISP_COPY_DST << 24) |
+		       DIV_ROUND_UP(dest_width, 4));
 	gx_load_bp_reg((BP_DISP_COPY_ADDR << 24) |
 		       ((virt_to_phys(dest) >> 5) & 0x00ffffff));
 
@@ -1791,6 +1794,14 @@ static void gx_copy_efb_rect_to_rgb565_texture(void *dest, u16 left, u16 top,
 	       (clear ? COPY_CTRL_CLEAR : 0);
 	gx_load_bp_reg(ctrl);
 	gx_load_bp_reg(0x45000002);
+}
+
+static void gx_copy_efb_rect_to_rgb565_texture(void *dest, u16 left, u16 top,
+					       u16 width, u16 height,
+					       bool clear)
+{
+	gx_copy_efb_rect_to_rgb565_texture_stride(dest, left, top, width,
+						  height, width, clear);
 }
 
 static void gx_copy_efb_to_rgb565_texture(void *dest, u16 width, u16 height,
@@ -3241,7 +3252,9 @@ static int gcn_gx_drm_blit_scaled_rgb565(void *src_allocation,
 	void *horizontal = gx_tex_buf;
 	u32 finish_count;
 	u16 crop_height;
+	u16 crop_copy_width;
 	u16 crop_width;
+	u16 horizontal_copy_width;
 	u16 horizontal_width;
 	size_t crop_bytes;
 	size_t dst_bytes;
@@ -3283,10 +3296,13 @@ static int gcn_gx_drm_blit_scaled_rgb565(void *src_allocation,
 	crop_width = gx_power_of_two_extent(src_rect_width);
 	crop_height = gx_power_of_two_extent(src_rect_height);
 	horizontal_width = gx_power_of_two_extent(dst_rect_width);
+	crop_copy_width = crop_width > 640 ? src_rect_width : crop_width;
+	horizontal_copy_width = horizontal_width > 640 ?
+				dst_rect_width : horizontal_width;
 	crop_bytes = (size_t)crop_width * crop_height * sizeof(u16);
 	horizontal_bytes = (size_t)horizontal_width * crop_height *
 			   sizeof(u16);
-	if (crop_width > 640 || horizontal_width > 640 ||
+	if (crop_width > 1024 || horizontal_width > 1024 ||
 	    crop_height > 528 || crop_bytes > GX_TEX_BUF_SLOT_SIZE ||
 	    horizontal_bytes > GX_TEX_BUF_SLOT_SIZE)
 		return -E2BIG;
@@ -3320,9 +3336,9 @@ static int gcn_gx_drm_blit_scaled_rgb565(void *src_allocation,
 	for (i = 0; i < 32; i++)
 		gx_wr8(0);
 	gx_set_copy_clear_rgb(0x00, 0x00, 0x00);
-	gx_copy_efb_rect_to_rgb565_texture(crop, 0, 0,
-					   crop_width, crop_height,
-					   true);
+	gx_copy_efb_rect_to_rgb565_texture_stride(crop, 0, 0,
+						  crop_copy_width, crop_height,
+						  crop_width, true);
 	ret = gx_submit_cmds("render-blit-scaled-crop");
 	if (ret)
 		goto out_unlock;
@@ -3344,8 +3360,10 @@ static int gcn_gx_drm_blit_scaled_rgb565(void *src_allocation,
 	for (i = 0; i < 32; i++)
 		gx_wr8(0);
 	gx_set_copy_clear_rgb(0x00, 0x00, 0x00);
-	gx_copy_efb_to_rgb565_texture(horizontal, horizontal_width,
-				      crop_height, true);
+	gx_copy_efb_rect_to_rgb565_texture_stride(horizontal, 0, 0,
+						  horizontal_copy_width,
+						  crop_height,
+						  horizontal_width, true);
 	ret = gx_submit_cmds("render-blit-scaled-horizontal");
 	if (ret)
 		goto out_unlock;

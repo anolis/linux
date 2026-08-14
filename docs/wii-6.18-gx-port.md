@@ -9928,3 +9928,59 @@ Supporting scaled 513-640-pixel widths or source heights above 512 requires a
 tiled or multi-pass oversized path; silently weakening the power-of-two rule
 would reintroduce the measured row-shift failure. The conventional
 nearest-neighbor scaled RGB565 stage is otherwise accepted.
+
+### Stage 640-wide RGB565 scaled blit
+
+- Test branch: `test/wii-gx-oversized-scaled-blit`
+
+Extend the accepted separable scaler across the EFB's complete 640-pixel
+width without changing the render ABI, nearest-neighbor contract, MEM1
+ownership, or behavior for power-of-two private widths at or below 512. A
+513-640-pixel source or destination requires a 1024-texel private texture to
+retain the exact binary preserved-axis slope. The EFB itself remains only 640
+pixels wide, so the texture-copy command must copy the valid EFB width while
+using the 1024-texel tiled destination stride. Add that stride as an internal
+copy-helper argument; all established callers continue to pass equal copy and
+stride widths.
+
+Do not expand the 512 KiB render pool into the apparent gap below the OHCI
+reservation. The historical typed-submit rejection proved that
+`0x01480000..0x014fffff` contains the live FDT relocated by the MEM2 boot
+wrapper; allocating a render object there corrupted OF properties and broke
+module reload. The accepted ownership remains two 768 KiB internal workspaces
+at `0x01300000` and `0x013c0000`, the independent render pool at
+`0x01600000..0x0167ffff`, FIFO at `0x01684000`, and XFBs from `0x01698000`.
+
+The strict positive control allocates a 320 by 120 source and 640 by 240
+destination after all earlier test objects are released. Together they use
+less than the existing render aperture. It fills every source texel with a
+coordinate-derived value, performs an exact 2x scale on both axes, and checks
+all 153600 destination pixels against the conventional center-nearest oracle.
+This exercises a 1024-texel horizontal intermediate and its padded copy stride
+while retaining the complete prior allocator, fill, blit, alias, and 23-case
+scaled matrix.
+
+The checksum-pinned candidate artifacts are:
+
+- `gcn-gx.ko` SHA-256:
+  `947c7b491abd8e58356652bd4ba2f56766e8fcf6af85e127ed7002c6acb2cd98`
+- static PowerPC `wii-gcn-render-test` SHA-256:
+  `8ba5e3a8c1b08302eb5de5bc34e106e6ddb59e16528affdba9c2cf7a7cbf14a8`
+
+Host validation passed `git diff --check`, strict patch-scoped checkpatch with
+zero errors, warnings, or checks, native and static PowerPC client builds with
+`-Wall -Wextra -Werror`, and a focused PowerPC `W=1` module build.
+
+Hardware result: passed. The exact module and static client completed twice
+across clean unload and reload. Every retained operation and all 23 accepted
+scaled cases remained byte-exact. The new 320 by 120 to 640 by 240 case then
+matched all 153600 destination pixels on both runs, each ending with
+`PASS: GCN render UAPI` before module unload restored the CPU console. This
+accepts padded 1024-texel private strides for 640-wide scaling.
+
+This does not make a 320 by 240 plus 640 by 480 distinct-object operation
+possible: those two RGB565 objects require 768000 bytes before allocator
+alignment, exceeding the safe 512 KiB render pool. Full-screen 2x scaling
+therefore needs a separate render-memory architecture, such as staging
+ordinary DRM buffers through the internal workspaces, and must not reclaim the
+FDT window. Source heights above 512 also still require vertical striping.
