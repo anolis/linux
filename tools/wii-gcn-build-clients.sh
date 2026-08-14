@@ -33,6 +33,10 @@ powerpc-linux-gnu-gcc "${common_flags[@]}" \
 powerpc-linux-gnu-gcc "${common_flags[@]}" \
 	"$repo/tools/wii-gcn-kms-render-test.c" \
 	-o "$output_dir/wii-gcn-kms-render-test"
+powerpc-linux-gnu-gcc "${common_flags[@]}" \
+	"$repo/tools/wii-gcn-kms-flip-test.c" \
+	-o "$output_dir/wii-gcn-kms-flip-test"
 
 sha256sum "$output_dir/wii-gcn-render-test" \
-	"$output_dir/wii-gcn-kms-render-test"
+	"$output_dir/wii-gcn-kms-render-test" \
+	"$output_dir/wii-gcn-kms-flip-test"

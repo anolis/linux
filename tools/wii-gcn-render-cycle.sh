@@ -5,9 +5,8 @@ set -euo pipefail
 
 usage()
 {
+	printf 'Usage: %s [options]\n\n' "${0##*/}"
 	cat <<'EOF'
-Usage: tools/wii-gcn-render-cycle.sh [options]
-
 Upload and run the GCN render-UAPI hardware test over SSH.
 
 Options:
@@ -16,6 +15,8 @@ Options:
   --client FILE        test client (default: /tmp/wii-gcn-render-test)
   --kms-client FILE    optional linear-render/KMS presentation client
   --kms-hold SECONDS   presentation duration (default: 5)
+  --flip-client FILE   optional linear-render/KMS page-flip client
+  --flip-count COUNT   page flips requested from flip client (default: 120)
   --module-args ARGS   arguments passed to insmod
   --reuse-remote       require checksum-matched files already in /tmp
   --keep-loaded        leave gcn_gx loaded after a successful test
@@ -31,6 +32,8 @@ module=
 client=/tmp/wii-gcn-render-test
 kms_client=
 kms_hold=5
+flip_client=
+flip_count=120
 module_args=
 reuse_remote=0
 keep_loaded=0
@@ -56,6 +59,14 @@ while (($#)); do
 		;;
 	--kms-hold)
 		kms_hold=$2
+		shift
+		;;
+	--flip-client)
+		flip_client=$2
+		shift
+		;;
+	--flip-count)
+		flip_count=$2
 		shift
 		;;
 	--module-args)
@@ -93,8 +104,16 @@ if [[ -n $kms_client && ! -f $kms_client ]]; then
 	printf 'KMS client not found: %s\n' "$kms_client" >&2
 	exit 1
 fi
+if [[ -n $flip_client && ! -f $flip_client ]]; then
+	printf 'Page-flip client not found: %s\n' "$flip_client" >&2
+	exit 1
+fi
 if [[ ! $kms_hold =~ ^[0-9]+$ ]]; then
 	printf 'Invalid KMS hold duration: %s\n' "$kms_hold" >&2
+	exit 2
+fi
+if [[ ! $flip_count =~ ^[1-9][0-9]*$ ]] || (( flip_count > 10000 )); then
+	printf 'Invalid page-flip count: %s\n' "$flip_count" >&2
 	exit 2
 fi
 if (( ! allow_dirty )) &&
@@ -203,10 +222,14 @@ remote_exec "rmmod gcn_gx 2>/dev/null || true"
 remote_module=/tmp/gcn-gx.ko
 remote_client=/tmp/wii-gcn-render-test
 remote_kms_client=/tmp/wii-gcn-kms-render-test
+remote_flip_client=/tmp/wii-gcn-kms-flip-test
 upload_verified "$module" "$remote_module" module
 upload_verified "$client" "$remote_client" "test client"
 if [[ -n $kms_client ]]; then
 	upload_verified "$kms_client" "$remote_kms_client" "KMS test client"
+fi
+if [[ -n $flip_client ]]; then
+	upload_verified "$flip_client" "$remote_flip_client" "page-flip test client"
 fi
 
 remote_notice "loading accelerator module"
@@ -233,6 +256,18 @@ if [[ -n $kms_client ]]; then
 		exit "$test_status"
 	fi
 	remote_notice "KMS presentation restored console"
+fi
+if [[ -n $flip_client ]]; then
+	remote_notice "running sustained KMS page-flip test"
+	set +e
+	remote_exec "$remote_flip_client /dev/dri/card0 $flip_count"
+	test_status=$?
+	set -e
+	if (( test_status )); then
+		remote_notice "PAGE-FLIP TEST FAILED status $test_status"
+		exit "$test_status"
+	fi
+	remote_notice "KMS page-flip test restored console"
 fi
 remote_notice "TEST PASSED"
 if (( keep_loaded )); then

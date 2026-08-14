@@ -1,0 +1,496 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/* Render alternating linear GCN objects and page-flip them through KMS. */
+
+#include <errno.h>
+#include <fcntl.h>
+#include <poll.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/ioctl.h>
+#include <sys/mman.h>
+#include <time.h>
+#include <unistd.h>
+
+#include <drm/drm.h>
+#include <drm/drm_mode.h>
+#include <drm/gcn_drm.h>
+
+#define SRC_WIDTH 320U
+#define SRC_HEIGHT 240U
+#define DST_WIDTH 640U
+#define DST_HEIGHT 480U
+#define DEFAULT_FLIPS 120U
+#define MAX_FLIPS 10000U
+#define FLIP_TIMEOUT_MS 2000
+#define TEST_DRM_MODE_CONNECTED 1
+
+struct render_buffer {
+	struct drm_gcn_gem_create bo;
+	struct drm_mode_fb_cmd fb;
+	uint16_t *map;
+};
+
+static int xioctl(int fd, unsigned long request, void *arg)
+{
+	int ret;
+
+	do {
+		ret = ioctl(fd, request, arg);
+	} while (ret < 0 && errno == EINTR);
+	return ret;
+}
+
+static __u64 user_ptr(const void *ptr)
+{
+	return (__u64)(uintptr_t)ptr;
+}
+
+static void *xcalloc(size_t count, size_t size)
+{
+	void *ptr = calloc(count, size);
+
+	if (!ptr && count) {
+		perror("calloc");
+		exit(EXIT_FAILURE);
+	}
+	return ptr;
+}
+
+static uint64_t monotonic_ns(void)
+{
+	struct timespec now;
+
+	if (clock_gettime(CLOCK_MONOTONIC, &now) < 0)
+		return 0;
+	return (uint64_t)now.tv_sec * 1000000000ULL + now.tv_nsec;
+}
+
+static uint16_t pattern(unsigned int x, unsigned int y, unsigned int frame)
+{
+	static const uint16_t colors[] = {
+		0xf800, 0x07e0, 0x001f, 0xffff,
+	};
+	unsigned int marker = frame * 7U % (SRC_WIDTH - 8U);
+	unsigned int quadrant = (y >= SRC_HEIGHT / 2) * 2 +
+				  (x >= SRC_WIDTH / 2);
+	uint16_t pixel = colors[quadrant];
+
+	if (x < 4 || x >= SRC_WIDTH - 4 || y < 4 || y >= SRC_HEIGHT - 4)
+		pixel = 0xffff;
+	else if (!(x % 40) || !(y % 30))
+		pixel = 0;
+	if (x >= 120 && x < 200 && y >= 90 && y < 150)
+		pixel = ((x / 5) ^ (y / 5)) & 1 ? 0xf81f : 0xffe0;
+	if (x >= marker && x < marker + 8 && y >= 16 && y < SRC_HEIGHT - 16)
+		pixel = 0x07ff;
+
+	return pixel;
+}
+
+static unsigned int scaled_source(unsigned int dst, unsigned int src_extent,
+				  unsigned int dst_extent)
+{
+	uint64_t numerator = (uint64_t)(2 * dst + 1) * src_extent;
+	unsigned int source = numerator / (2 * dst_extent);
+
+	return source < src_extent ? source : src_extent - 1;
+}
+
+static int create_linear_bo(int fd, struct drm_gcn_gem_create *bo,
+			    unsigned int width, unsigned int height,
+			    uint16_t **map)
+{
+	struct drm_gcn_gem_mmap mmap_args = {};
+
+	*bo = (struct drm_gcn_gem_create) {
+		.width = width,
+		.height = height,
+		.format = DRM_GCN_GEM_FORMAT_RGB565,
+		.layout = DRM_GCN_GEM_LAYOUT_LINEAR,
+		.flags = DRM_GCN_GEM_CREATE_SYSTEM,
+	};
+	if (xioctl(fd, DRM_IOCTL_GCN_GEM_CREATE, bo) < 0)
+		return -1;
+
+	mmap_args.handle = bo->handle;
+	if (xioctl(fd, DRM_IOCTL_GCN_GEM_MMAP, &mmap_args) < 0)
+		return -1;
+	*map = mmap(NULL, bo->size, PROT_READ | PROT_WRITE, MAP_SHARED, fd,
+		    mmap_args.offset);
+	return *map == MAP_FAILED ? -1 : 0;
+}
+
+static void close_bo(int fd, struct drm_gcn_gem_create *bo, uint16_t *map)
+{
+	struct drm_gem_close close_args = { .handle = bo->handle };
+
+	if (map != MAP_FAILED)
+		munmap(map, bo->size);
+	if (bo->handle)
+		xioctl(fd, DRM_IOCTL_GEM_CLOSE, &close_args);
+}
+
+static int get_resources(int fd, struct drm_mode_card_res *res,
+			 __u32 **crtcs, __u32 **connectors)
+{
+	memset(res, 0, sizeof(*res));
+	if (xioctl(fd, DRM_IOCTL_MODE_GETRESOURCES, res) < 0)
+		return -1;
+	*crtcs = xcalloc(res->count_crtcs, sizeof(**crtcs));
+	*connectors = xcalloc(res->count_connectors, sizeof(**connectors));
+	res->crtc_id_ptr = user_ptr(*crtcs);
+	res->connector_id_ptr = user_ptr(*connectors);
+	res->count_fbs = 0;
+	res->count_encoders = 0;
+	return xioctl(fd, DRM_IOCTL_MODE_GETRESOURCES, res);
+}
+
+static int get_connector(int fd, __u32 id,
+			 struct drm_mode_get_connector *connector,
+			 struct drm_mode_modeinfo **modes)
+{
+	__u32 *encoders;
+	__u32 *props;
+	__u64 *values;
+
+	memset(connector, 0, sizeof(*connector));
+	connector->connector_id = id;
+	if (xioctl(fd, DRM_IOCTL_MODE_GETCONNECTOR, connector) < 0)
+		return -1;
+
+	*modes = xcalloc(connector->count_modes, sizeof(**modes));
+	encoders = xcalloc(connector->count_encoders, sizeof(*encoders));
+	props = xcalloc(connector->count_props, sizeof(*props));
+	values = xcalloc(connector->count_props, sizeof(*values));
+	connector->modes_ptr = user_ptr(*modes);
+	connector->encoders_ptr = user_ptr(encoders);
+	connector->props_ptr = user_ptr(props);
+	connector->prop_values_ptr = user_ptr(values);
+	if (xioctl(fd, DRM_IOCTL_MODE_GETCONNECTOR, connector) < 0) {
+		free(*modes);
+		*modes = NULL;
+		free(encoders);
+		free(props);
+		free(values);
+		return -1;
+	}
+	free(encoders);
+	free(props);
+	free(values);
+	return 0;
+}
+
+static int select_output(int fd, const struct drm_mode_card_res *res,
+			 const __u32 *connector_ids, __u32 *connector_id,
+			 struct drm_mode_modeinfo *mode)
+{
+	unsigned int i;
+
+	for (i = 0; i < res->count_connectors; i++) {
+		struct drm_mode_get_connector connector;
+		struct drm_mode_modeinfo *modes = NULL;
+		unsigned int j;
+
+		if (get_connector(fd, connector_ids[i], &connector, &modes) < 0)
+			continue;
+		if (connector.connection != TEST_DRM_MODE_CONNECTED) {
+			free(modes);
+			continue;
+		}
+		for (j = 0; j < connector.count_modes; j++) {
+			if (modes[j].hdisplay == DST_WIDTH &&
+			    modes[j].vdisplay == DST_HEIGHT)
+				break;
+		}
+		if (j < connector.count_modes) {
+			*connector_id = connector.connector_id;
+			*mode = modes[j];
+			free(modes);
+			return 0;
+		}
+		free(modes);
+	}
+	errno = ENODEV;
+	return -1;
+}
+
+static int add_framebuffer(int fd, struct render_buffer *buffer)
+{
+	buffer->fb = (struct drm_mode_fb_cmd) {
+		.width = DST_WIDTH,
+		.height = DST_HEIGHT,
+		.pitch = DST_WIDTH * sizeof(uint16_t),
+		.bpp = 16,
+		.depth = 16,
+		.handle = buffer->bo.handle,
+	};
+	return xioctl(fd, DRM_IOCTL_MODE_ADDFB, &buffer->fb);
+}
+
+static int render_frame(int fd, __u32 ctx_id,
+			struct drm_gcn_gem_create *src, uint16_t *src_map,
+			struct render_buffer *dst, unsigned int frame)
+{
+	struct drm_gcn_blit_scaled blit = {
+		.ctx_id = ctx_id,
+		.src_handle = src->handle,
+		.dst_handle = dst->bo.handle,
+		.src_width = SRC_WIDTH,
+		.src_height = SRC_HEIGHT,
+		.dst_width = DST_WIDTH,
+		.dst_height = DST_HEIGHT,
+	};
+	struct drm_gcn_wait wait = {
+		.handle = dst->bo.handle,
+		.flags = DRM_GCN_WAIT_WRITE,
+	};
+	unsigned int x;
+	unsigned int y;
+
+	for (y = 0; y < SRC_HEIGHT; y++)
+		for (x = 0; x < SRC_WIDTH; x++)
+			src_map[(size_t)y * SRC_WIDTH + x] = pattern(x, y, frame);
+	memset(dst->map, 0x5a, DST_WIDTH * DST_HEIGHT * sizeof(*dst->map));
+	if (xioctl(fd, DRM_IOCTL_GCN_BLIT_SCALED, &blit) < 0)
+		return -1;
+	wait.timeout_ns = monotonic_ns() + 1000000000ULL;
+	if (xioctl(fd, DRM_IOCTL_GCN_WAIT, &wait) < 0)
+		return -1;
+
+	for (y = 0; y < DST_HEIGHT; y++) {
+		for (x = 0; x < DST_WIDTH; x++) {
+			unsigned int sx = scaled_source(x, SRC_WIDTH, DST_WIDTH);
+			unsigned int sy = scaled_source(y, SRC_HEIGHT, DST_HEIGHT);
+			uint16_t expected = pattern(sx, sy, frame);
+			uint16_t actual = dst->map[(size_t)y * DST_WIDTH + x];
+
+			if (actual != expected) {
+				fprintf(stderr,
+					"frame %u mismatch at (%u,%u): got=%04x expected=%04x\n",
+					frame, x, y, actual, expected);
+				errno = EIO;
+				return -1;
+			}
+		}
+	}
+	return 0;
+}
+
+static int wait_flip_event(int fd, __u64 expected, __u32 *sequence)
+{
+	unsigned char data[256];
+	struct pollfd poll_fd = { .fd = fd, .events = POLLIN };
+	ssize_t length;
+	size_t offset;
+	int ret;
+
+	do {
+		ret = poll(&poll_fd, 1, FLIP_TIMEOUT_MS);
+	} while (ret < 0 && errno == EINTR);
+	if (ret <= 0) {
+		if (!ret)
+			errno = ETIMEDOUT;
+		return -1;
+	}
+	length = read(fd, data, sizeof(data));
+	if (length < 0)
+		return -1;
+
+	for (offset = 0; offset + sizeof(struct drm_event) <= (size_t)length;) {
+		const struct drm_event *event = (const void *)(data + offset);
+		const struct drm_event_vblank *vblank;
+
+		if (event->length < sizeof(*event) ||
+		    offset + event->length > (size_t)length) {
+			errno = EPROTO;
+			return -1;
+		}
+		if (event->type == DRM_EVENT_FLIP_COMPLETE) {
+			if (event->length < sizeof(*vblank)) {
+				errno = EPROTO;
+				return -1;
+			}
+			vblank = (const void *)event;
+			if (vblank->user_data != expected) {
+				errno = EPROTO;
+				return -1;
+			}
+			*sequence = vblank->sequence;
+			return 0;
+		}
+		offset += event->length;
+	}
+	errno = EPROTO;
+	return -1;
+}
+
+static unsigned int parse_flips(const char *value)
+{
+	char *end;
+	unsigned long parsed;
+
+	errno = 0;
+	parsed = strtoul(value, &end, 10);
+	if (errno || !*value || *end || !parsed || parsed > MAX_FLIPS) {
+		fprintf(stderr, "invalid flip count: %s\n", value);
+		exit(EXIT_FAILURE);
+	}
+	return parsed;
+}
+
+int main(int argc, char **argv)
+{
+	const char *card = argc > 1 ? argv[1] : "/dev/dri/card0";
+	unsigned int flip_count = argc > 2 ? parse_flips(argv[2]) : DEFAULT_FLIPS;
+	struct drm_gcn_gem_create src = {};
+	struct render_buffer buffers[2] = {
+		{ .map = MAP_FAILED },
+		{ .map = MAP_FAILED },
+	};
+	struct drm_gcn_ctx_create ctx = {};
+	struct drm_gcn_ctx_free free_ctx = {};
+	struct drm_mode_card_res resources;
+	struct drm_mode_modeinfo mode;
+	struct drm_mode_crtc old_crtc = {};
+	struct drm_mode_crtc set_crtc = {};
+	__u32 *connector_ids = NULL;
+	__u32 *crtc_ids = NULL;
+	__u32 connector_id = 0;
+	__u32 last_sequence = 0;
+	uint16_t *src_map = MAP_FAILED;
+	unsigned int completed = 0;
+	unsigned int created = 0;
+	int displayed = 0;
+	int fd = -1;
+	int ret = EXIT_FAILURE;
+
+	fd = open(card, O_RDWR | O_CLOEXEC);
+	if (fd < 0) {
+		perror(card);
+		goto out;
+	}
+	if (xioctl(fd, DRM_IOCTL_SET_MASTER, NULL) < 0 && errno != EINVAL) {
+		perror("DRM_IOCTL_SET_MASTER");
+		goto out;
+	}
+	if (create_linear_bo(fd, &src, SRC_WIDTH, SRC_HEIGHT, &src_map) < 0) {
+		perror("create linear source");
+		goto out;
+	}
+	for (created = 0; created < 2; created++) {
+		if (create_linear_bo(fd, &buffers[created].bo, DST_WIDTH,
+				     DST_HEIGHT, &buffers[created].map) < 0 ||
+		    add_framebuffer(fd, &buffers[created]) < 0) {
+			perror("create linear scanout buffer");
+			created++;
+			goto out;
+		}
+	}
+	if (xioctl(fd, DRM_IOCTL_GCN_CTX_CREATE, &ctx) < 0) {
+		perror("DRM_IOCTL_GCN_CTX_CREATE");
+		goto out;
+	}
+	if (get_resources(fd, &resources, &crtc_ids, &connector_ids) < 0 ||
+	    !resources.count_crtcs ||
+	    select_output(fd, &resources, connector_ids, &connector_id,
+			  &mode) < 0) {
+		perror("select DRM output");
+		goto out;
+	}
+	old_crtc.crtc_id = crtc_ids[0];
+	if (xioctl(fd, DRM_IOCTL_MODE_GETCRTC, &old_crtc) < 0) {
+		perror("DRM_IOCTL_MODE_GETCRTC");
+		goto out;
+	}
+	if (render_frame(fd, ctx.id, &src, src_map, &buffers[0], 0) < 0) {
+		perror("render initial frame");
+		goto out;
+	}
+	set_crtc = (struct drm_mode_crtc) {
+		.set_connectors_ptr = user_ptr(&connector_id),
+		.count_connectors = 1,
+		.crtc_id = crtc_ids[0],
+		.fb_id = buffers[0].fb.fb_id,
+		.mode_valid = 1,
+		.mode = mode,
+	};
+	if (xioctl(fd, DRM_IOCTL_MODE_SETCRTC, &set_crtc) < 0) {
+		perror("DRM_IOCTL_MODE_SETCRTC");
+		goto out;
+	}
+	displayed = 1;
+	printf("gcn-kms-flip-test: initial frame verified, running %u flips\n",
+	       flip_count);
+	fflush(stdout);
+
+	for (completed = 0; completed < flip_count; completed++) {
+		unsigned int frame = completed + 1;
+		struct render_buffer *next = &buffers[frame & 1];
+		struct drm_mode_crtc_page_flip flip = {
+			.crtc_id = crtc_ids[0],
+			.fb_id = next->fb.fb_id,
+			.flags = DRM_MODE_PAGE_FLIP_EVENT,
+			.user_data = frame,
+		};
+		__u32 sequence;
+
+		if (render_frame(fd, ctx.id, &src, src_map, next, frame) < 0) {
+			perror("render back buffer");
+			goto out;
+		}
+		if (xioctl(fd, DRM_IOCTL_MODE_PAGE_FLIP, &flip) < 0) {
+			perror("DRM_IOCTL_MODE_PAGE_FLIP");
+			goto out;
+		}
+		if (wait_flip_event(fd, flip.user_data, &sequence) < 0) {
+			perror("wait page-flip event");
+			goto out;
+		}
+		if (last_sequence && (__u32)(sequence - last_sequence) == 0) {
+			fprintf(stderr, "vblank sequence did not advance at frame %u\n",
+				frame);
+			goto out;
+		}
+		last_sequence = sequence;
+		if (!(frame % 30)) {
+			printf("gcn-kms-flip-test: frame=%u vblank=%u\n", frame,
+			       sequence);
+			fflush(stdout);
+		}
+	}
+	printf("gcn-kms-flip-test: PASS frames=%u last-vblank=%u pixels=%u\n",
+	       completed + 1, last_sequence,
+	       (completed + 1) * DST_WIDTH * DST_HEIGHT);
+	ret = EXIT_SUCCESS;
+
+out:
+	if (displayed) {
+		old_crtc.set_connectors_ptr = user_ptr(&connector_id);
+		old_crtc.count_connectors = 1;
+		if (xioctl(fd, DRM_IOCTL_MODE_SETCRTC, &old_crtc) < 0) {
+			perror("restore DRM CRTC");
+			ret = EXIT_FAILURE;
+		} else {
+			puts("gcn-kms-flip-test: restored previous console framebuffer");
+		}
+	}
+	while (created) {
+		struct render_buffer *buffer = &buffers[--created];
+
+		if (buffer->fb.fb_id)
+			xioctl(fd, DRM_IOCTL_MODE_RMFB, &buffer->fb.fb_id);
+		close_bo(fd, &buffer->bo, buffer->map);
+	}
+	if (ctx.id) {
+		free_ctx.id = ctx.id;
+		xioctl(fd, DRM_IOCTL_GCN_CTX_FREE, &free_ctx);
+	}
+	close_bo(fd, &src, src_map);
+	free(crtc_ids);
+	free(connector_ids);
+	if (fd >= 0)
+		close(fd);
+	return ret;
+}

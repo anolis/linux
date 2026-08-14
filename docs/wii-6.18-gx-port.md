@@ -10190,3 +10190,45 @@ magenta/gold center checkerboard. The cycle then unloaded GX and restored the
 CPU console. The post-test kernel log contained no GX/DRM timeout, FIFO stall,
 oops, panic, or machine check. This accepts linear system render objects as KMS
 framebuffers and closes this test branch.
+
+### Stage sustained GX rendering into vblank page flips
+
+- Test branch: `test/wii-gx-linear-page-flip`
+
+Exercise the accepted linear render/KMS object contract as a repeated display
+loop rather than a one-frame modeset. Keep the accepted strict client and
+static KMS presentation client unchanged. Add a focused sustained client with
+one 320 by 240 linear system source and two 640 by 480 linear system
+destinations, each also attached as an RGB565 KMS framebuffer.
+
+The client renders frame zero through the accepted full-screen GX scaler and
+modesets it. For each of 120 subsequent frames, it writes a deterministic
+quadrant, grid, checkerboard, and moving-marker source pattern, renders into
+the non-visible destination, waits on that destination's write reservation,
+and checks all 307200 output pixels against the center-nearest oracle before
+requesting a vblank-event page flip. It validates the event serial and requires
+the vblank sequence to advance before reusing the previous framebuffer. This
+is strict double buffering: GX never writes the currently displayed object.
+
+The test checks 121 complete frames, or 37171200 destination pixels, and then
+restores the saved console CRTC before removing both framebuffers and closing
+all render objects. The render-cycle script uploads and checksum-verifies the
+new client, reports its phase on tty0, and keeps module load/unload ownership
+in the existing single SSH transaction.
+
+The checksum-pinned candidate artifacts are:
+
+- unchanged `zImage` / `dtbImage.wii` SHA-256:
+  `beebf5f730aaefedd420c9fab8e159665bbe1bf00e1923d7aeb6ab589664bcfb`
+- unchanged `gcn-gx.ko` SHA-256:
+  `740a5092395e8a1d890d30022225d5d9f85118b53d32bef05c06036e5fffb68d`
+- unchanged strict PowerPC client SHA-256:
+  `e93c2f853790a9dd094417c5b0120bfc2496daf52156a68ca788c8c558d06aeb`
+- sustained KMS page-flip client SHA-256:
+  `ffc54d5cda8167c82915056f8504f517dedb8089a4d78225028f2b38f75d7567`
+
+Hardware acceptance requires all 120 page-flip events in order, strictly
+advancing vblank sequences, byte-exact pixels for all 121 rendered frames, a
+visually coherent moving cyan marker over the accepted quadrant/grid pattern,
+a clear live console after CRTC restoration, clean GX unload, and no GX/DRM
+timeout, FIFO stall, oops, panic, or machine check.
