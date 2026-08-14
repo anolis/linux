@@ -10085,3 +10085,65 @@ both runs. MEM1 free space remained exactly 524288 bytes while both system
 objects existed and after they were closed. Both runs ended with
 `PASS: GCN render UAPI`, unloaded GX, and restored the CPU console without a
 timeout, stall, oops, panic, or machine check.
+
+### Stage linear system GEM rendering into a KMS framebuffer
+
+- Test branch: `test/wii-gx-linear-kms-render`
+
+Bridge the accepted full-screen scaler to ordinary DRM presentation without
+changing the fixed 640 by 480 VI timing or replacing the simple KMS pipeline.
+Add an opt-in linear layout for system-memory render objects. Existing MEM1
+objects remain tiled-only, and existing tiled system objects retain their
+behavior. A separate feature bit advertises linear system objects.
+
+Pass source and destination layouts through the internal provider contract.
+The GX provider converts the declared source layout into its established tiled
+crop workspace and converts the final tiled copyback into the declared
+destination layout. The accepted horizontal and vertical GX command streams,
+workspace ownership, PE completion waits, cache policy, and nearest-neighbor
+sampling contract are unchanged. Mixed linear/tiled system layouts are valid;
+MEM1 submissions still require tiled source and destination objects.
+
+Only a marked linear RGB565 system render object may also become a KMS
+framebuffer. Its framebuffer dimensions must match the render metadata, its
+pitch must be exactly width times two, and its offset and modifier must be
+linear. Tiled render objects and MEM1 render objects are rejected at framebuffer
+creation. Normal unmarked shmem dumb buffers continue through the existing KMS
+path unchanged.
+
+The strict render client repeats the complete 320 by 240 to 640 by 480 scale
+with linear source and destination objects and checks all 307200 pixels against
+the center-nearest oracle. It also retains the accepted tiled full-screen test
+and every earlier MEM1 operation. A focused card-node client independently
+creates linear source and destination render objects, verifies all output
+pixels, attaches the destination with `DRM_IOCTL_MODE_ADDFB`, displays it for a
+bounded interval, and restores the previous console CRTC. The render-cycle
+script can run both clients as one checksum-verified transaction while
+reporting each phase on tty0.
+
+The checksum-pinned candidate artifacts are:
+
+- `zImage` / `dtbImage.wii` SHA-256:
+  `beebf5f730aaefedd420c9fab8e159665bbe1bf00e1923d7aeb6ab589664bcfb`
+- `gcn-gx.ko` SHA-256:
+  `740a5092395e8a1d890d30022225d5d9f85118b53d32bef05c06036e5fffb68d`
+- static PowerPC `wii-gcn-render-test` SHA-256:
+  `333905a8adee5a4eb3e534d9e07aff875dbd7f5386e7699e9d463c6e95f58ab2`
+- static PowerPC `wii-gcn-kms-render-test` SHA-256:
+  `446bccdd03ea1fd77b8756d7e8df9cd4eb91a652fbf09f7b32694463364001b1`
+
+Host validation passed `git diff --check`, strict full-patch checkpatch with
+zero diagnostics, shellcheck and `bash -n` for the cycle script, warning-clean
+native and static PowerPC builds of both clients, focused PowerPC `W=1` builds
+of both changed DRM objects and `gcn-gx.ko`, a complete `make -j16 modules
+zImage`, and a clean UML KUnit run. KUnit passed all 10 `gcn_drm_render` tests
+and all 3 `gcn_gx_mem1` tests.
+
+Hardware acceptance remains pending. Deploy the exact kernel, then run the
+strict render cycle with both checksum-pinned clients. Require every retained
+test plus both 307200-pixel tiled and linear full-screen oracles to pass with
+MEM1 remaining at 524288 free bytes. The presentation phase must show the
+expected red, green, blue, and white quadrants with black grid lines and the
+magenta/gold center checkerboard, then restore a clear live console. Require a
+clean module unload and no GX/DRM timeout, FIFO stall, oops, panic, or machine
+check.

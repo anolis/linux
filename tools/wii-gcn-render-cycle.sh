@@ -14,6 +14,8 @@ Options:
   --host HOST          Wii address (default: WII_SSH_HOST or 10.3.10.12)
   --module FILE        gcn-gx module (default: drivers/video/fbdev/gcn-gx.ko)
   --client FILE        test client (default: /tmp/wii-gcn-render-test)
+  --kms-client FILE    optional linear-render/KMS presentation client
+  --kms-hold SECONDS   presentation duration (default: 5)
   --module-args ARGS   arguments passed to insmod
   --reuse-remote       require checksum-matched files already in /tmp
   --keep-loaded        leave gcn_gx loaded after a successful test
@@ -27,6 +29,8 @@ EOF
 ssh_host=${WII_SSH_HOST:-10.3.10.12}
 module=
 client=/tmp/wii-gcn-render-test
+kms_client=
+kms_hold=5
 module_args=
 reuse_remote=0
 keep_loaded=0
@@ -44,6 +48,14 @@ while (($#)); do
 		;;
 	--client)
 		client=$2
+		shift
+		;;
+	--kms-client)
+		kms_client=$2
+		shift
+		;;
+	--kms-hold)
+		kms_hold=$2
 		shift
 		;;
 	--module-args)
@@ -77,6 +89,14 @@ cd "$repo"
 module=${module:-$repo/drivers/video/fbdev/gcn-gx.ko}
 [[ -f $module ]] || { printf 'Module not found: %s\n' "$module" >&2; exit 1; }
 [[ -f $client ]] || { printf 'Client not found: %s\n' "$client" >&2; exit 1; }
+if [[ -n $kms_client && ! -f $kms_client ]]; then
+	printf 'KMS client not found: %s\n' "$kms_client" >&2
+	exit 1
+fi
+if [[ ! $kms_hold =~ ^[0-9]+$ ]]; then
+	printf 'Invalid KMS hold duration: %s\n' "$kms_hold" >&2
+	exit 2
+fi
 if (( ! allow_dirty )) &&
    [[ -n $(git status --porcelain --untracked-files=normal) ]]; then
 	printf 'Refusing a dirty tree; commit first or pass --allow-dirty.\n' >&2
@@ -182,8 +202,12 @@ remote_exec "rmmod gcn_gx 2>/dev/null || true"
 
 remote_module=/tmp/gcn-gx.ko
 remote_client=/tmp/wii-gcn-render-test
+remote_kms_client=/tmp/wii-gcn-kms-render-test
 upload_verified "$module" "$remote_module" module
 upload_verified "$client" "$remote_client" "test client"
+if [[ -n $kms_client ]]; then
+	upload_verified "$kms_client" "$remote_kms_client" "KMS test client"
+fi
 
 remote_notice "loading accelerator module"
 remote_exec "insmod $remote_module $module_args"
@@ -197,6 +221,18 @@ set -e
 if (( test_status )); then
 	remote_notice "TEST FAILED status $test_status"
 	exit "$test_status"
+fi
+if [[ -n $kms_client ]]; then
+	remote_notice "running KMS presentation test"
+	set +e
+	remote_exec "$remote_kms_client /dev/dri/card0 $kms_hold"
+	test_status=$?
+	set -e
+	if (( test_status )); then
+		remote_notice "KMS TEST FAILED status $test_status"
+		exit "$test_status"
+	fi
+	remote_notice "KMS presentation restored console"
 fi
 remote_notice "TEST PASSED"
 if (( keep_loaded )); then

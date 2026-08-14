@@ -748,10 +748,18 @@ static size_t gx_tiled_rgb565_index(u16 x, u16 y, u16 width)
 	       (y & 3) * 4 + (x & 3);
 }
 
-static void gx_copy_tiled_rgb565_rect(const u16 *src, u16 src_width,
-				      u16 src_x, u16 src_y, u16 *dst,
-				      u16 dst_width, u16 dst_height,
-				      u16 rect_width, u16 rect_height)
+static size_t gx_rgb565_index(u16 x, u16 y, u16 width, u32 layout)
+{
+	if (layout == DRM_GCN_GEM_LAYOUT_LINEAR)
+		return (size_t)y * width + x;
+
+	return gx_tiled_rgb565_index(x, y, width);
+}
+
+static void gx_copy_rect_to_tiled(const u16 *src, u16 src_width,
+				  u16 src_x, u16 src_y, u32 src_layout,
+				  u16 *dst, u16 dst_width, u16 dst_height,
+				  u16 rect_width, u16 rect_height)
 {
 	u16 x;
 	u16 y;
@@ -760,10 +768,27 @@ static void gx_copy_tiled_rgb565_rect(const u16 *src, u16 src_width,
 	for (y = 0; y < rect_height; y++) {
 		for (x = 0; x < rect_width; x++) {
 			dst[gx_tiled_rgb565_index(x, y, dst_width)] =
-				src[gx_tiled_rgb565_index(src_x + x,
-							  src_y + y,
-							  src_width)];
+				src[gx_rgb565_index(src_x + x, src_y + y,
+						      src_width, src_layout)];
 		}
+	}
+}
+
+static void gx_copy_tiled_to_layout(const u16 *src, u16 *dst, u16 width,
+				    u16 height, u32 layout)
+{
+	u16 x;
+	u16 y;
+
+	if (layout == DRM_GCN_GEM_LAYOUT_TILED_4X4) {
+		memcpy(dst, src, (size_t)width * height * sizeof(*dst));
+		return;
+	}
+
+	for (y = 0; y < height; y++) {
+		for (x = 0; x < width; x++)
+			dst[(size_t)y * width + x] =
+				src[gx_tiled_rgb565_index(x, y, width)];
 	}
 }
 
@@ -2888,7 +2913,7 @@ static int gcn_gx_drm_mem1_info(struct gcn_drm_mem1_info *info)
 	info->max_width = 640;
 	info->max_height = 576;
 	info->formats = DRM_GCN_FORMAT_RGB565;
-	info->layouts = DRM_GCN_LAYOUT_TILED_4X4;
+	info->layouts = DRM_GCN_LAYOUT_TILED_4X4 | DRM_GCN_LAYOUT_LINEAR;
 	info->features = DRM_GCN_FEATURE_SUBMIT_RGB565 |
 			 DRM_GCN_FEATURE_FILL_RGB565 |
 			 DRM_GCN_FEATURE_FILL_RECT_RGB565 |
@@ -2897,7 +2922,8 @@ static int gcn_gx_drm_mem1_info(struct gcn_drm_mem1_info *info)
 			 DRM_GCN_FEATURE_BLIT_RECT_RGB565_SAME_OBJECT |
 			 DRM_GCN_FEATURE_BLIT_SCALED_RGB565 |
 			 DRM_GCN_FEATURE_SYSTEM_GEM |
-			 DRM_GCN_FEATURE_BLIT_SCALED_SYSTEM_RGB565;
+			 DRM_GCN_FEATURE_BLIT_SCALED_SYSTEM_RGB565 |
+			 DRM_GCN_FEATURE_SYSTEM_GEM_LINEAR;
 	mutex_unlock(&gx_mem1_lock);
 	return 0;
 }
@@ -3272,6 +3298,7 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 					      u16 src_rect_height, u16 dst_x,
 					      u16 dst_y, u16 dst_rect_width,
 					      u16 dst_rect_height,
+					      u32 src_layout, u32 dst_layout,
 					      bool system_memory)
 {
 	void *crop = gx_tex_buf_alt;
@@ -3299,6 +3326,14 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	    src_rect_height > src_height - src_y ||
 	    dst_rect_width > dst_width - dst_x ||
 	    dst_rect_height > dst_height - dst_y)
+		return -EINVAL;
+	if ((src_layout != DRM_GCN_GEM_LAYOUT_TILED_4X4 &&
+	     src_layout != DRM_GCN_GEM_LAYOUT_LINEAR) ||
+	    (dst_layout != DRM_GCN_GEM_LAYOUT_TILED_4X4 &&
+	     dst_layout != DRM_GCN_GEM_LAYOUT_LINEAR) ||
+	    (!system_memory &&
+	     (src_layout != DRM_GCN_GEM_LAYOUT_TILED_4X4 ||
+	      dst_layout != DRM_GCN_GEM_LAYOUT_TILED_4X4)))
 		return -EINVAL;
 	src_bytes = (size_t)src_width * src_height * sizeof(u16);
 	dst_bytes = (size_t)dst_width * dst_height * sizeof(u16);
@@ -3344,9 +3379,9 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	 * edges and preserves same-object overlap semantics.
 	 */
 	if (system_memory) {
-		gx_copy_tiled_rgb565_rect(src_addr, src_width, src_x, src_y,
-					  crop, crop_width, crop_height,
-					  src_rect_width, src_rect_height);
+		gx_copy_rect_to_tiled(src_addr, src_width, src_x, src_y,
+				      src_layout, crop, crop_width, crop_height,
+				      src_rect_width, src_rect_height);
 		flush_dcache_range((unsigned long)crop,
 				   (unsigned long)crop + crop_bytes);
 	} else {
@@ -3399,7 +3434,9 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 
 	/* The crop workspace is free once the horizontal snapshot is complete. */
 	if (system_memory) {
-		memcpy(crop, dst_addr, dst_bytes);
+		gx_copy_rect_to_tiled(dst_addr, dst_width, 0, 0, dst_layout,
+				      crop, dst_width, dst_height, dst_width,
+				      dst_height);
 		flush_dcache_range((unsigned long)crop,
 				   (unsigned long)crop + dst_bytes);
 	}
@@ -3447,7 +3484,7 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	if (system_memory) {
 		invalidate_dcache_range((unsigned long)crop,
 					(unsigned long)crop + dst_bytes);
-		memcpy(dst_addr, crop, dst_bytes);
+		gx_copy_tiled_to_layout(crop, dst_addr, dst_width, dst_height, dst_layout);
 	} else {
 		invalidate_dcache_range((unsigned long)dst_addr,
 					(unsigned long)dst_addr + dst_bytes);
@@ -3491,12 +3528,14 @@ static int gcn_gx_drm_blit_scaled_rgb565(void *src_allocation,
 			dst->cpu_addr, src_width, src_height, dst_width,
 			dst_height, src_x, src_y, src_rect_width,
 			src_rect_height, dst_x, dst_y, dst_rect_width,
-			dst_rect_height, false);
+			dst_rect_height, DRM_GCN_GEM_LAYOUT_TILED_4X4,
+			DRM_GCN_GEM_LAYOUT_TILED_4X4, false);
 }
 
 static int gcn_gx_drm_blit_scaled_system_rgb565(const void *src, void *dst,
 						u16 src_width, u16 src_height,
 						u16 dst_width, u16 dst_height,
+						u32 src_layout, u32 dst_layout,
 						u16 src_x, u16 src_y,
 						u16 src_rect_width,
 						u16 src_rect_height,
@@ -3507,7 +3546,8 @@ static int gcn_gx_drm_blit_scaled_system_rgb565(const void *src, void *dst,
 	return gcn_gx_drm_blit_scaled_rgb565_core(src, dst, src_width,
 			src_height, dst_width, dst_height, src_x, src_y,
 			src_rect_width, src_rect_height, dst_x, dst_y,
-			dst_rect_width, dst_rect_height, true);
+			dst_rect_width, dst_rect_height, src_layout, dst_layout,
+			true);
 }
 
 static const struct gcn_drm_accel_ops gcn_gx_drm_accel_ops = {

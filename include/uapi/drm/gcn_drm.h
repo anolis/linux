@@ -25,6 +25,7 @@ enum drm_gcn_param {
 
 #define DRM_GCN_FORMAT_RGB565		(1ULL << 0)
 #define DRM_GCN_LAYOUT_TILED_4X4		(1ULL << 0)
+#define DRM_GCN_LAYOUT_LINEAR		(1ULL << 1)
 
 #define DRM_GCN_FEATURE_MEM1_GEM		(1ULL << 0)
 #define DRM_GCN_FEATURE_CONTEXTS		(1ULL << 1)
@@ -39,6 +40,7 @@ enum drm_gcn_param {
 #define DRM_GCN_FEATURE_BLIT_SCALED_RGB565	(1ULL << 10)
 #define DRM_GCN_FEATURE_SYSTEM_GEM		(1ULL << 11)
 #define DRM_GCN_FEATURE_BLIT_SCALED_SYSTEM_RGB565	(1ULL << 12)
+#define DRM_GCN_FEATURE_SYSTEM_GEM_LINEAR	(1ULL << 13)
 
 struct drm_gcn_get_param {
 	__u32 param;
@@ -53,6 +55,7 @@ enum drm_gcn_gem_format {
 
 enum drm_gcn_gem_layout {
 	DRM_GCN_GEM_LAYOUT_TILED_4X4 = 1,
+	DRM_GCN_GEM_LAYOUT_LINEAR = 2,
 };
 
 #define DRM_GCN_GEM_CREATE_SYSTEM	(1U << 0)

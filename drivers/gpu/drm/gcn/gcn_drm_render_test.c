@@ -25,6 +25,10 @@ static void gcn_drm_render_uapi_layout(struct kunit *test)
 			DRM_GCN_FEATURE_BLIT_RECT_RGB565_SAME_OBJECT,
 			1ULL << 9);
 	KUNIT_EXPECT_EQ(test, DRM_GCN_FEATURE_BLIT_SCALED_RGB565, 1ULL << 10);
+	KUNIT_EXPECT_EQ(test, DRM_GCN_FEATURE_SYSTEM_GEM, 1ULL << 11);
+	KUNIT_EXPECT_EQ(test, DRM_GCN_FEATURE_BLIT_SCALED_SYSTEM_RGB565,
+			1ULL << 12);
+	KUNIT_EXPECT_EQ(test, DRM_GCN_FEATURE_SYSTEM_GEM_LINEAR, 1ULL << 13);
 }
 
 static void gcn_drm_render_validates_scaled_blit(struct kunit *test)
@@ -217,6 +221,11 @@ static void gcn_drm_render_accepts_tiled_rgb565(struct kunit *test)
 	args.height = 64;
 	KUNIT_EXPECT_EQ(test, gcn_drm_render_bo_size(&args, &size), 0);
 	KUNIT_EXPECT_EQ(test, size, 8192ULL);
+
+	args.flags = DRM_GCN_GEM_CREATE_SYSTEM;
+	args.layout = DRM_GCN_GEM_LAYOUT_LINEAR;
+	KUNIT_EXPECT_EQ(test, gcn_drm_render_bo_size(&args, &size), 0);
+	KUNIT_EXPECT_EQ(test, size, 8192ULL);
 }
 
 static void gcn_drm_render_rejects_invalid_objects(struct kunit *test)
@@ -245,6 +254,41 @@ static void gcn_drm_render_rejects_invalid_objects(struct kunit *test)
 	args.format = DRM_GCN_GEM_FORMAT_RGB565;
 	args.layout = 0;
 	KUNIT_EXPECT_EQ(test, gcn_drm_render_bo_size(&args, &size), -EINVAL);
+	args.layout = DRM_GCN_GEM_LAYOUT_LINEAR;
+	KUNIT_EXPECT_EQ(test, gcn_drm_render_bo_size(&args, &size), -EINVAL);
+}
+
+static void gcn_drm_render_validates_linear_framebuffer(struct kunit *test)
+{
+	struct drm_mode_fb_cmd2 mode_cmd = {
+		.width = 640,
+		.height = 480,
+		.pixel_format = DRM_FORMAT_RGB565,
+		.pitches[0] = 640 * sizeof(u16),
+		.modifier[0] = DRM_FORMAT_MOD_LINEAR,
+	};
+	int ret;
+
+	ret = gcn_drm_render_validate_fb(640, 480,
+					 DRM_GCN_GEM_FORMAT_RGB565,
+					 DRM_GCN_GEM_LAYOUT_LINEAR, &mode_cmd);
+	KUNIT_EXPECT_EQ(test, ret, 0);
+	ret = gcn_drm_render_validate_fb(640, 480,
+					 DRM_GCN_GEM_FORMAT_RGB565,
+					 DRM_GCN_GEM_LAYOUT_TILED_4X4,
+					 &mode_cmd);
+	KUNIT_EXPECT_EQ(test, ret, -EINVAL);
+	mode_cmd.pitches[0] += sizeof(u16);
+	ret = gcn_drm_render_validate_fb(640, 480,
+					 DRM_GCN_GEM_FORMAT_RGB565,
+					 DRM_GCN_GEM_LAYOUT_LINEAR, &mode_cmd);
+	KUNIT_EXPECT_EQ(test, ret, -EINVAL);
+	mode_cmd.pitches[0] = 640 * sizeof(u16);
+	mode_cmd.width = 320;
+	ret = gcn_drm_render_validate_fb(640, 480,
+					 DRM_GCN_GEM_FORMAT_RGB565,
+					 DRM_GCN_GEM_LAYOUT_LINEAR, &mode_cmd);
+	KUNIT_EXPECT_EQ(test, ret, -EINVAL);
 }
 
 static void gcn_drm_render_converts_absolute_timeouts(struct kunit *test)
@@ -267,6 +311,7 @@ static struct kunit_case gcn_drm_render_test_cases[] = {
 	KUNIT_CASE(gcn_drm_render_uapi_layout),
 	KUNIT_CASE(gcn_drm_render_accepts_tiled_rgb565),
 	KUNIT_CASE(gcn_drm_render_rejects_invalid_objects),
+	KUNIT_CASE(gcn_drm_render_validates_linear_framebuffer),
 	KUNIT_CASE(gcn_drm_render_converts_absolute_timeouts),
 	KUNIT_CASE(gcn_drm_render_validates_copy_submit),
 	KUNIT_CASE(gcn_drm_render_validates_fill_submit),

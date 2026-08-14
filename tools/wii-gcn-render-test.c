@@ -44,6 +44,15 @@ static size_t tiled_rgb565_index(unsigned int x, unsigned int y,
 	       (y & 3) * 4 + (x & 3);
 }
 
+static size_t rgb565_index(unsigned int x, unsigned int y,
+			   unsigned int width, uint32_t layout)
+{
+	if (layout == DRM_GCN_GEM_LAYOUT_LINEAR)
+		return (size_t)y * width + x;
+
+	return tiled_rgb565_index(x, y, width);
+}
+
 static uint16_t source_pattern(unsigned int x, unsigned int y)
 {
 	return ((x & 0x1f) << 11) | ((y & 0x3f) << 5) |
@@ -291,17 +300,27 @@ static int get_param(int fd, uint32_t param, uint64_t *value)
 	return 0;
 }
 
-static int create_bo_size_flags(int fd, struct drm_gcn_gem_create *args,
-				uint32_t width, uint32_t height,
-				uint32_t flags)
+static int create_bo_size_layout_flags(int fd,
+				       struct drm_gcn_gem_create *args,
+				       uint32_t width, uint32_t height,
+				       uint32_t layout, uint32_t flags)
 {
 	memset(args, 0, sizeof(*args));
 	args->width = width;
 	args->height = height;
 	args->format = DRM_GCN_GEM_FORMAT_RGB565;
-	args->layout = DRM_GCN_GEM_LAYOUT_TILED_4X4;
+	args->layout = layout;
 	args->flags = flags;
 	return ioctl(fd, DRM_IOCTL_GCN_GEM_CREATE, args);
+}
+
+static int create_bo_size_flags(int fd, struct drm_gcn_gem_create *args,
+				uint32_t width, uint32_t height,
+				uint32_t flags)
+{
+	return create_bo_size_layout_flags(fd, args, width, height,
+					   DRM_GCN_GEM_LAYOUT_TILED_4X4,
+					   flags);
 }
 
 static int create_bo_size(int fd, struct drm_gcn_gem_create *args,
@@ -1165,7 +1184,8 @@ out:
 		fail("close 640-wide scaled-reduction source");
 }
 
-static void test_full_scaled_system_blit(int fd)
+static void test_full_system_layout(int fd, uint32_t layout,
+				    const char *layout_name)
 {
 	struct drm_gcn_ctx_create ctx = {};
 	struct drm_gcn_ctx_free free_ctx;
@@ -1182,10 +1202,12 @@ static void test_full_scaled_system_blit(int fd)
 		fail("query MEM1 before full-screen system scale");
 		return;
 	}
-	if (create_bo_size_flags(fd, &src, FULL_SRC_WIDTH, FULL_SRC_HEIGHT,
-				 DRM_GCN_GEM_CREATE_SYSTEM) ||
-	    create_bo_size_flags(fd, &dst, FULL_DST_WIDTH, FULL_DST_HEIGHT,
-				 DRM_GCN_GEM_CREATE_SYSTEM)) {
+	if (create_bo_size_layout_flags(fd, &src, FULL_SRC_WIDTH,
+					FULL_SRC_HEIGHT, layout,
+					DRM_GCN_GEM_CREATE_SYSTEM) ||
+	    create_bo_size_layout_flags(fd, &dst, FULL_DST_WIDTH,
+					FULL_DST_HEIGHT, layout,
+					DRM_GCN_GEM_CREATE_SYSTEM)) {
 		fail("create full-screen system scaled-blit objects");
 		goto out;
 	}
@@ -1208,16 +1230,16 @@ static void test_full_scaled_system_blit(int fd)
 
 	for (unsigned int y = 0; y < FULL_SRC_HEIGHT; y++) {
 		for (unsigned int x = 0; x < FULL_SRC_WIDTH; x++) {
-			size_t pixel = tiled_rgb565_index(x, y,
-						 FULL_SRC_WIDTH);
+			size_t pixel = rgb565_index(x, y, FULL_SRC_WIDTH,
+						   layout);
 
 			src_map[pixel] = y * FULL_SRC_WIDTH + x;
 		}
 	}
 	for (unsigned int y = 0; y < FULL_DST_HEIGHT; y++) {
 		for (unsigned int x = 0; x < FULL_DST_WIDTH; x++) {
-			size_t pixel = tiled_rgb565_index(x, y,
-						 FULL_DST_WIDTH);
+			size_t pixel = rgb565_index(x, y, FULL_DST_WIDTH,
+						   layout);
 
 			dst_map[pixel] = 0xc33c;
 		}
@@ -1248,8 +1270,8 @@ static void test_full_scaled_system_blit(int fd)
 			unsigned int source_y = scaled_source_offset(y,
 					FULL_SRC_HEIGHT, FULL_DST_HEIGHT);
 			uint16_t expected = source_y * FULL_SRC_WIDTH + source_x;
-			size_t pixel = tiled_rgb565_index(x, y,
-						 FULL_DST_WIDTH);
+			size_t pixel = rgb565_index(x, y, FULL_DST_WIDTH,
+						   layout);
 
 			if (dst_map[pixel] != expected) {
 				fprintf(stderr,
@@ -1260,7 +1282,8 @@ static void test_full_scaled_system_blit(int fd)
 			}
 		}
 	}
-	puts("SCALED: system 320x240 to 640x480 preserved all 307200 pixels");
+	printf("SCALED: %s system 320x240 to 640x480 preserved all 307200 pixels\n",
+	       layout_name);
 
 out_ctx:
 	free_ctx.id = ctx.id;
@@ -1285,6 +1308,12 @@ out:
 		printf("SCALED: system objects preserved all %llu MEM1 bytes\n",
 		       (unsigned long long)free_after);
 	}
+}
+
+static void test_full_scaled_system_blit(int fd)
+{
+	test_full_system_layout(fd, DRM_GCN_GEM_LAYOUT_TILED_4X4, "tiled");
+	test_full_system_layout(fd, DRM_GCN_GEM_LAYOUT_LINEAR, "linear");
 }
 
 static int hold_mapping(const char *node)
@@ -1471,7 +1500,8 @@ int main(int argc, char **argv)
 			       (unsigned long long)alignment);
 			if (!(features & DRM_GCN_FEATURE_MEM1_GEM) ||
 			    !(formats & DRM_GCN_FORMAT_RGB565) ||
-			    !(layouts & DRM_GCN_LAYOUT_TILED_4X4))
+			    !(layouts & DRM_GCN_LAYOUT_TILED_4X4) ||
+			    !(layouts & DRM_GCN_LAYOUT_LINEAR))
 				fail_value("provider capability bits", features, 0);
 			if (!alignment || free_bytes > total)
 				fail_value("provider capacity", free_bytes, total);
@@ -1510,14 +1540,17 @@ int main(int argc, char **argv)
 		if (features & DRM_GCN_FEATURE_BLIT_SCALED_RGB565)
 			test_wide_scaled_reduce(fd);
 		if ((features & (DRM_GCN_FEATURE_SYSTEM_GEM |
-				 DRM_GCN_FEATURE_BLIT_SCALED_SYSTEM_RGB565)) ==
+				 DRM_GCN_FEATURE_BLIT_SCALED_SYSTEM_RGB565 |
+				 DRM_GCN_FEATURE_SYSTEM_GEM_LINEAR)) ==
 		    (DRM_GCN_FEATURE_SYSTEM_GEM |
-		     DRM_GCN_FEATURE_BLIT_SCALED_SYSTEM_RGB565))
+		     DRM_GCN_FEATURE_BLIT_SCALED_SYSTEM_RGB565 |
+		     DRM_GCN_FEATURE_SYSTEM_GEM_LINEAR))
 			test_full_scaled_system_blit(fd);
 		else
 			fail_value("system-memory scaled features", features,
 				   DRM_GCN_FEATURE_SYSTEM_GEM |
-				   DRM_GCN_FEATURE_BLIT_SCALED_SYSTEM_RGB565);
+				   DRM_GCN_FEATURE_BLIT_SCALED_SYSTEM_RGB565 |
+				   DRM_GCN_FEATURE_SYSTEM_GEM_LINEAR);
 	}
 
 	close(other_fd);

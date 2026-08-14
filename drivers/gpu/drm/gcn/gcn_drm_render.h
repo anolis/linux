@@ -7,7 +7,9 @@
 #include <linux/overflow.h>
 #include <linux/types.h>
 
+#include <drm/drm_fourcc.h>
 #include <uapi/drm/gcn_drm.h>
+#include <uapi/drm/drm_mode.h>
 
 #define GCN_DRM_RENDER_MAX_WIDTH	640U
 #define GCN_DRM_RENDER_MAX_HEIGHT	576U
@@ -28,6 +30,21 @@ struct gcn_drm_render_blit_rect {
 	u16 width;
 	u16 height;
 };
+
+static inline int
+gcn_drm_render_validate_fb(u32 width, u32 height, u32 format, u32 layout,
+			   const struct drm_mode_fb_cmd2 *mode_cmd)
+{
+	if (!mode_cmd || layout != DRM_GCN_GEM_LAYOUT_LINEAR ||
+	    format != DRM_GCN_GEM_FORMAT_RGB565 ||
+	    mode_cmd->pixel_format != DRM_FORMAT_RGB565 ||
+	    mode_cmd->width != width || mode_cmd->height != height ||
+	    mode_cmd->pitches[0] != width * sizeof(u16) ||
+	    mode_cmd->offsets[0] || mode_cmd->modifier[0] != DRM_FORMAT_MOD_LINEAR)
+		return -EINVAL;
+
+	return 0;
+}
 
 static inline int
 gcn_drm_render_validate_scaled(const struct drm_gcn_blit_scaled *args,
@@ -127,7 +144,10 @@ gcn_drm_render_bo_size(const struct drm_gcn_gem_create *args, u64 *size)
 	    args->height > GCN_DRM_RENDER_MAX_HEIGHT ||
 	    (args->width & 3) || (args->height & 3) ||
 	    args->format != DRM_GCN_GEM_FORMAT_RGB565 ||
-	    args->layout != DRM_GCN_GEM_LAYOUT_TILED_4X4)
+	    (args->layout != DRM_GCN_GEM_LAYOUT_TILED_4X4 &&
+	     args->layout != DRM_GCN_GEM_LAYOUT_LINEAR) ||
+	    (args->layout == DRM_GCN_GEM_LAYOUT_LINEAR &&
+	     !(args->flags & DRM_GCN_GEM_CREATE_SYSTEM)))
 		return -EINVAL;
 
 	if (check_mul_overflow((u64)args->width, (u64)args->height, &bytes) ||

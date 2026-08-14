@@ -8,6 +8,7 @@
 struct drm_device;
 struct drm_file;
 struct drm_gem_object;
+struct drm_mode_fb_cmd2;
 struct vm_area_struct;
 
 int gcn_drm_provider_info(struct gcn_drm_mem1_info *info);
@@ -41,12 +42,15 @@ int gcn_drm_provider_blit_scaled(const struct gcn_drm_accel_ops *provider,
 int gcn_drm_provider_blit_scaled_system(const void *src, void *dst,
 					u16 src_width, u16 src_height,
 					u16 dst_width, u16 dst_height,
+					u32 src_layout, u32 dst_layout,
 					const struct drm_gcn_blit_scaled *args);
 
 int gcn_drm_render_open(struct drm_device *drm, struct drm_file *file);
 void gcn_drm_render_postclose(struct drm_device *drm, struct drm_file *file);
 struct drm_gem_object *
 gcn_drm_render_create_object(struct drm_device *drm, size_t size);
+int gcn_drm_render_validate_framebuffer(struct drm_file *file,
+					const struct drm_mode_fb_cmd2 *mode_cmd);
 
 extern const struct drm_ioctl_desc
 gcn_drm_render_ioctls[DRM_GCN_NUM_IOCTLS];

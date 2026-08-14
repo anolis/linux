@@ -12,12 +12,14 @@
 #include <drm/drm_drv.h>
 #include <drm/drm_exec.h>
 #include <drm/drm_file.h>
+#include <drm/drm_fourcc.h>
 #include <drm/drm_gem.h>
 #include <drm/drm_gem_shmem_helper.h>
 #include <drm/drm_ioctl.h>
 #include <drm/drm_syncobj.h>
 
 #include <uapi/drm/gcn_drm.h>
+#include <uapi/drm/drm_mode.h>
 
 #include "gcn_drm_internal.h"
 #include "gcn_drm_render.h"
@@ -134,6 +136,37 @@ static bool gcn_drm_is_system_bo(const struct drm_gem_object *gem)
 	       to_gcn_drm_system_bo((struct drm_gem_object *)gem)->render_object;
 }
 
+int gcn_drm_render_validate_framebuffer(struct drm_file *file,
+					const struct drm_mode_fb_cmd2 *mode_cmd)
+{
+	struct gcn_drm_system_bo *bo;
+	struct drm_gem_object *gem;
+	int ret = 0;
+
+	if (!file || !mode_cmd || !mode_cmd->handles[0])
+		return -EINVAL;
+
+	gem = drm_gem_object_lookup(file, mode_cmd->handles[0]);
+	if (!gem)
+		return -ENOENT;
+	if (gcn_drm_is_mem1_bo(gem)) {
+		ret = -EINVAL;
+		goto out_put;
+	}
+	if (gem->funcs != &gcn_drm_system_bo_funcs)
+		goto out_put;
+
+	bo = to_gcn_drm_system_bo(gem);
+	if (!bo->render_object)
+		goto out_put;
+	ret = gcn_drm_render_validate_fb(bo->width, bo->height, bo->format,
+					 bo->layout, mode_cmd);
+
+out_put:
+	drm_gem_object_put(gem);
+	return ret;
+}
+
 static int gcn_drm_ioctl_get_param(struct drm_device *drm, void *data,
 				   struct drm_file *file)
 {
@@ -227,6 +260,9 @@ static int gcn_drm_ioctl_gem_create(struct drm_device *drm, void *data,
 		if (ret)
 			return ret;
 		if (!(info.features & DRM_GCN_FEATURE_SYSTEM_GEM))
+			return -EOPNOTSUPP;
+		if (args->layout == DRM_GCN_GEM_LAYOUT_LINEAR &&
+		    !(info.features & DRM_GCN_FEATURE_SYSTEM_GEM_LINEAR))
 			return -EOPNOTSUPP;
 
 		shmem = drm_gem_shmem_create(drm, size);
@@ -557,7 +593,8 @@ gcn_drm_blit_scaled_system_locked(struct drm_gem_object *src_gem,
 	}
 	ret = gcn_drm_provider_blit_scaled_system(src_map.vaddr, dst_addr,
 						  src_width, src_height,
-						  dst_width, dst_height, args);
+						  dst_width, dst_height,
+						  src->layout, dst->layout, args);
 
 out_unmap_dst:
 	if (src_gem != dst_gem)
@@ -636,9 +673,11 @@ static int gcn_drm_ioctl_blit_scaled(struct drm_device *drm, void *data,
 		dst_width = system_dst->width;
 		dst_height = system_dst->height;
 		if (system_src->format != system_dst->format ||
-		    system_src->layout != system_dst->layout ||
 		    system_src->format != DRM_GCN_GEM_FORMAT_RGB565 ||
-		    system_src->layout != DRM_GCN_GEM_LAYOUT_TILED_4X4) {
+		    (system_src->layout != DRM_GCN_GEM_LAYOUT_TILED_4X4 &&
+		     system_src->layout != DRM_GCN_GEM_LAYOUT_LINEAR) ||
+		    (system_dst->layout != DRM_GCN_GEM_LAYOUT_TILED_4X4 &&
+		     system_dst->layout != DRM_GCN_GEM_LAYOUT_LINEAR)) {
 			ret = -EINVAL;
 			goto out_put;
 		}

@@ -374,6 +374,7 @@ int gcn_drm_provider_blit_scaled(const struct gcn_drm_accel_ops *provider,
 int gcn_drm_provider_blit_scaled_system(const void *src, void *dst,
 					u16 src_width, u16 src_height,
 					u16 dst_width, u16 dst_height,
+					u32 src_layout, u32 dst_layout,
 					const struct drm_gcn_blit_scaled *args)
 {
 	const struct gcn_drm_accel_ops *provider;
@@ -385,6 +386,7 @@ int gcn_drm_provider_blit_scaled_system(const void *src, void *dst,
 	    try_module_get(provider->owner)) {
 		ret = provider->blit_scaled_system_rgb565(src, dst,
 				src_width, src_height, dst_width, dst_height,
+				src_layout, dst_layout,
 				args->src_x, args->src_y, args->src_width,
 				args->src_height, args->dst_x, args->dst_y,
 				args->dst_width, args->dst_height);
@@ -972,8 +974,22 @@ static const struct drm_connector_funcs gcn_drm_connector_funcs = {
 	.atomic_destroy_state = drm_atomic_helper_connector_destroy_state,
 };
 
+static struct drm_framebuffer *
+gcn_drm_fb_create(struct drm_device *drm, struct drm_file *file,
+		  const struct drm_format_info *info,
+		  const struct drm_mode_fb_cmd2 *mode_cmd)
+{
+	int ret;
+
+	ret = gcn_drm_render_validate_framebuffer(file, mode_cmd);
+	if (ret)
+		return ERR_PTR(ret);
+
+	return drm_gem_fb_create_with_dirty(drm, file, info, mode_cmd);
+}
+
 static const struct drm_mode_config_funcs gcn_drm_mode_config_funcs = {
-	.fb_create = drm_gem_fb_create_with_dirty,
+	.fb_create = gcn_drm_fb_create,
 	.atomic_check = drm_atomic_helper_check,
 	.atomic_commit = drm_atomic_helper_commit,
 };
