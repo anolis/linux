@@ -251,16 +251,6 @@ module_param_named(texel_bias_eighths, gx_texel_bias_eighths, int, 0444);
 MODULE_PARM_DESC(texel_bias_eighths,
 		 "Texture-coordinate translation in eighths of a texel");
 
-static int gx_scaled_bias_256ths;
-module_param_named(scaled_bias_256ths, gx_scaled_bias_256ths, int, 0444);
-MODULE_PARM_DESC(scaled_bias_256ths,
-		 "Scaled-blit translation in 1/256ths of a source texel");
-
-static int gx_scaled_scale_ulps;
-module_param_named(scaled_scale_ulps, gx_scaled_scale_ulps, int, 0444);
-MODULE_PARM_DESC(scaled_scale_ulps,
-		 "Signed float-ULP adjustment to scaled-blit coordinate slopes");
-
 static char *gx_texcoord_space = "normalized";
 module_param_named(texcoord_space, gx_texcoord_space, charp, 0444);
 MODULE_PARM_DESC(texcoord_space,
@@ -554,54 +544,16 @@ static void gx_load_pos_to_tex_mtx0(u16 width, u16 height)
 	gx_load_pos_to_tex_mtx0_offset(width, height, 0, 0);
 }
 
-struct gx_scaled_rect {
-	u16 src_x;
-	u16 src_y;
-	u16 src_width;
-	u16 src_height;
-	u16 dst_x;
-	u16 dst_y;
-	u16 dst_width;
-	u16 dst_height;
-};
-
-static void gx_load_pos_to_tex_mtx0_scaled(u16 texture_width,
-					   u16 texture_height,
-					   const struct gx_scaled_rect *rect)
+static u32 gx_f32_signed_fraction(s32 numerator, u32 denominator)
 {
-	s64 s_numerator = ((s64)rect->src_x * rect->dst_width -
-			   (s64)rect->dst_x * rect->src_width) * 256 +
-			  (s64)gx_scaled_bias_256ths * rect->dst_width;
-	s64 t_numerator = ((s64)rect->src_y * rect->dst_height -
-			   (s64)rect->dst_y * rect->src_height) * 256 +
-			  (s64)gx_scaled_bias_256ths * rect->dst_height;
-	u32 s_denominator = (u32)rect->dst_width * 256;
-	u32 t_denominator = (u32)rect->dst_height * 256;
-	u32 s_scale = f32_div_u32(rect->src_width, rect->dst_width);
-	u32 t_scale = f32_div_u32(rect->src_height, rect->dst_height);
-	u32 s_bias = f32_div_u32(abs(s_numerator), s_denominator);
-	u32 t_bias = f32_div_u32(abs(t_numerator), t_denominator);
+	u32 bits = f32_div_u32(abs(numerator), denominator);
 
-	if (!gx_use_texel_space) {
-		s_denominator = (u32)rect->dst_width * texture_width;
-		t_denominator = (u32)rect->dst_height * texture_height;
-		s_scale = f32_div_u32(rect->src_width, s_denominator);
-		t_scale = f32_div_u32(rect->src_height, t_denominator);
-		s_denominator *= 256;
-		t_denominator *= 256;
-		s_bias = f32_div_u32(abs(s_numerator), s_denominator);
-		t_bias = f32_div_u32(abs(t_numerator), t_denominator);
-	}
-	if (gx_scaled_scale_ulps) {
-		s_scale += gx_scaled_scale_ulps;
-		t_scale += gx_scaled_scale_ulps;
-	}
+	return numerator < 0 ? F32_NEG(bits) : bits;
+}
 
-	if (s_numerator < 0)
-		s_bias = F32_NEG(s_bias);
-	if (t_numerator < 0)
-		t_bias = F32_NEG(t_bias);
-
+static void gx_load_separable_tex_mtx0(u32 s_scale, u32 s_bias,
+				       u32 t_scale, u32 t_bias)
+{
 	gx_load_xf_regs_n(0x0078, 8);
 	wg_f32_bits(s_scale);  wg_f32_bits(F32_ZERO);
 	wg_f32_bits(F32_ZERO); wg_f32_bits(s_bias);
@@ -610,6 +562,27 @@ static void gx_load_pos_to_tex_mtx0_scaled(u16 texture_width,
 
 	gx_load_cp_reg(0x30, 30 << 6);
 	gx_load_xf_reg(0x1018, 30 << 6);
+}
+
+static void gx_load_horizontal_run_tex_mtx0(u16 src_index, u16 src_width,
+					    u16 height)
+{
+	gx_load_separable_tex_mtx0(F32_ZERO,
+				   f32_div_u32(4 * src_index + 1,
+					       4 * src_width),
+				   f32_div_u32(1, height),
+				   gx_f32_signed_fraction(-1, 4 * height));
+}
+
+static void gx_load_vertical_run_tex_mtx0(u16 src_index, u16 src_height,
+					  u16 x, u16 width)
+{
+	gx_load_separable_tex_mtx0(f32_div_u32(1, width),
+				   gx_f32_signed_fraction(-(4 * (s32)x + 1),
+							  4 * width),
+				   F32_ZERO,
+				   f32_div_u32(4 * src_index + 1,
+					       4 * src_height));
 }
 
 static u32 gx_direct_texcoord_bits(u16 extent, u16 multiple)
@@ -628,6 +601,23 @@ static u32 gx_direct_center_texcoord_bits(u16 extent)
 	u32 bits = f32_div_u16(abs(numerator), denominator);
 
 	return numerator < 0 ? F32_NEG(bits) : bits;
+}
+
+static u16 gx_nearest_source_index(u16 dst_index, u16 src_extent,
+				   u16 dst_extent)
+{
+	u32 numerator = (2 * (u32)dst_index + 1) * src_extent;
+
+	return min_t(u32, numerator / (2 * dst_extent), src_extent - 1);
+}
+
+static u16 gx_power_of_two_extent(u16 extent)
+{
+	u16 padded = 4;
+
+	while (padded < extent)
+		padded <<= 1;
+	return padded;
 }
 
 static void gx_load_identity_post_mtx(void)
@@ -1319,7 +1309,8 @@ static void gx_setup_vertex_color_state(u16 width, u16 height)
 }
 
 /* Add one position-derived texcoord and make TEV stage 0 sample texmap 0. */
-static void gx_setup_rgb565_texture_state(u16 width, u16 height)
+static void gx_setup_rgb565_texture_state_mode(u16 width, u16 height,
+					       bool direct_texcoord)
 {
 	gx_setup_vertex_color_state(width, height);
 
@@ -1337,7 +1328,7 @@ static void gx_setup_rgb565_texture_state(u16 width, u16 height)
 
 	/* GX_TG_MTX2x4 through GX_TEXMTX0. */
 	gx_load_xf_reg(0x103f, 0x00000001);
-	if (gx_use_direct_texcoord) {
+	if (direct_texcoord) {
 		/* GX_TG_TEX0 is XF source row 5, not row 4. */
 		gx_load_xf_reg(0x1040, 0x00000280);
 		gx_load_identity_pos_mtx0();
@@ -1355,6 +1346,12 @@ static void gx_setup_rgb565_texture_state(u16 width, u16 height)
 	/* GX_DTTIDENTITY - GX_DTTMTX0 = 125 - 64 = 61 (0x3d). */
 	gx_load_xf_reg(0x1050, 0x0000003D);
 	gx_load_identity_post_mtx();
+}
+
+static void gx_setup_rgb565_texture_state(u16 width, u16 height)
+{
+	gx_setup_rgb565_texture_state_mode(width, height,
+					   gx_use_direct_texcoord);
 }
 
 /*
@@ -1410,6 +1407,13 @@ static void gx_setup_texture_rgb565(void *tile_buf, u16 width, u16 height)
 		       (gx_use_texel_space ? 0 : (u32)(width - 1)));
 	gx_load_bp_reg(0x31000000 |
 		       (gx_use_texel_space ? 0 : (u32)(height - 1)));
+}
+
+static void gx_setup_texture_coordinate_scale(u16 width, u16 height,
+					      bool s_texel, bool t_texel)
+{
+	gx_load_bp_reg(0x30000000 | (s_texel ? 0 : (u32)(width - 1)));
+	gx_load_bp_reg(0x31000000 | (t_texel ? 0 : (u32)(height - 1)));
 }
 
 /*
@@ -1501,6 +1505,67 @@ static void gx_draw_color_rect(u16 x0, u16 y0, u16 x1, u16 y1,
 static void gx_draw_color_quad(u16 width, u16 height, u8 r, u8 g, u8 b)
 {
 	gx_draw_color_rect(0, 0, width, height, r, g, b);
+}
+
+static void gx_set_scissor(u16 x, u16 y, u16 width, u16 height);
+
+static void gx_draw_nearest_horizontal_runs(u16 src_width,
+					    u16 texture_width, u16 height,
+					    u16 texture_height,
+					    u16 dst_width)
+{
+	u16 dst_start = 0;
+
+	while (dst_start < dst_width) {
+		u16 src_index = gx_nearest_source_index(dst_start, src_width,
+						       dst_width);
+		u16 dst_end = dst_start + 1;
+		u16 draw_start;
+		u16 draw_end;
+
+		while (dst_end < dst_width &&
+		       gx_nearest_source_index(dst_end, src_width, dst_width) ==
+		       src_index)
+			dst_end++;
+		draw_start = dst_start ? dst_start - 1 : 0;
+		draw_end = min_t(u16, dst_end + 1, dst_width + 1);
+		gx_set_scissor(dst_start, 0, dst_end - dst_start, height);
+		gx_load_horizontal_run_tex_mtx0(src_index, texture_width,
+						texture_height);
+		gx_draw_color_rect(draw_start, 0, draw_end, height,
+				   0xff, 0xff, 0xff);
+		dst_start = dst_end;
+	}
+}
+
+static void gx_draw_nearest_vertical_runs(u16 x, u16 y, u16 width,
+					  u16 texture_width,
+					  u16 src_height,
+					  u16 texture_height,
+					  u16 dst_height)
+{
+	u16 dst_start = 0;
+
+	while (dst_start < dst_height) {
+		u16 src_index = gx_nearest_source_index(dst_start, src_height,
+						       dst_height);
+		u16 dst_end = dst_start + 1;
+		u16 draw_start;
+		u16 draw_end;
+
+		while (dst_end < dst_height &&
+		       gx_nearest_source_index(dst_end, src_height, dst_height) ==
+		       src_index)
+			dst_end++;
+		draw_start = dst_start ? y + dst_start - 1 : y;
+		draw_end = min_t(u16, y + dst_end + 1, y + dst_height + 1);
+		gx_set_scissor(x, y + dst_start, width, dst_end - dst_start);
+		gx_load_vertical_run_tex_mtx0(src_index, texture_height, x,
+					      texture_width);
+		gx_draw_color_rect(x, draw_start, x + width, draw_end,
+				   0xff, 0xff, 0xff);
+		dst_start = dst_end;
+	}
 }
 
 static void gx_set_scissor(u16 x, u16 y, u16 width, u16 height)
@@ -3173,23 +3238,26 @@ static int gcn_gx_drm_blit_scaled_rgb565(void *src_allocation,
 	struct gx_mem1_allocation *src = src_allocation;
 	struct gx_mem1_allocation *dst = dst_allocation;
 	void *crop = gx_tex_buf_alt;
-	struct gx_scaled_rect rect = {
-		.src_x = src_x,
-		.src_y = src_y,
-		.src_width = src_rect_width,
-		.src_height = src_rect_height,
-		.dst_x = dst_x,
-		.dst_y = dst_y,
-		.dst_width = dst_rect_width,
-		.dst_height = dst_rect_height,
-	};
+	void *horizontal = gx_tex_buf;
 	u32 finish_count;
+	u16 crop_height;
+	u16 crop_width;
+	u16 horizontal_width;
 	size_t crop_bytes;
 	size_t dst_bytes;
+	size_t horizontal_bytes;
 	size_t src_bytes;
 	long completed;
 	int ret;
 	int i;
+
+	if (src_rect_width == dst_rect_width &&
+	    src_rect_height == dst_rect_height)
+		return gcn_gx_drm_blit_rect_rgb565(src_allocation,
+				dst_allocation, src_width, src_height,
+				dst_width, dst_height, src_x, src_y,
+				dst_x, dst_y, src_rect_width,
+				src_rect_height);
 
 	if (!src || !dst || !src_width || !src_height || !dst_width ||
 	    !dst_height || (src_width & 3) || (src_height & 3) ||
@@ -3207,8 +3275,21 @@ static int gcn_gx_drm_blit_scaled_rgb565(void *src_allocation,
 		return -E2BIG;
 	if (!READ_ONCE(gx_accel_ready))
 		return -ENODEV;
-	crop_bytes = (size_t)DIV_ROUND_UP(src_rect_width, 4) *
-		     DIV_ROUND_UP(src_rect_height, 4) * 32;
+	if (src_rect_width > 640 || dst_rect_width > 640 ||
+	    src_rect_height > 528)
+		return -E2BIG;
+
+	/* Exact binary slopes require power-of-two private texture extents. */
+	crop_width = gx_power_of_two_extent(src_rect_width);
+	crop_height = gx_power_of_two_extent(src_rect_height);
+	horizontal_width = gx_power_of_two_extent(dst_rect_width);
+	crop_bytes = (size_t)crop_width * crop_height * sizeof(u16);
+	horizontal_bytes = (size_t)horizontal_width * crop_height *
+			   sizeof(u16);
+	if (crop_width > 640 || horizontal_width > 640 ||
+	    crop_height > 528 || crop_bytes > GX_TEX_BUF_SLOT_SIZE ||
+	    horizontal_bytes > GX_TEX_BUF_SLOT_SIZE)
+		return -E2BIG;
 
 	mutex_lock(&gx_submit_lock);
 	if (src != dst)
@@ -3218,6 +3299,8 @@ static int gcn_gx_drm_blit_scaled_rgb565(void *src_allocation,
 			   (unsigned long)dst->cpu_addr + dst_bytes);
 	flush_dcache_range((unsigned long)crop,
 			   (unsigned long)crop + crop_bytes);
+	flush_dcache_range((unsigned long)horizontal,
+			   (unsigned long)horizontal + horizontal_bytes);
 
 	/*
 	 * Snapshot the requested source rectangle into a private texture first.
@@ -3225,7 +3308,6 @@ static int gcn_gx_drm_blit_scaled_rgb565(void *src_allocation,
 	 * isolating the rectangle prevents nearest sampling from escaping its
 	 * edges and preserves same-object overlap semantics.
 	 */
-	finish_count = READ_ONCE(gx_pe_finish_count);
 	fifo_pos = 0;
 	gx_load_libogc_init_preamble();
 	gx_setup_display_copy_state();
@@ -3239,18 +3321,40 @@ static int gcn_gx_drm_blit_scaled_rgb565(void *src_allocation,
 		gx_wr8(0);
 	gx_set_copy_clear_rgb(0x00, 0x00, 0x00);
 	gx_copy_efb_rect_to_rgb565_texture(crop, 0, 0,
-					   src_rect_width, src_rect_height,
+					   crop_width, crop_height,
 					   true);
 	ret = gx_submit_cmds("render-blit-scaled-crop");
 	if (ret)
 		goto out_unlock;
 
-	/* gx_submit_cmds() observed the unique token ordered after the crop. */
+	/* Expand or reduce source columns exactly into a private intermediate. */
+	fifo_pos = 0;
+	gx_load_libogc_init_preamble();
+	gx_setup_display_copy_state();
+	gx_setup_rgb565_texture_state_mode(horizontal_width, crop_height,
+					   false);
+	gx_setup_texture_rgb565(crop, crop_width, crop_height);
+	gx_setup_texture_coordinate_scale(crop_width, crop_height,
+					  false, false);
+	gx_set_scissor(0, 0, dst_rect_width, src_rect_height);
+	gx_draw_nearest_horizontal_runs(src_rect_width, crop_width,
+					src_rect_height, crop_height,
+					 dst_rect_width);
+	gx_load_bp_reg(0x45000002);
+	for (i = 0; i < 32; i++)
+		gx_wr8(0);
+	gx_set_copy_clear_rgb(0x00, 0x00, 0x00);
+	gx_copy_efb_to_rgb565_texture(horizontal, horizontal_width,
+				      crop_height, true);
+	ret = gx_submit_cmds("render-blit-scaled-horizontal");
+	if (ret)
+		goto out_unlock;
+
+	/* gx_submit_cmds() observed the token ordered after the intermediate. */
 	finish_count = READ_ONCE(gx_pe_finish_count);
 	fifo_pos = 0;
 	gx_load_libogc_init_preamble();
 	gx_setup_display_copy_state();
-
 	gx_setup_rgb565_texture_state(dst_width, dst_height);
 	gx_setup_texture_rgb565(dst->cpu_addr, dst_width, dst_height);
 	gx_draw_color_quad(dst_width, dst_height, 0xff, 0xff, 0xff);
@@ -3258,13 +3362,15 @@ static int gcn_gx_drm_blit_scaled_rgb565(void *src_allocation,
 	for (i = 0; i < 32; i++)
 		gx_wr8(0);
 
-	rect.src_x = 0;
-	rect.src_y = 0;
-	gx_setup_rgb565_texture_state(dst_width, dst_height);
-	gx_load_pos_to_tex_mtx0_scaled(src_rect_width, src_rect_height, &rect);
-	gx_setup_texture_rgb565(crop, src_rect_width, src_rect_height);
+	gx_setup_rgb565_texture_state_mode(dst_width, dst_height, false);
+	gx_setup_texture_rgb565(horizontal, horizontal_width, crop_height);
+	gx_setup_texture_coordinate_scale(horizontal_width, crop_height,
+					  false, false);
 	gx_set_scissor(dst_x, dst_y, dst_rect_width, dst_rect_height);
-	gx_draw_color_quad(dst_width, dst_height, 0xff, 0xff, 0xff);
+	gx_draw_nearest_vertical_runs(dst_x, dst_y, dst_rect_width,
+				      horizontal_width, src_rect_height,
+				      crop_height,
+				      dst_rect_height);
 	gx_load_bp_reg(0x45000002);
 	for (i = 0; i < 32; i++)
 		gx_wr8(0);

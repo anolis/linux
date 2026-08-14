@@ -9839,3 +9839,92 @@ the translation-only and slope-only corrections. Future work should model the
 GX 1/128-texel fixed-point conversion per ratio or define the ABI around the
 hardware's deterministic sampling rule, rather than adding another global
 phase parameter.
+
+The fixed-point investigation ultimately rejected direct affine sampling for
+this ABI altogether. Static comparison with Dolphin's GX texture pipeline
+confirmed that the BP SU size registers scale transformed coordinates and the
+rasterizer converts the result to signed 17.7 fixed point by multiplying by
+128; nearest filtering then selects the integer `s >> 7` and `t >> 7` texel.
+Endpoint, phase, and span sweeps showed quantized boundaries that could not
+represent the conventional pixel-center oracle for every ratio with one
+interpolated quad. Constant-coordinate diagnostic runs initially remained
+confounded by shared quad edges and preserved-axis interpolation. Scissoring
+each run independently made the error structure measurable.
+
+Full mismatch maps supplied the decisive signal. With zero vertical phase,
+the 106 by 47 horizontal intermediate had 6784 mismatches, exactly 64 complete
+rows; adding 1/256 texel reduced that to 3180 mismatches, exactly 30 complete
+rows. The discontinuity began at source row 32. It was not random sampling
+noise: the non-power-of-two offscreen viewport generated a shifted preserved
+axis. Padding the private texture and viewport to 128 by 64 removed the shift
+completely. A subsequent one-pixel replication case showed one correct column
+and 88 black columns with a degenerate one-pixel private extent. Requiring a
+minimum private extent of four fixed that final edge case.
+
+The accepted implementation uses a separable nearest-neighbor pipeline. An
+exact-size request delegates to the established unscaled rectangle blit. A
+scaled request first renders the requested source rectangle at EFB origin and
+copies it into an isolated, power-of-two RGB565 texture. This retains bounded
+source-clamp and same-object snapshot semantics. The horizontal pass groups
+adjacent destination columns that select the same source index under
+`floor((2*d + 1)*s/(2*n))`, assigns that exact source coordinate with a
+position-derived texture matrix, and isolates the run with a scissor. It
+copies the padded horizontal result into the second private texture. The
+vertical pass repeats the same operation per destination-row run while
+preserving the exact horizontal coordinate, then copies the completed EFB
+back to the destination object. Power-of-two private dimensions make all
+preserved-axis slopes exact binary fractions; a minimum dimension of four
+avoids degenerate GX viewport and tile behavior.
+
+The diagnostic sampling parameters `scaled_bias_256ths` and
+`scaled_scale_ulps`, along with the rejected global scaled matrix helper, are
+removed. The scaled path explicitly selects position-derived normalized
+texture coordinates so unrelated unscaled diagnostic module parameters cannot
+change its contract. The temporary mismatch-map userspace instrumentation was
+also restored; `tools/wii-gcn-render-test.c` remains the strict expanded
+client with no diagnostic-only source changes.
+
+Host validation for the final tree passed `git diff --check`, strict
+patch-scoped `checkpatch.pl` with zero errors, warnings, or checks, native and
+static PowerPC client builds with `-Wall -Wextra -Werror`, and a focused
+PowerPC `W=1` GX module build. The DRM-enabled UML `gcn_drm_render` KUnit suite
+passed 9/9 and `gcn_gx_mem1` passed 3/3 using the repository's GCN KUnit
+fragment plus `CONFIG_KUNIT_UML_PCI=y`. The normal complete PowerPC
+`zImage modules -j16` build passed. A full-tree `W=1` build is not a valid
+additional gate for this patch because it stops on pre-existing
+`arch/powerpc/lib/sstep.c` unused-variable warnings; the changed GX object is
+clean under `W=1`.
+
+The final artifacts are:
+
+- `zImage` SHA-256:
+  `26ac350e35ae1463d98ffec4556339092e4679e7da36c8942f59c40bfc21a316`
+- `gcn-gx.ko` SHA-256:
+  `e3e186f80e1f26fcf128467d89fbd6222ec44bab24dc614a883df308e002e2f3`
+- static PowerPC `wii-gcn-render-test` SHA-256:
+  `689c4e83b6d7ec47f831d7084e687ced47699b8f2c4fdf59028cc6e7a354f5c3`
+- native `wii-gcn-render-test` SHA-256:
+  `e3408918da58dd6e34266cc354a5bfce4e4180499b53089bbebe70181d4fcdec`
+
+Hardware result: accepted. The checksum-pinned final module and strict static
+client passed twice across clean module unload and reload on boot ID
+`ba70e037-0c6d-4a5d-ba8c-7c0408fc322c`. Both runs retained every allocator,
+copy, four-colour fill, rectangle fill, translated and unequal-dimension blit,
+bottom-right boundary, and all-direction same-object overlap control. They
+then exhaustively passed 23 scaled cases: no-scale, exact 2x enlargement and
+reduction, mixed and odd ratios, prime ratios in both directions,
+near-identity scaling, full-width scaling, one-pixel replication on each axis,
+extreme reductions, and overlapping same-object scales. Every selected and
+outside destination pixel matched the conventional center-nearest snapshot
+oracle. Both runs ended with `PASS: GCN render UAPI`, unloaded GX, and restored
+the CPU console. The final GX timeout, stall, and failure audit is empty.
+
+One implementation limit remains explicit. A genuinely scaled request uses
+power-of-two private workspaces, so source width, destination width, and
+source height currently cannot exceed 512 even though render objects may be
+640 by 576. Equal-size requests bypass this restriction through the accepted
+unscaled path, and destination height does not require a padded workspace.
+Supporting scaled 513-640-pixel widths or source heights above 512 requires a
+tiled or multi-pass oversized path; silently weakening the power-of-two rule
+would reintroduce the measured row-shift failure. The conventional
+nearest-neighbor scaled RGB565 stage is otherwise accepted.
