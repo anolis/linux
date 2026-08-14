@@ -10232,3 +10232,20 @@ advancing vblank sequences, byte-exact pixels for all 121 rendered frames, a
 visually coherent moving cyan marker over the accepted quadrant/grid pattern,
 a clear live console after CRTC restoration, clean GX unload, and no GX/DRM
 timeout, FIFO stall, oops, panic, or machine check.
+
+Hardware result: accepted. The checksum-pinned candidate completed three
+independent 120-flip transactions on `6.18.40-wii+`. Every transaction
+verified all 121 rendered frames, or 37171200 destination pixels, byte for
+byte. The reported frame-30/60/90/120 vblank sequences were respectively
+344240/344330/344420/344511, 346962/347053/347143/347233, and
+416809/416899/416989/417080. All page-flip events arrived with the expected
+serials and every observed vblank sequence advanced.
+
+The final transaction was observed on the physical display. The moving cyan
+marker remained visually coherent over the accepted quadrant, grid, and
+checkerboard pattern, and the client restored a clear live console afterward.
+All three transactions restored the console CRTC, unloaded GX cleanly, and
+reported `TEST PASSED`. The post-test kernel log contained no GX/DRM timeout,
+FIFO stall, oops, panic, or machine check. This accepts sustained linear GX
+rendering through strict double-buffered KMS page flips and closes this test
+branch.
