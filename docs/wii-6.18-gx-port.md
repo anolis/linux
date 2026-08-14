@@ -9984,3 +9984,40 @@ alignment, exceeding the safe 512 KiB render pool. Full-screen 2x scaling
 therefore needs a separate render-memory architecture, such as staging
 ordinary DRM buffers through the internal workspaces, and must not reclaim the
 FDT window. Source heights above 512 also still require vertical striping.
+
+### Stage 640-wide source scaling positive control
+
+- Test branch: `test/wii-gx-oversized-scaled-blit`
+
+Extend the strict client with the reciprocal 640 by 240 to 320 by 120 exact
+2x reduction after the accepted wide-destination test releases its objects.
+The source and destination together remain within the safe 512 KiB render
+pool. The test initializes every source texel with a coordinate-derived value,
+leaves a distinct destination sentinel, and verifies all 38400 destination
+pixels against the conventional center-nearest oracle.
+
+This is a positive control for the other half of the oversized implementation:
+the source crop uses a 1024-texel padded private texture and a 640-pixel EFB
+copy with that padded tiled stride. No driver, UAPI, or memory-map change is
+needed. The previously accepted 320 by 120 to 640 by 240 case remains in the
+same client and independently validates the 1024-texel horizontal intermediate
+and destination-wide path.
+
+The checksum-pinned artifacts are:
+
+- unchanged `gcn-gx.ko` SHA-256:
+  `947c7b491abd8e58356652bd4ba2f56766e8fcf6af85e127ed7002c6acb2cd98`
+- static PowerPC `wii-gcn-render-test` SHA-256:
+  `1ff89c9e62dc194dfafa424ff5674117115fad2e2985e19b2c47cb15321b7e3d`
+
+Host validation passed `git diff --check`, strict patch-scoped checkpatch with
+zero errors, warnings, or checks, and warning-clean native and static PowerPC
+client builds.
+
+Hardware result: passed twice across clean module unload and reload. Every
+retained allocator, fill, blit, alias, and 23-case scaled control passed, the
+accepted 320 by 120 to 640 by 240 enlargement matched all 153600 pixels, and
+the new 640 by 240 to 320 by 120 reduction matched all 38400 pixels. Both runs
+ended with `PASS: GCN render UAPI` before restoring the CPU console. This
+accepts padded 1024-texel private source strides for the complete 640-pixel EFB
+width.

@@ -22,6 +22,10 @@
 #define WIDE_SRC_HEIGHT 120U
 #define WIDE_DST_WIDTH 640U
 #define WIDE_DST_HEIGHT 240U
+#define WIDE_REDUCE_SRC_WIDTH 640U
+#define WIDE_REDUCE_SRC_HEIGHT 240U
+#define WIDE_REDUCE_DST_WIDTH 320U
+#define WIDE_REDUCE_DST_HEIGHT 120U
 #define MAX_OBJECTS 1024U
 #define ARRAY_SIZE(array) (sizeof(array) / sizeof((array)[0]))
 
@@ -1050,6 +1054,105 @@ out:
 		fail("close 640-wide scaled-blit source");
 }
 
+static void test_wide_scaled_reduce(int fd)
+{
+	struct drm_gcn_ctx_create ctx = {};
+	struct drm_gcn_ctx_free free_ctx;
+	struct drm_gcn_gem_create src = {};
+	struct drm_gcn_gem_create dst = {};
+	struct drm_gcn_blit_scaled blit;
+	uint16_t *src_map = MAP_FAILED;
+	uint16_t *dst_map = MAP_FAILED;
+
+	if (create_bo_size(fd, &src, WIDE_REDUCE_SRC_WIDTH,
+			   WIDE_REDUCE_SRC_HEIGHT) ||
+	    create_bo_size(fd, &dst, WIDE_REDUCE_DST_WIDTH,
+			   WIDE_REDUCE_DST_HEIGHT)) {
+		fail("create 640-wide scaled-reduction objects");
+		goto out;
+	}
+	src_map = map_bo(fd, &src);
+	dst_map = map_bo(fd, &dst);
+	if (src_map == MAP_FAILED || dst_map == MAP_FAILED) {
+		fail("map 640-wide scaled-reduction objects");
+		goto out;
+	}
+
+	for (unsigned int y = 0; y < WIDE_REDUCE_SRC_HEIGHT; y++) {
+		for (unsigned int x = 0; x < WIDE_REDUCE_SRC_WIDTH; x++) {
+			size_t pixel = tiled_rgb565_index(x, y,
+						 WIDE_REDUCE_SRC_WIDTH);
+
+			src_map[pixel] = y * WIDE_REDUCE_SRC_WIDTH + x;
+		}
+	}
+	for (unsigned int y = 0; y < WIDE_REDUCE_DST_HEIGHT; y++) {
+		for (unsigned int x = 0; x < WIDE_REDUCE_DST_WIDTH; x++) {
+			size_t pixel = tiled_rgb565_index(x, y,
+						 WIDE_REDUCE_DST_WIDTH);
+
+			dst_map[pixel] = 0xa55a;
+		}
+	}
+
+	if (ioctl(fd, DRM_IOCTL_GCN_CTX_CREATE, &ctx)) {
+		fail("create 640-wide scaled-reduction context");
+		goto out;
+	}
+	blit = (struct drm_gcn_blit_scaled) {
+		.ctx_id = ctx.id,
+		.src_handle = src.handle,
+		.dst_handle = dst.handle,
+		.src_width = WIDE_REDUCE_SRC_WIDTH,
+		.src_height = WIDE_REDUCE_SRC_HEIGHT,
+		.dst_width = WIDE_REDUCE_DST_WIDTH,
+		.dst_height = WIDE_REDUCE_DST_HEIGHT,
+	};
+	if (ioctl(fd, DRM_IOCTL_GCN_BLIT_SCALED, &blit)) {
+		fail("submit 640x240 to 320x120 scaled reduction");
+		goto out_ctx;
+	}
+
+	for (unsigned int y = 0; y < WIDE_REDUCE_DST_HEIGHT; y++) {
+		for (unsigned int x = 0; x < WIDE_REDUCE_DST_WIDTH; x++) {
+			unsigned int source_x = scaled_source_offset(x,
+					WIDE_REDUCE_SRC_WIDTH,
+					WIDE_REDUCE_DST_WIDTH);
+			unsigned int source_y = scaled_source_offset(y,
+					WIDE_REDUCE_SRC_HEIGHT,
+					WIDE_REDUCE_DST_HEIGHT);
+			uint16_t expected = source_y * WIDE_REDUCE_SRC_WIDTH +
+					    source_x;
+			size_t pixel = tiled_rgb565_index(x, y,
+						 WIDE_REDUCE_DST_WIDTH);
+
+			if (dst_map[pixel] != expected) {
+				fprintf(stderr,
+					"FAIL: 640-wide reduction mismatch at (%u,%u): got=0x%04x expected=0x%04x\n",
+					x, y, dst_map[pixel], expected);
+				failures++;
+				goto out_ctx;
+			}
+		}
+	}
+	puts("SCALED: 640x240 to 320x120 preserved all 38400 pixels");
+
+out_ctx:
+	free_ctx.id = ctx.id;
+	free_ctx.pad = 0;
+	if (ioctl(fd, DRM_IOCTL_GCN_CTX_FREE, &free_ctx))
+		fail("free 640-wide scaled-reduction context");
+out:
+	if (dst_map != MAP_FAILED && munmap(dst_map, dst.size))
+		fail("unmap 640-wide scaled-reduction destination");
+	if (src_map != MAP_FAILED && munmap(src_map, src.size))
+		fail("unmap 640-wide scaled-reduction source");
+	if (dst.handle && close_bo(fd, dst.handle))
+		fail("close 640-wide scaled-reduction destination");
+	if (src.handle && close_bo(fd, src.handle))
+		fail("close 640-wide scaled-reduction source");
+}
+
 static int hold_mapping(const char *node)
 {
 	struct drm_gcn_gem_mmap mmap_args = {};
@@ -1270,6 +1373,8 @@ int main(int argc, char **argv)
 				   DRM_GCN_FEATURE_BLIT_SCALED_RGB565);
 		if (features & DRM_GCN_FEATURE_BLIT_SCALED_RGB565)
 			test_wide_scaled_blit(fd);
+		if (features & DRM_GCN_FEATURE_BLIT_SCALED_RGB565)
+			test_wide_scaled_reduce(fd);
 	}
 
 	close(other_fd);
