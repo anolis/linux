@@ -118,6 +118,8 @@ static int get_resources(int fd, struct drm_mode_card_res *res,
 	*connectors = xcalloc(res->count_connectors, sizeof(**connectors));
 	res->crtc_id_ptr = user_ptr(*crtcs);
 	res->connector_id_ptr = user_ptr(*connectors);
+	res->count_fbs = 0;
+	res->count_encoders = 0;
 	if (xioctl(fd, DRM_IOCTL_MODE_GETRESOURCES, res) < 0)
 		return -1;
 	return 0;

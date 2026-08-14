@@ -10130,7 +10130,7 @@ The checksum-pinned candidate artifacts are:
 - static PowerPC `wii-gcn-render-test` SHA-256:
   `e93c2f853790a9dd094417c5b0120bfc2496daf52156a68ca788c8c558d06aeb`
 - static PowerPC `wii-gcn-kms-render-test` SHA-256:
-  `d84ac5f32883adc0560d4aa24ebb363b765dfc906618cecba6e0fcc6726c9bf2`
+  `697c7c53f03bd4aa9293006a599e0cd9fccf8bfb26713b87f3c0139cd4bfc5b5`
 
 Host validation passed `git diff --check`, strict full-patch checkpatch with
 zero diagnostics, shellcheck and `bash -n` for the cycle script, warning-clean
@@ -10164,3 +10164,14 @@ tree with `ARCH=powerpc headers_install` and builds both static clients only
 against that tree. The corrected checksums above encode PowerPC write-only
 ioctls and supersede the two invalid client checksums. Hardware validation of
 the corrected strict and KMS clients remains pending.
+
+The corrected strict client passed on hardware. Every retained operation
+remained byte-exact, and both tiled and linear system-memory 320 by 240 to 640
+by 480 scales matched all 307200 pixels while preserving all 524288 MEM1
+bytes. The KMS client independently rendered and verified all 307200 linear
+pixels, then failed before presentation with `GETRESOURCES` returning
+`EFAULT`. Its second resource query retained nonzero framebuffer and encoder
+counts from the sizing query without supplying arrays for those unneeded IDs.
+Set both unrequested counts to zero while requesting only the allocated CRTC
+and connector arrays. KMS presentation and console restoration remain pending
+for a rebuilt client checksum.
