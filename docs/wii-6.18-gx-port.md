@@ -10128,9 +10128,9 @@ The checksum-pinned candidate artifacts are:
 - `gcn-gx.ko` SHA-256:
   `740a5092395e8a1d890d30022225d5d9f85118b53d32bef05c06036e5fffb68d`
 - static PowerPC `wii-gcn-render-test` SHA-256:
-  `333905a8adee5a4eb3e534d9e07aff875dbd7f5386e7699e9d463c6e95f58ab2`
+  `e93c2f853790a9dd094417c5b0120bfc2496daf52156a68ca788c8c558d06aeb`
 - static PowerPC `wii-gcn-kms-render-test` SHA-256:
-  `446bccdd03ea1fd77b8756d7e8df9cd4eb91a652fbf09f7b32694463364001b1`
+  `d84ac5f32883adc0560d4aa24ebb363b765dfc906618cecba6e0fcc6726c9bf2`
 
 Host validation passed `git diff --check`, strict full-patch checkpatch with
 zero diagnostics, shellcheck and `bash -n` for the cycle script, warning-clean
@@ -10147,3 +10147,20 @@ expected red, green, blue, and white quadrants with black grid lines and the
 magenta/gold center checkerboard, then restore a clear live console. Require a
 clean module unload and no GX/DRM timeout, FIFO stall, oops, panic, or machine
 check.
+
+The first hardware attempt used static client checksums `333905a8adee...` and
+`446bccdd03ea...`. Those artifacts were invalid: they had been compiled with
+host x86 ioctl direction definitions. Combined read/write ioctl numbers are
+the same on x86 and PowerPC, so capability queries and object creation worked,
+but write-only context-free, wait, and submit requests encoded `0x4008...`
+instead of PowerPC's `0x8008...`. The strict client consequently failed before
+any new linear-layout operation and leaked the test MEM1 handles during its
+failed cleanup. The accepted pre-linear client `547c214093f5...`, which uses
+the correct PowerPC ioctl numbers, then passed every retained test against the
+same kernel and module. This rules out a kernel or GX regression.
+
+`tools/wii-gcn-build-clients.sh` now installs a sanitized PowerPC UAPI header
+tree with `ARCH=powerpc headers_install` and builds both static clients only
+against that tree. The corrected checksums above encode PowerPC write-only
+ioctls and supersede the two invalid client checksums. Hardware validation of
+the corrected strict and KMS clients remains pending.
