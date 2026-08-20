@@ -10445,3 +10445,31 @@ native scene to remain correctly colored, coherent, and free from tile seams,
 stale quadrants, tearing, blanking, or corruption. Run the accepted scaled
 XRGB8888 mode as a control, restore the console, unload GX cleanly, and require
 no GX/DRM timeout, FIFO stall, fallback, oops, panic, or machine check.
+
+Hardware result: accepted. The checksum-pinned strict client passed every
+retained render operation before presentation. The native client then
+completed 60 page flips against the same loaded GX module. It verified all 61
+native frames, or 18739200 RGB565 destination pixels, byte for byte after 244
+ordered tile submissions. Frames 30 and 60 completed at vblank sequences
+316344 and 316558; every event carried the expected serial and every observed
+vblank sequence advanced.
+
+The four-tile conversion averaged 92810 microseconds per frame and reached a
+maximum of 122424 microseconds, or approximately 10.8 conversion frames per
+second. The user observed the native presentation and reported that it looked
+correct, with no visible tile seam, stale quadrant, tearing, blanking,
+corruption, or loss of coherence.
+
+Without reloading GX, the accepted 320 by 240 XRGB8888 source mode completed a
+40-flip control. It verified all 41 frames, or 12595200 destination pixels,
+and reached vblank 317454. Its conversion averaged 23619 microseconds and
+peaked at 30347 microseconds. Both modes restored the previous console
+framebuffer. The exact native-capable client checksum was independently
+verified on the Wii, GX unloaded cleanly, registration and unregistration were
+paired, and the final fault search found no GX/DRM timeout, FIFO stall,
+fallback, oops, panic, or machine check.
+
+This accepts functionally correct native-resolution XRGB8888 presentation
+through bounded tiles. The measured fourfold latency identifies repeated
+full-destination preservation and copyback as the next optimization target;
+this path is not yet fast enough for a responsive native-resolution desktop.
