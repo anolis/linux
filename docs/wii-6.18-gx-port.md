@@ -10473,3 +10473,57 @@ This accepts functionally correct native-resolution XRGB8888 presentation
 through bounded tiles. The measured fourfold latency identifies repeated
 full-destination preservation and copyback as the next optimization target;
 this path is not yet fast enough for a responsive native-resolution desktop.
+
+### Stage native full-frame XRGB8888 presentation in one GX submission
+
+- Test branch: `test/wii-gx-xrgb-native-full`
+- Candidate commit: `7906fe02b`
+
+Optimize the exact full-destination, unscaled system-memory XRGB8888 case that
+drives native 640 by 480 KMS presentation. Convert the complete packed source
+once into the private natural-size tiled RGB565 texture workspace, draw one
+full-screen textured quad, and copy EFB once into the second private workspace
+before returning the capture through the accepted destination-layout
+conversion. The operation remains bounded by the existing two 768 KiB private
+workspaces and does not change the render UAPI or its synchronization contract.
+
+The general scaled, partial-rectangle, and overlap path remains unchanged. The
+sustained KMS client now names the optimized single-operation workload
+`xrgb8888-native` and retains the exact accepted four-operation workload as
+`xrgb8888-native-tiled`. This provides an A/B control against the same source
+fixture, CPU oracle, double buffering, page-flip events, and loaded module.
+
+Candidate artifacts are:
+
+- `zImage` / `dtbImage.wii` SHA-256:
+  `403a76453515d9d4cb7f087a5f7ae7db83d5059b282eacabdb97d94ab2e00d17`
+- `vmlinux` SHA-256:
+  `85ff300eb7b5c38dbe1e755243200e57fddb3e5745a37deac6c57f499f439fae`
+- `vmlinux.unstripped` SHA-256:
+  `d34ffc78be55d01a7f29be5de6c64dc5c6db682fd59de4efa0ecf1bf4ec99280`
+- `gcn-gx.ko` SHA-256:
+  `bebd391507cc57104aa11a96f80783e56e13ed7cb26860f56027cdd1c8a4950c`
+- unchanged strict PowerPC render client SHA-256:
+  `cc8549c106799492a87b1d210267c0499ad87ef83580524f26d33f496b9cd2e6`
+- full-frame-capable sustained KMS page-flip client SHA-256:
+  `c8127596f7fe3c0ab72b1e16702f76787b33bc59dafc550af327ea9fb5a0305f`
+
+Host validation passed a complete `make -j16 modules zImage`, warning-clean
+PowerPC module and static-client builds, shellcheck, `bash -n`, `git diff
+--check`, and strict full-patch checkpatch with zero diagnostics. The module's
+undefined-symbol audit contains the expected kernel imports and GCN DRM
+registration hooks, with no legacy `gcnfb` dependency. A clean detached UML
+build at the exact candidate commit passed all 12 `gcn_drm_render` tests and
+all 3 `gcn_gx_mem1` tests.
+
+Hardware acceptance requires checksum-verifying the exact module and clients,
+then running the complete strict render suite. Against one loaded module, run
+at least 120 visible optimized `xrgb8888-native` flips followed by at least 40
+`xrgb8888-native-tiled` control flips. Require every destination pixel to
+match its native CPU oracle, all flip events to arrive in order with advancing
+vblank sequences, and both latency reports to complete without timeout.
+Visually require correct colors and geometry with no seam, stale region,
+tearing, blanking, or corruption. The optimized path must materially improve
+on the accepted four-tile average of 92810 microseconds. Finally restore the
+console, unload GX cleanly, and require no GX/DRM timeout, FIFO stall, fallback,
+oops, panic, or machine check.
