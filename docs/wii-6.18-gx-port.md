@@ -10303,3 +10303,25 @@ Repeat the strict client once against the same loaded module. Both runs must
 complete without GX/DRM timeout, FIFO stall, fallback, oops, panic, or machine
 check. Physical-display classification is not required because this milestone
 ends at a CPU-verified GEM destination and does not change VI/AVE scanout.
+
+Hardware result: accepted. The checksum-pinned kernel booted as
+`6.18.40-wii+` with boot ID
+`ae67272c-3e86-4f7d-82a4-fdb6fbeee690`. The deployed kernel image, loaded
+module, and strict PowerPC client independently matched the candidate hashes
+above.
+
+The strict client completed twice against the same loaded `gcn_gx` module.
+Both runs passed every retained RGB565 submit, fill, rectangle, overlap,
+scaling, system-object, and synchronization test. The capability gate
+observed both `DRM_GCN_FORMAT_XRGB8888` and
+`DRM_GCN_FEATURE_BLIT_SCALED_SYSTEM_XRGB8888_TO_RGB565`; otherwise the client
+would have failed before the new conversion test. Each run converted and
+scaled the independently varied 320 by 240 XRGB8888 source into a 640 by 480
+RGB565 destination with all 307200 pixels matching the CPU oracle. Each run
+also reported all 524288 MEM1 bytes free after system-object cleanup.
+
+GX registered once, remained loaded across both transactions, and unloaded
+cleanly afterward. The post-test kernel log contained no GX/DRM timeout, FIFO
+stall, fallback, oops, panic, or machine check. This accepts linear system
+XRGB8888 staging into RGB565 render destinations without requiring a physical
+display observation.
