@@ -10372,3 +10372,27 @@ correct red/green/blue/white quadrants, black grid, magenta/gold checkerboard,
 and coherent moving cyan marker during the XRGB8888 phase. Finally require
 console restoration, clean GX unload, and no timeout, FIFO stall, fallback,
 oops, panic, or machine check.
+
+Hardware result: accepted. The unchanged checksum-pinned kernel ran as
+`6.18.40-wii+` with boot ID
+`ae67272c-3e86-4f7d-82a4-fdb6fbeee690`. The strict render client first passed
+every retained operation, including its complete 307200-pixel XRGB8888
+conversion oracle, while preserving all 524288 MEM1 bytes.
+
+The selectable page-flip client then ran 120 XRGB8888-sourced flips. It
+verified all 121 frames, or 37171200 RGB565 destination pixels, byte for byte.
+Frame 30, 60, 90, and 120 completed at vblank sequences 27797, 27887, 27977,
+and 28069. Every event carried the expected serial and every observed vblank
+sequence advanced. The user observed the complete presentation and confirmed
+correct red, green, blue, and white quadrants, black grid, magenta/gold center
+checkerboard, and coherent cyan marker motion without tearing, blanking, or
+corruption.
+
+Without reloading GX, the same client completed a 40-flip RGB565 control. It
+verified all 41 frames, or 12595200 destination pixels, and reached vblank
+28727. Both phases restored the previous console framebuffer. The exact
+page-flip client checksum was independently verified on the Wii, GX unloaded
+cleanly, registration and unregistration were paired, and the post-test fault
+search found no GX/DRM timeout, FIFO stall, fallback, oops, panic, or machine
+check. This accepts sustained XRGB8888 desktop-style rendering through
+double-buffered RGB565 KMS presentation.
