@@ -10527,3 +10527,31 @@ tearing, blanking, or corruption. The optimized path must materially improve
 on the accepted four-tile average of 92810 microseconds. Finally restore the
 console, unload GX cleanly, and require no GX/DRM timeout, FIFO stall, fallback,
 oops, panic, or machine check.
+
+Hardware result: headless acceptance passed; visual acceptance remains
+pending. The unchanged checksum-pinned kernel ran as `6.18.40-wii+` with boot
+ID `ae67272c-3e86-4f7d-82a4-fdb6fbeee690`. Independent Wii-side SHA-256
+verification matched the candidate module, strict client, and page-flip client
+hashes above.
+
+The complete strict render client passed every retained allocator, copy, fill,
+rectangle, overlap, scale, system-memory, XRGB8888, synchronization, and MEM1
+capacity check. Against that same loaded module, the optimized native client
+completed 120 flips. It verified all 121 frames, or 37171200 destination
+pixels, byte for byte. Frames 30, 60, 90, and 120 completed at vblank sequences
+934116, 934272, 934423, and 934574. Conversion averaged 22940 microseconds per
+frame and reached a maximum of 40664 microseconds.
+
+Without reloading GX, the retained four-tile control completed 40 flips. It
+verified all 41 frames, or 12595200 pixels, reached vblank 935606, averaged
+92968 microseconds, and reached a maximum of 142748 microseconds. The new
+single-operation path is therefore 4.05 times faster than its same-module
+control and 4.05 times faster than the previously accepted 92810-microsecond
+baseline.
+
+Both presentation phases restored the previous console framebuffer. GX then
+unloaded cleanly; registration and unregistration were paired, no accelerator
+module remained loaded, and the final kernel-log search found no GX/DRM
+timeout, FIFO stall, fallback, oops, panic, or machine check. The user was not
+present at the display during this run, so the required visual replay remains
+the only open acceptance item.
