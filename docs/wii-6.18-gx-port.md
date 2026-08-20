@@ -10249,3 +10249,57 @@ reported `TEST PASSED`. The post-test kernel log contained no GX/DRM timeout,
 FIFO stall, oops, panic, or machine check. This accepts sustained linear GX
 rendering through strict double-buffered KMS page flips and closes this test
 branch.
+
+### Stage linear system XRGB8888 sources
+
+- Test branch: `test/wii-gx-system-xrgb8888`
+- Candidate commit: `790fe17d7`
+
+Add the first desktop-oriented source format to render ABI version 1 without
+opening a general GX command stream. A system-memory XRGB8888 object is legal
+only with linear layout and may be used only as a distinct source for the
+typed scaled-blit ioctl. Destinations remain the accepted tiled or linear
+RGB565 system objects. MEM1 objects remain RGB565-only, and tiled XRGB8888,
+XRGB8888 destinations, and aliased cross-format operations are rejected.
+
+The provider converts the selected packed XRGB8888 rectangle into the private
+tiled RGB565 crop workspace, then reuses the accepted nearest-neighbor
+horizontal and vertical GX passes. This preserves the established reservation,
+wait, syncobj, bounded-workspace, and CPU-readable destination contracts. The
+feature is advertised independently as
+`DRM_GCN_FEATURE_BLIT_SCALED_SYSTEM_XRGB8888_TO_RGB565`.
+
+The strict PowerPC client creates a 320 by 240 linear XRGB8888 source whose
+alpha, red, green, and blue channels all vary independently. It scales that
+surface to a 640 by 480 linear RGB565 system destination, waits on the
+destination write reservation, and compares all 307200 pixels against a CPU
+XRGB8888-to-RGB565 center-nearest oracle. It also requires system objects to
+leave the complete MEM1 render-object pool free.
+
+Candidate artifacts are:
+
+- `zImage` / `dtbImage.wii` SHA-256:
+  `0d550d44ac8b24501bebecbf9575f58d3626146ea2838f91255d5d0f82427ecd`
+- `vmlinux` SHA-256:
+  `6f8c4ea66ff8eb4219e693bdf28a6d0c30449f94471e4f8e4484f7919385134b`
+- `vmlinux.unstripped` SHA-256:
+  `84a0b0bfdf0abc34577e4e9ea71834ad27e4aed254bba5b8604ae7ab1eac9e6e`
+- `gcn-gx.ko` SHA-256:
+  `1702a7df46b7ee9c3b3f1386d8b489a2f4fe66e1d26d79be9f7f72dec5cdd40a`
+- strict PowerPC render client SHA-256:
+  `cc8549c106799492a87b1d210267c0499ad87ef83580524f26d33f496b9cd2e6`
+
+Host validation passed a complete `make -j16 modules zImage`, warning-clean
+PowerPC builds of the changed DRM and GX objects, a warning-clean static
+PowerPC client build against installed PowerPC UAPI headers, `git diff
+--check`, and strict full-patch checkpatch with zero diagnostics. UML KUnit
+passed all 12 `gcn_drm_render` tests and all 3 `gcn_gx_mem1` tests.
+
+Hardware acceptance is headless. Deploy and independently verify the exact
+kernel, module, and client checksums. Require every retained render-UAPI test
+to pass, the new XRGB8888 and feature capability bits to appear, all 307200
+converted/scaled pixels to match, and MEM1 free bytes to remain unchanged.
+Repeat the strict client once against the same loaded module. Both runs must
+complete without GX/DRM timeout, FIFO stall, fallback, oops, panic, or machine
+check. Physical-display classification is not required because this milestone
+ends at a CPU-verified GEM destination and does not change VI/AVE scanout.
