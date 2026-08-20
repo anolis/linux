@@ -3323,6 +3323,65 @@ static bool gx_valid_scaled_source(u32 format, u32 layout, bool system_memory)
 	       layout == DRM_GCN_GEM_LAYOUT_LINEAR;
 }
 
+static int
+gcn_gx_drm_blit_full_system_xrgb8888(const u32 *src, u16 src_width,
+				     u16 src_x, u16 src_y, u16 *dst,
+				     u16 width, u16 height, u32 dst_layout)
+{
+	u16 *capture = gx_tex_buf;
+	u16 *texture = gx_tex_buf_alt;
+	u32 finish_count;
+	size_t bytes = (size_t)width * height * sizeof(*texture);
+	long completed;
+	int ret;
+	int i;
+
+	if (bytes > GX_TEX_BUF_SLOT_SIZE || width > 640 || height > 528)
+		return -E2BIG;
+
+	mutex_lock(&gx_submit_lock);
+	gx_copy_xrgb8888_rect_to_tiled(src, src_width, src_x, src_y,
+				       texture, width, height, width, height);
+	flush_dcache_range((unsigned long)texture,
+			   (unsigned long)texture + bytes);
+
+	/* Prevent dirty CPU lines from overwriting the subsequent GX copy. */
+	memset(capture, 0, bytes);
+	flush_dcache_range((unsigned long)capture,
+			   (unsigned long)capture + bytes);
+
+	finish_count = READ_ONCE(gx_pe_finish_count);
+	fifo_pos = 0;
+	gx_load_libogc_init_preamble();
+	gx_setup_display_copy_state();
+	gx_setup_rgb565_texture_state(width, height);
+	gx_setup_texture_rgb565(texture, width, height);
+	gx_draw_color_quad(width, height, 0xff, 0xff, 0xff);
+	gx_load_bp_reg(0x45000002);
+	for (i = 0; i < 32; i++)
+		gx_wr8(0);
+	gx_set_copy_clear_rgb(0x00, 0x00, 0x00);
+	gx_copy_efb_to_rgb565_texture(capture, width, height, true);
+	ret = gx_submit_cmds("render-blit-xrgb8888-full");
+	if (ret)
+		goto out_unlock;
+
+	completed = gx_wait_for_pe_finishes(finish_count, 1);
+	if (!completed) {
+		pr_warn_ratelimited("gcn-gx: full XRGB8888 blit timed out waiting for final PE finish\n");
+		ret = -ETIMEDOUT;
+		goto out_unlock;
+	}
+
+	invalidate_dcache_range((unsigned long)capture,
+				(unsigned long)capture + bytes);
+	gx_copy_tiled_to_layout(capture, dst, width, height, dst_layout);
+
+out_unlock:
+	mutex_unlock(&gx_submit_lock);
+	return ret;
+}
+
 static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 					      void *dst_addr, u16 src_width,
 					      u16 src_height, u16 dst_width,
@@ -3377,6 +3436,14 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	if (src_rect_width > 640 || dst_rect_width > 640 ||
 	    src_rect_height > 528)
 		return -E2BIG;
+	if (system_memory &&
+	    src_format == DRM_GCN_GEM_FORMAT_XRGB8888 &&
+	    src_rect_width == dst_rect_width &&
+	    src_rect_height == dst_rect_height && !dst_x && !dst_y &&
+	    dst_rect_width == dst_width && dst_rect_height == dst_height)
+		return gcn_gx_drm_blit_full_system_xrgb8888(src_addr, src_width,
+					src_x, src_y, dst_addr, dst_width,
+					dst_height, dst_layout);
 
 	/* Exact binary slopes require power-of-two private texture extents. */
 	crop_width = gx_power_of_two_extent(src_rect_width);

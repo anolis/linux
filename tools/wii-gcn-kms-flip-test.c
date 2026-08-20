@@ -254,7 +254,7 @@ static int add_framebuffer(int fd, struct render_buffer *buffer)
 static int render_frame(int fd, __u32 ctx_id,
 			struct drm_gcn_gem_create *src, void *src_map,
 			struct render_buffer *dst, unsigned int frame,
-			bool native_tiled, uint64_t *render_ns)
+			bool native, bool native_tiled, uint64_t *render_ns)
 {
 	struct drm_gcn_blit_scaled blit = {
 		.ctx_id = ctx_id,
@@ -315,9 +315,9 @@ static int render_frame(int fd, __u32 ctx_id,
 
 	for (y = 0; y < DST_HEIGHT; y++) {
 		for (x = 0; x < DST_WIDTH; x++) {
-			unsigned int sx = native_tiled ? x :
+			unsigned int sx = native ? x :
 				scaled_source(x, src->width, DST_WIDTH);
-			unsigned int sy = native_tiled ? y :
+			unsigned int sy = native ? y :
 				scaled_source(y, src->height, DST_HEIGHT);
 			uint32_t source = pattern_xrgb8888(sx, sy, frame,
 						       src->width, src->height);
@@ -399,14 +399,21 @@ static unsigned int parse_flips(const char *value)
 	return parsed;
 }
 
-static __u32 parse_source_format(const char *value, bool *native_tiled)
+static __u32 parse_source_format(const char *value, bool *native,
+				 bool *native_tiled)
 {
+	*native = false;
 	*native_tiled = false;
 	if (!strcmp(value, "rgb565"))
 		return DRM_GCN_GEM_FORMAT_RGB565;
 	if (!strcmp(value, "xrgb8888"))
 		return DRM_GCN_GEM_FORMAT_XRGB8888;
 	if (!strcmp(value, "xrgb8888-native")) {
+		*native = true;
+		return DRM_GCN_GEM_FORMAT_XRGB8888;
+	}
+	if (!strcmp(value, "xrgb8888-native-tiled")) {
+		*native = true;
 		*native_tiled = true;
 		return DRM_GCN_GEM_FORMAT_XRGB8888;
 	}
@@ -414,9 +421,12 @@ static __u32 parse_source_format(const char *value, bool *native_tiled)
 	exit(EXIT_FAILURE);
 }
 
-static const char *source_format_name(__u32 format, bool native_tiled)
+static const char *source_format_name(__u32 format, bool native,
+				      bool native_tiled)
 {
 	if (native_tiled)
+		return "xrgb8888-native-tiled";
+	if (native)
 		return "xrgb8888-native";
 	return format == DRM_GCN_GEM_FORMAT_XRGB8888 ? "xrgb8888" : "rgb565";
 }
@@ -426,10 +436,12 @@ int main(int argc, char **argv)
 	const char *card = argc > 1 ? argv[1] : "/dev/dri/card0";
 	unsigned int flip_count = argc > 2 ? parse_flips(argv[2]) : DEFAULT_FLIPS;
 	const char *format_arg = argc > 3 ? argv[3] : "rgb565";
+	bool native;
 	bool native_tiled;
-	__u32 src_format = parse_source_format(format_arg, &native_tiled);
-	unsigned int src_width = native_tiled ? DST_WIDTH : SCALED_SRC_WIDTH;
-	unsigned int src_height = native_tiled ? DST_HEIGHT : SCALED_SRC_HEIGHT;
+	__u32 src_format = parse_source_format(format_arg, &native,
+					       &native_tiled);
+	unsigned int src_width = native ? DST_WIDTH : SCALED_SRC_WIDTH;
+	unsigned int src_height = native ? DST_HEIGHT : SCALED_SRC_HEIGHT;
 	struct drm_gcn_gem_create src = {};
 	struct render_buffer buffers[2] = {
 		{ .map = MAP_FAILED },
@@ -498,7 +510,7 @@ int main(int argc, char **argv)
 		uint64_t render_ns;
 
 		if (render_frame(fd, ctx.id, &src, src_map, &buffers[0], 0,
-				 native_tiled, &render_ns) < 0) {
+				 native, native_tiled, &render_ns) < 0) {
 			perror("render initial frame");
 			goto out;
 		}
@@ -519,7 +531,7 @@ int main(int argc, char **argv)
 	}
 	displayed = 1;
 	printf("gcn-kms-flip-test: %s initial frame verified, running %u flips\n",
-	       source_format_name(src_format, native_tiled), flip_count);
+	       source_format_name(src_format, native, native_tiled), flip_count);
 	fflush(stdout);
 
 	for (completed = 0; completed < flip_count; completed++) {
@@ -535,7 +547,7 @@ int main(int argc, char **argv)
 		uint64_t render_ns;
 
 		if (render_frame(fd, ctx.id, &src, src_map, next, frame,
-				 native_tiled, &render_ns) < 0) {
+				 native, native_tiled, &render_ns) < 0) {
 			perror("render back buffer");
 			goto out;
 		}
@@ -564,7 +576,7 @@ int main(int argc, char **argv)
 		}
 	}
 	printf("gcn-kms-flip-test: PASS format=%s frames=%u last-vblank=%u pixels=%u",
-	       source_format_name(src_format, native_tiled), completed + 1,
+	       source_format_name(src_format, native, native_tiled), completed + 1,
 	       last_sequence, (completed + 1) * DST_WIDTH * DST_HEIGHT);
 	printf(" render-us-avg=%llu render-us-max=%llu\n",
 	       (unsigned long long)(total_render_ns / (completed + 1) / 1000),

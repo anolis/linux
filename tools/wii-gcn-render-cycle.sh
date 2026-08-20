@@ -18,7 +18,7 @@ Options:
   --flip-client FILE   optional linear-render/KMS page-flip client
   --flip-count COUNT   page flips requested from flip client (default: 120)
   --flip-format FORMAT source format: rgb565, xrgb8888, or
-                       xrgb8888-native (default: rgb565)
+                       xrgb8888-native[-tiled] (default: rgb565)
   --module-args ARGS   arguments passed to insmod
   --reuse-remote       require checksum-matched files already in /tmp
   --keep-loaded        leave gcn_gx loaded after a successful test
@@ -124,7 +124,8 @@ if [[ ! $flip_count =~ ^[1-9][0-9]*$ ]] || (( flip_count > 10000 )); then
 	exit 2
 fi
 if [[ $flip_format != rgb565 && $flip_format != xrgb8888 &&
-      $flip_format != xrgb8888-native ]]; then
+      $flip_format != xrgb8888-native &&
+      $flip_format != xrgb8888-native-tiled ]]; then
 	printf 'Invalid page-flip source format: %s\n' "$flip_format" >&2
 	exit 2
 fi
