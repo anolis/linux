@@ -102,8 +102,9 @@ image=$repo/arch/powerpc/boot/zImage
 
 if (( build )); then
 	ARCH=powerpc CROSS_COMPILE=powerpc-linux-gnu- make -j"$jobs" wii_defconfig
-	if ! grep -q '^CONFIG_FB_GAMECUBE=y$' .config; then
-		echo "wii_defconfig did not enable CONFIG_FB_GAMECUBE=y" >&2
+	if ! grep -q '^CONFIG_DRM_GCN_VI=y$' .config ||
+	   ! grep -q '^CONFIG_DRM_GCN_GX=m$' .config; then
+		echo "wii_defconfig did not enable built-in GCN VI DRM and modular GX" >&2
 		exit 1
 	fi
 	CCACHE_DISABLE=1 ARCH=powerpc CROSS_COMPILE=powerpc-linux-gnu- \
