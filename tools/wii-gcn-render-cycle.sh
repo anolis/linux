@@ -17,6 +17,7 @@ Options:
   --kms-hold SECONDS   presentation duration (default: 5)
   --flip-client FILE   optional linear-render/KMS page-flip client
   --flip-count COUNT   page flips requested from flip client (default: 120)
+  --flip-format FORMAT source format: rgb565 or xrgb8888 (default: rgb565)
   --module-args ARGS   arguments passed to insmod
   --reuse-remote       require checksum-matched files already in /tmp
   --keep-loaded        leave gcn_gx loaded after a successful test
@@ -34,6 +35,7 @@ kms_client=
 kms_hold=5
 flip_client=
 flip_count=120
+flip_format=rgb565
 module_args=
 reuse_remote=0
 keep_loaded=0
@@ -67,6 +69,10 @@ while (($#)); do
 		;;
 	--flip-count)
 		flip_count=$2
+		shift
+		;;
+	--flip-format)
+		flip_format=$2
 		shift
 		;;
 	--module-args)
@@ -114,6 +120,10 @@ if [[ ! $kms_hold =~ ^[0-9]+$ ]]; then
 fi
 if [[ ! $flip_count =~ ^[1-9][0-9]*$ ]] || (( flip_count > 10000 )); then
 	printf 'Invalid page-flip count: %s\n' "$flip_count" >&2
+	exit 2
+fi
+if [[ $flip_format != rgb565 && $flip_format != xrgb8888 ]]; then
+	printf 'Invalid page-flip source format: %s\n' "$flip_format" >&2
 	exit 2
 fi
 if (( ! allow_dirty )) &&
@@ -258,9 +268,9 @@ if [[ -n $kms_client ]]; then
 	remote_notice "KMS presentation restored console"
 fi
 if [[ -n $flip_client ]]; then
-	remote_notice "running sustained KMS page-flip test"
+	remote_notice "running $flip_format sustained KMS page-flip test"
 	set +e
-	remote_exec "$remote_flip_client /dev/dri/card0 $flip_count"
+	remote_exec "$remote_flip_client /dev/dri/card0 $flip_count $flip_format"
 	test_status=$?
 	set -e
 	if (( test_status )); then

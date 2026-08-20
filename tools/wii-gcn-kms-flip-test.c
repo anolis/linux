@@ -29,7 +29,7 @@
 struct render_buffer {
 	struct drm_gcn_gem_create bo;
 	struct drm_mode_fb_cmd fb;
-	uint16_t *map;
+	void *map;
 };
 
 static int xioctl(int fd, unsigned long request, void *arg)
@@ -67,26 +67,34 @@ static uint64_t monotonic_ns(void)
 	return (uint64_t)now.tv_sec * 1000000000ULL + now.tv_nsec;
 }
 
-static uint16_t pattern(unsigned int x, unsigned int y, unsigned int frame)
+static uint32_t pattern_xrgb8888(unsigned int x, unsigned int y,
+				 unsigned int frame)
 {
-	static const uint16_t colors[] = {
-		0xf800, 0x07e0, 0x001f, 0xffff,
+	static const uint32_t colors[] = {
+		0x00ff0000, 0x0000ff00, 0x000000ff, 0x00ffffff,
 	};
 	unsigned int marker = frame * 7U % (SRC_WIDTH - 8U);
 	unsigned int quadrant = (y >= SRC_HEIGHT / 2) * 2 +
 				  (x >= SRC_WIDTH / 2);
-	uint16_t pixel = colors[quadrant];
+	uint32_t pixel = colors[quadrant];
 
 	if (x < 4 || x >= SRC_WIDTH - 4 || y < 4 || y >= SRC_HEIGHT - 4)
-		pixel = 0xffff;
+		pixel = 0x00ffffff;
 	else if (!(x % 40) || !(y % 30))
 		pixel = 0;
 	if (x >= 120 && x < 200 && y >= 90 && y < 150)
-		pixel = ((x / 5) ^ (y / 5)) & 1 ? 0xf81f : 0xffe0;
+		pixel = ((x / 5) ^ (y / 5)) & 1 ? 0x00ff00ff : 0x00ffff00;
 	if (x >= marker && x < marker + 8 && y >= 16 && y < SRC_HEIGHT - 16)
-		pixel = 0x07ff;
+		pixel = 0x0000ffff;
 
 	return pixel;
+}
+
+static uint16_t xrgb8888_to_rgb565(uint32_t pixel)
+{
+	return ((pixel >> 8) & 0xf800) |
+	       ((pixel >> 5) & 0x07e0) |
+	       ((pixel >> 3) & 0x001f);
 }
 
 static unsigned int scaled_source(unsigned int dst, unsigned int src_extent,
@@ -100,14 +108,14 @@ static unsigned int scaled_source(unsigned int dst, unsigned int src_extent,
 
 static int create_linear_bo(int fd, struct drm_gcn_gem_create *bo,
 			    unsigned int width, unsigned int height,
-			    uint16_t **map)
+			    __u32 format, void **map)
 {
 	struct drm_gcn_gem_mmap mmap_args = {};
 
 	*bo = (struct drm_gcn_gem_create) {
 		.width = width,
 		.height = height,
-		.format = DRM_GCN_GEM_FORMAT_RGB565,
+		.format = format,
 		.layout = DRM_GCN_GEM_LAYOUT_LINEAR,
 		.flags = DRM_GCN_GEM_CREATE_SYSTEM,
 	};
@@ -122,7 +130,7 @@ static int create_linear_bo(int fd, struct drm_gcn_gem_create *bo,
 	return *map == MAP_FAILED ? -1 : 0;
 }
 
-static void close_bo(int fd, struct drm_gcn_gem_create *bo, uint16_t *map)
+static void close_bo(int fd, struct drm_gcn_gem_create *bo, void *map)
 {
 	struct drm_gem_close close_args = { .handle = bo->handle };
 
@@ -230,7 +238,7 @@ static int add_framebuffer(int fd, struct render_buffer *buffer)
 }
 
 static int render_frame(int fd, __u32 ctx_id,
-			struct drm_gcn_gem_create *src, uint16_t *src_map,
+			struct drm_gcn_gem_create *src, void *src_map,
 			struct render_buffer *dst, unsigned int frame)
 {
 	struct drm_gcn_blit_scaled blit = {
@@ -249,10 +257,20 @@ static int render_frame(int fd, __u32 ctx_id,
 	unsigned int x;
 	unsigned int y;
 
-	for (y = 0; y < SRC_HEIGHT; y++)
-		for (x = 0; x < SRC_WIDTH; x++)
-			src_map[(size_t)y * SRC_WIDTH + x] = pattern(x, y, frame);
-	memset(dst->map, 0x5a, DST_WIDTH * DST_HEIGHT * sizeof(*dst->map));
+	for (y = 0; y < SRC_HEIGHT; y++) {
+		for (x = 0; x < SRC_WIDTH; x++) {
+			uint32_t pixel = pattern_xrgb8888(x, y, frame);
+			size_t offset = (size_t)y * SRC_WIDTH + x;
+
+			if (src->format == DRM_GCN_GEM_FORMAT_XRGB8888)
+				((uint32_t *)src_map)[offset] = pixel;
+			else
+				((uint16_t *)src_map)[offset] =
+					xrgb8888_to_rgb565(pixel);
+		}
+	}
+	memset(dst->map, 0x5a,
+	       DST_WIDTH * DST_HEIGHT * sizeof(uint16_t));
 	if (xioctl(fd, DRM_IOCTL_GCN_BLIT_SCALED, &blit) < 0)
 		return -1;
 	wait.timeout_ns = monotonic_ns() + 1000000000ULL;
@@ -263,8 +281,10 @@ static int render_frame(int fd, __u32 ctx_id,
 		for (x = 0; x < DST_WIDTH; x++) {
 			unsigned int sx = scaled_source(x, SRC_WIDTH, DST_WIDTH);
 			unsigned int sy = scaled_source(y, SRC_HEIGHT, DST_HEIGHT);
-			uint16_t expected = pattern(sx, sy, frame);
-			uint16_t actual = dst->map[(size_t)y * DST_WIDTH + x];
+			uint32_t source = pattern_xrgb8888(sx, sy, frame);
+			uint16_t expected = xrgb8888_to_rgb565(source);
+			uint16_t actual = ((uint16_t *)dst->map)
+				[(size_t)y * DST_WIDTH + x];
 
 			if (actual != expected) {
 				fprintf(stderr,
@@ -340,10 +360,27 @@ static unsigned int parse_flips(const char *value)
 	return parsed;
 }
 
+static __u32 parse_source_format(const char *value)
+{
+	if (!strcmp(value, "rgb565"))
+		return DRM_GCN_GEM_FORMAT_RGB565;
+	if (!strcmp(value, "xrgb8888"))
+		return DRM_GCN_GEM_FORMAT_XRGB8888;
+	fprintf(stderr, "invalid source format: %s\n", value);
+	exit(EXIT_FAILURE);
+}
+
+static const char *source_format_name(__u32 format)
+{
+	return format == DRM_GCN_GEM_FORMAT_XRGB8888 ? "xrgb8888" : "rgb565";
+}
+
 int main(int argc, char **argv)
 {
 	const char *card = argc > 1 ? argv[1] : "/dev/dri/card0";
 	unsigned int flip_count = argc > 2 ? parse_flips(argv[2]) : DEFAULT_FLIPS;
+	__u32 src_format = argc > 3 ? parse_source_format(argv[3]) :
+				       DRM_GCN_GEM_FORMAT_RGB565;
 	struct drm_gcn_gem_create src = {};
 	struct render_buffer buffers[2] = {
 		{ .map = MAP_FAILED },
@@ -359,7 +396,7 @@ int main(int argc, char **argv)
 	__u32 *crtc_ids = NULL;
 	__u32 connector_id = 0;
 	__u32 last_sequence = 0;
-	uint16_t *src_map = MAP_FAILED;
+	void *src_map = MAP_FAILED;
 	unsigned int completed = 0;
 	unsigned int created = 0;
 	int displayed = 0;
@@ -375,13 +412,15 @@ int main(int argc, char **argv)
 		perror("DRM_IOCTL_SET_MASTER");
 		goto out;
 	}
-	if (create_linear_bo(fd, &src, SRC_WIDTH, SRC_HEIGHT, &src_map) < 0) {
+	if (create_linear_bo(fd, &src, SRC_WIDTH, SRC_HEIGHT, src_format,
+			     &src_map) < 0) {
 		perror("create linear source");
 		goto out;
 	}
 	for (created = 0; created < 2; created++) {
 		if (create_linear_bo(fd, &buffers[created].bo, DST_WIDTH,
-				     DST_HEIGHT, &buffers[created].map) < 0 ||
+				     DST_HEIGHT, DRM_GCN_GEM_FORMAT_RGB565,
+				     &buffers[created].map) < 0 ||
 		    add_framebuffer(fd, &buffers[created]) < 0) {
 			perror("create linear scanout buffer");
 			created++;
@@ -421,8 +460,8 @@ int main(int argc, char **argv)
 		goto out;
 	}
 	displayed = 1;
-	printf("gcn-kms-flip-test: initial frame verified, running %u flips\n",
-	       flip_count);
+	printf("gcn-kms-flip-test: %s initial frame verified, running %u flips\n",
+	       source_format_name(src_format), flip_count);
 	fflush(stdout);
 
 	for (completed = 0; completed < flip_count; completed++) {
@@ -460,8 +499,8 @@ int main(int argc, char **argv)
 			fflush(stdout);
 		}
 	}
-	printf("gcn-kms-flip-test: PASS frames=%u last-vblank=%u pixels=%u\n",
-	       completed + 1, last_sequence,
+	printf("gcn-kms-flip-test: PASS format=%s frames=%u last-vblank=%u pixels=%u\n",
+	       source_format_name(src_format), completed + 1, last_sequence,
 	       (completed + 1) * DST_WIDTH * DST_HEIGHT);
 	ret = EXIT_SUCCESS;
 
