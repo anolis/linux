@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,10 +18,12 @@
 #include <drm/drm_mode.h>
 #include <drm/gcn_drm.h>
 
-#define SRC_WIDTH 320U
-#define SRC_HEIGHT 240U
+#define SCALED_SRC_WIDTH 320U
+#define SCALED_SRC_HEIGHT 240U
 #define DST_WIDTH 640U
 #define DST_HEIGHT 480U
+#define NATIVE_TILE_WIDTH 320U
+#define NATIVE_TILE_HEIGHT 240U
 #define DEFAULT_FLIPS 120U
 #define MAX_FLIPS 10000U
 #define FLIP_TIMEOUT_MS 2000
@@ -68,23 +71,34 @@ static uint64_t monotonic_ns(void)
 }
 
 static uint32_t pattern_xrgb8888(unsigned int x, unsigned int y,
-				 unsigned int frame)
+				 unsigned int frame, unsigned int width,
+				 unsigned int height)
 {
 	static const uint32_t colors[] = {
 		0x00ff0000, 0x0000ff00, 0x000000ff, 0x00ffffff,
 	};
-	unsigned int marker = frame * 7U % (SRC_WIDTH - 8U);
-	unsigned int quadrant = (y >= SRC_HEIGHT / 2) * 2 +
-				  (x >= SRC_WIDTH / 2);
+	unsigned int border_x = width / 80;
+	unsigned int border_y = height / 60;
+	unsigned int checker_x = width / 64;
+	unsigned int checker_y = height / 48;
+	unsigned int marker_width = width / 40;
+	unsigned int marker_step = width * 7U / SCALED_SRC_WIDTH;
+	unsigned int marker_margin = height / 15;
+	unsigned int marker = frame * marker_step % (width - marker_width);
+	unsigned int quadrant = (y >= height / 2) * 2 + (x >= width / 2);
 	uint32_t pixel = colors[quadrant];
 
-	if (x < 4 || x >= SRC_WIDTH - 4 || y < 4 || y >= SRC_HEIGHT - 4)
+	if (x < border_x || x >= width - border_x || y < border_y ||
+	    y >= height - border_y)
 		pixel = 0x00ffffff;
-	else if (!(x % 40) || !(y % 30))
+	else if (!(x % (width / 8)) || !(y % (height / 8)))
 		pixel = 0;
-	if (x >= 120 && x < 200 && y >= 90 && y < 150)
-		pixel = ((x / 5) ^ (y / 5)) & 1 ? 0x00ff00ff : 0x00ffff00;
-	if (x >= marker && x < marker + 8 && y >= 16 && y < SRC_HEIGHT - 16)
+	if (x >= width * 3 / 8 && x < width * 5 / 8 &&
+	    y >= height * 3 / 8 && y < height * 5 / 8)
+		pixel = ((x / checker_x) ^ (y / checker_y)) & 1 ?
+			0x00ff00ff : 0x00ffff00;
+	if (x >= marker && x < marker + marker_width && y >= marker_margin &&
+	    y < height - marker_margin)
 		pixel = 0x0000ffff;
 
 	return pixel;
@@ -239,16 +253,13 @@ static int add_framebuffer(int fd, struct render_buffer *buffer)
 
 static int render_frame(int fd, __u32 ctx_id,
 			struct drm_gcn_gem_create *src, void *src_map,
-			struct render_buffer *dst, unsigned int frame)
+			struct render_buffer *dst, unsigned int frame,
+			bool native_tiled, uint64_t *render_ns)
 {
 	struct drm_gcn_blit_scaled blit = {
 		.ctx_id = ctx_id,
 		.src_handle = src->handle,
 		.dst_handle = dst->bo.handle,
-		.src_width = SRC_WIDTH,
-		.src_height = SRC_HEIGHT,
-		.dst_width = DST_WIDTH,
-		.dst_height = DST_HEIGHT,
 	};
 	struct drm_gcn_wait wait = {
 		.handle = dst->bo.handle,
@@ -256,11 +267,13 @@ static int render_frame(int fd, __u32 ctx_id,
 	};
 	unsigned int x;
 	unsigned int y;
+	uint64_t start;
 
-	for (y = 0; y < SRC_HEIGHT; y++) {
-		for (x = 0; x < SRC_WIDTH; x++) {
-			uint32_t pixel = pattern_xrgb8888(x, y, frame);
-			size_t offset = (size_t)y * SRC_WIDTH + x;
+	for (y = 0; y < src->height; y++) {
+		for (x = 0; x < src->width; x++) {
+			uint32_t pixel = pattern_xrgb8888(x, y, frame,
+						      src->width, src->height);
+			size_t offset = (size_t)y * src->width + x;
 
 			if (src->format == DRM_GCN_GEM_FORMAT_XRGB8888)
 				((uint32_t *)src_map)[offset] = pixel;
@@ -271,17 +284,43 @@ static int render_frame(int fd, __u32 ctx_id,
 	}
 	memset(dst->map, 0x5a,
 	       DST_WIDTH * DST_HEIGHT * sizeof(uint16_t));
-	if (xioctl(fd, DRM_IOCTL_GCN_BLIT_SCALED, &blit) < 0)
-		return -1;
-	wait.timeout_ns = monotonic_ns() + 1000000000ULL;
+	start = monotonic_ns();
+	if (native_tiled) {
+		for (y = 0; y < DST_HEIGHT; y += NATIVE_TILE_HEIGHT) {
+			for (x = 0; x < DST_WIDTH; x += NATIVE_TILE_WIDTH) {
+				blit.src_x = x;
+				blit.src_y = y;
+				blit.src_width = NATIVE_TILE_WIDTH;
+				blit.src_height = NATIVE_TILE_HEIGHT;
+				blit.dst_x = x;
+				blit.dst_y = y;
+				blit.dst_width = NATIVE_TILE_WIDTH;
+				blit.dst_height = NATIVE_TILE_HEIGHT;
+				if (xioctl(fd, DRM_IOCTL_GCN_BLIT_SCALED, &blit) < 0)
+					return -1;
+			}
+		}
+	} else {
+		blit.src_width = src->width;
+		blit.src_height = src->height;
+		blit.dst_width = DST_WIDTH;
+		blit.dst_height = DST_HEIGHT;
+		if (xioctl(fd, DRM_IOCTL_GCN_BLIT_SCALED, &blit) < 0)
+			return -1;
+	}
+	wait.timeout_ns = monotonic_ns() + 5000000000ULL;
 	if (xioctl(fd, DRM_IOCTL_GCN_WAIT, &wait) < 0)
 		return -1;
+	*render_ns = monotonic_ns() - start;
 
 	for (y = 0; y < DST_HEIGHT; y++) {
 		for (x = 0; x < DST_WIDTH; x++) {
-			unsigned int sx = scaled_source(x, SRC_WIDTH, DST_WIDTH);
-			unsigned int sy = scaled_source(y, SRC_HEIGHT, DST_HEIGHT);
-			uint32_t source = pattern_xrgb8888(sx, sy, frame);
+			unsigned int sx = native_tiled ? x :
+				scaled_source(x, src->width, DST_WIDTH);
+			unsigned int sy = native_tiled ? y :
+				scaled_source(y, src->height, DST_HEIGHT);
+			uint32_t source = pattern_xrgb8888(sx, sy, frame,
+						       src->width, src->height);
 			uint16_t expected = xrgb8888_to_rgb565(source);
 			uint16_t actual = ((uint16_t *)dst->map)
 				[(size_t)y * DST_WIDTH + x];
@@ -360,18 +399,25 @@ static unsigned int parse_flips(const char *value)
 	return parsed;
 }
 
-static __u32 parse_source_format(const char *value)
+static __u32 parse_source_format(const char *value, bool *native_tiled)
 {
+	*native_tiled = false;
 	if (!strcmp(value, "rgb565"))
 		return DRM_GCN_GEM_FORMAT_RGB565;
 	if (!strcmp(value, "xrgb8888"))
 		return DRM_GCN_GEM_FORMAT_XRGB8888;
+	if (!strcmp(value, "xrgb8888-native")) {
+		*native_tiled = true;
+		return DRM_GCN_GEM_FORMAT_XRGB8888;
+	}
 	fprintf(stderr, "invalid source format: %s\n", value);
 	exit(EXIT_FAILURE);
 }
 
-static const char *source_format_name(__u32 format)
+static const char *source_format_name(__u32 format, bool native_tiled)
 {
+	if (native_tiled)
+		return "xrgb8888-native";
 	return format == DRM_GCN_GEM_FORMAT_XRGB8888 ? "xrgb8888" : "rgb565";
 }
 
@@ -379,8 +425,11 @@ int main(int argc, char **argv)
 {
 	const char *card = argc > 1 ? argv[1] : "/dev/dri/card0";
 	unsigned int flip_count = argc > 2 ? parse_flips(argv[2]) : DEFAULT_FLIPS;
-	__u32 src_format = argc > 3 ? parse_source_format(argv[3]) :
-				       DRM_GCN_GEM_FORMAT_RGB565;
+	const char *format_arg = argc > 3 ? argv[3] : "rgb565";
+	bool native_tiled;
+	__u32 src_format = parse_source_format(format_arg, &native_tiled);
+	unsigned int src_width = native_tiled ? DST_WIDTH : SCALED_SRC_WIDTH;
+	unsigned int src_height = native_tiled ? DST_HEIGHT : SCALED_SRC_HEIGHT;
 	struct drm_gcn_gem_create src = {};
 	struct render_buffer buffers[2] = {
 		{ .map = MAP_FAILED },
@@ -396,6 +445,8 @@ int main(int argc, char **argv)
 	__u32 *crtc_ids = NULL;
 	__u32 connector_id = 0;
 	__u32 last_sequence = 0;
+	uint64_t max_render_ns = 0;
+	uint64_t total_render_ns = 0;
 	void *src_map = MAP_FAILED;
 	unsigned int completed = 0;
 	unsigned int created = 0;
@@ -412,7 +463,7 @@ int main(int argc, char **argv)
 		perror("DRM_IOCTL_SET_MASTER");
 		goto out;
 	}
-	if (create_linear_bo(fd, &src, SRC_WIDTH, SRC_HEIGHT, src_format,
+	if (create_linear_bo(fd, &src, src_width, src_height, src_format,
 			     &src_map) < 0) {
 		perror("create linear source");
 		goto out;
@@ -443,9 +494,16 @@ int main(int argc, char **argv)
 		perror("DRM_IOCTL_MODE_GETCRTC");
 		goto out;
 	}
-	if (render_frame(fd, ctx.id, &src, src_map, &buffers[0], 0) < 0) {
-		perror("render initial frame");
-		goto out;
+	{
+		uint64_t render_ns;
+
+		if (render_frame(fd, ctx.id, &src, src_map, &buffers[0], 0,
+				 native_tiled, &render_ns) < 0) {
+			perror("render initial frame");
+			goto out;
+		}
+		total_render_ns = render_ns;
+		max_render_ns = render_ns;
 	}
 	set_crtc = (struct drm_mode_crtc) {
 		.set_connectors_ptr = user_ptr(&connector_id),
@@ -461,7 +519,7 @@ int main(int argc, char **argv)
 	}
 	displayed = 1;
 	printf("gcn-kms-flip-test: %s initial frame verified, running %u flips\n",
-	       source_format_name(src_format), flip_count);
+	       source_format_name(src_format, native_tiled), flip_count);
 	fflush(stdout);
 
 	for (completed = 0; completed < flip_count; completed++) {
@@ -474,11 +532,16 @@ int main(int argc, char **argv)
 			.user_data = frame,
 		};
 		__u32 sequence;
+		uint64_t render_ns;
 
-		if (render_frame(fd, ctx.id, &src, src_map, next, frame) < 0) {
+		if (render_frame(fd, ctx.id, &src, src_map, next, frame,
+				 native_tiled, &render_ns) < 0) {
 			perror("render back buffer");
 			goto out;
 		}
+		total_render_ns += render_ns;
+		if (render_ns > max_render_ns)
+			max_render_ns = render_ns;
 		if (xioctl(fd, DRM_IOCTL_MODE_PAGE_FLIP, &flip) < 0) {
 			perror("DRM_IOCTL_MODE_PAGE_FLIP");
 			goto out;
@@ -494,14 +557,18 @@ int main(int argc, char **argv)
 		}
 		last_sequence = sequence;
 		if (!(frame % 30)) {
-			printf("gcn-kms-flip-test: frame=%u vblank=%u\n", frame,
-			       sequence);
+			printf("gcn-kms-flip-test: frame=%u vblank=%u render-us=%llu\n",
+			       frame, sequence,
+			       (unsigned long long)(render_ns / 1000));
 			fflush(stdout);
 		}
 	}
-	printf("gcn-kms-flip-test: PASS format=%s frames=%u last-vblank=%u pixels=%u\n",
-	       source_format_name(src_format), completed + 1, last_sequence,
-	       (completed + 1) * DST_WIDTH * DST_HEIGHT);
+	printf("gcn-kms-flip-test: PASS format=%s frames=%u last-vblank=%u pixels=%u",
+	       source_format_name(src_format, native_tiled), completed + 1,
+	       last_sequence, (completed + 1) * DST_WIDTH * DST_HEIGHT);
+	printf(" render-us-avg=%llu render-us-max=%llu\n",
+	       (unsigned long long)(total_render_ns / (completed + 1) / 1000),
+	       (unsigned long long)(max_render_ns / 1000));
 	ret = EXIT_SUCCESS;
 
 out:
