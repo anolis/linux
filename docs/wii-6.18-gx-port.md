@@ -10396,3 +10396,52 @@ cleanly, registration and unregistration were paired, and the post-test fault
 search found no GX/DRM timeout, FIFO stall, fallback, oops, panic, or machine
 check. This accepts sustained XRGB8888 desktop-style rendering through
 double-buffered RGB565 KMS presentation.
+
+### Stage native-resolution XRGB8888 presentation through bounded tiles
+
+- Test branch: `test/wii-gx-xrgb-native-tiled-kms`
+- Candidate commit: `3d383887f`
+
+Remove the presentation test's 320 by 240 source-resolution limitation without
+increasing the two fixed 768 KiB private GX workspaces. Add an
+`xrgb8888-native` mode with a 640 by 480 linear system source. Each completed
+back buffer is composed through four ordered 320 by 240 XRGB8888-to-RGB565
+operations. Every operation fits the accepted workspace contract, targets its
+matching destination quadrant, and must preserve the quadrants written by
+earlier operations.
+
+The client fills the native source with a proportionally scaled version of the
+accepted quadrant, grid, checkerboard, and moving-marker fixture. It poisons
+the complete non-visible RGB565 destination first, submits all four tiles,
+waits on the destination's final write reservation, and compares all 307200
+pixels against a native-resolution CPU conversion oracle before requesting the
+page flip. It retains strict double buffering, event-serial checks, advancing
+vblank checks, and saved-console restoration. Per-frame conversion latency is
+reported so this functional milestone also identifies the cost of repeatedly
+preserving and copying the full destination around bounded updates.
+
+Candidate artifacts are:
+
+- unchanged `zImage` / `dtbImage.wii` SHA-256:
+  `0d550d44ac8b24501bebecbf9575f58d3626146ea2838f91255d5d0f82427ecd`
+- unchanged `gcn-gx.ko` SHA-256:
+  `1702a7df46b7ee9c3b3f1386d8b489a2f4fe66e1d26d79be9f7f72dec5cdd40a`
+- unchanged strict PowerPC render client SHA-256:
+  `cc8549c106799492a87b1d210267c0499ad87ef83580524f26d33f496b9cd2e6`
+- native-capable sustained KMS page-flip client SHA-256:
+  `16618cefff0e06a319ad588dc67faa980142dc6b82517f759c0dcbcc203c1874`
+
+Host validation passed strict full-patch checkpatch with zero diagnostics,
+`git diff --check`, shellcheck and `bash -n` for the cycle script, and a
+warning-clean static client build against installed PowerPC UAPI headers. The
+result is a 32-bit, big-endian PowerPC executable.
+
+Hardware acceptance requires the checksum-pinned kernel, module, strict client,
+and page-flip client. Run the retained render suite, then at least 60 visible
+native XRGB8888 flips against one loaded module. Require all native destination
+pixels to match, every flip event to arrive in order with advancing vblank,
+and the latency report to complete without a timeout. Visually require the
+native scene to remain correctly colored, coherent, and free from tile seams,
+stale quadrants, tearing, blanking, or corruption. Run the accepted scaled
+XRGB8888 mode as a control, restore the console, unload GX cleanly, and require
+no GX/DRM timeout, FIFO stall, fallback, oops, panic, or machine check.
