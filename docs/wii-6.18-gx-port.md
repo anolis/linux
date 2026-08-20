@@ -10325,3 +10325,50 @@ cleanly afterward. The post-test kernel log contained no GX/DRM timeout, FIFO
 stall, fallback, oops, panic, or machine check. This accepts linear system
 XRGB8888 staging into RGB565 render destinations without requiring a physical
 display observation.
+
+### Stage sustained XRGB8888 rendering through KMS flips
+
+- Test branch: `test/wii-gx-xrgb-kms-flip`
+- Candidate commit: `7a94a3296`
+
+Exercise the accepted XRGB8888 source conversion as an observable desktop-style
+presentation loop. Extend the sustained KMS client with a source-format
+selector while preserving its accepted RGB565 mode. Both modes generate the
+same deterministic quadrant, grid, magenta/gold checkerboard, and moving cyan
+marker scene. XRGB8888 mode writes packed 32-bit source pixels, submits the
+typed conversion and scale into the non-visible linear RGB565 KMS buffer,
+waits for the destination write reservation, and checks every destination
+pixel against an independent CPU XRGB8888-to-RGB565 center-nearest oracle.
+
+The client retains strict double buffering. It verifies a complete back buffer
+before each vblank-event page flip, checks the event serial and advancing
+vblank sequence, and never writes the currently displayed framebuffer. The
+cycle script reports the selected source format on tty0 and restores the saved
+console CRTC after the presentation test.
+
+Candidate artifacts are:
+
+- unchanged `zImage` / `dtbImage.wii` SHA-256:
+  `0d550d44ac8b24501bebecbf9575f58d3626146ea2838f91255d5d0f82427ecd`
+- unchanged `gcn-gx.ko` SHA-256:
+  `1702a7df46b7ee9c3b3f1386d8b489a2f4fe66e1d26d79be9f7f72dec5cdd40a`
+- unchanged strict PowerPC render client SHA-256:
+  `cc8549c106799492a87b1d210267c0499ad87ef83580524f26d33f496b9cd2e6`
+- selectable sustained KMS page-flip client SHA-256:
+  `7b8b9c2e3dc11f23efb48e40bad0226c87637e7b10ad2cb97ca1b78332d2958c`
+
+Host validation passed strict full-patch checkpatch with zero diagnostics,
+`git diff --check`, shellcheck and `bash -n` for the cycle script, and a
+warning-clean static client build against installed PowerPC UAPI headers. The
+result is a 32-bit, big-endian PowerPC executable.
+
+Hardware acceptance requires the checksum-pinned kernel, module, strict client,
+and page-flip client. Run the complete retained render suite, then 120 visible
+XRGB8888-sourced page flips and an RGB565 control against the same loaded
+module. Require all 121 XRGB8888 frames, or 37171200 destination pixels, to
+match the CPU oracle, all flip events to arrive in order with advancing vblank
+sequences, and the RGB565 control to remain byte-exact. Visually require the
+correct red/green/blue/white quadrants, black grid, magenta/gold checkerboard,
+and coherent moving cyan marker during the XRGB8888 phase. Finally require
+console restoration, clean GX unload, and no timeout, FIFO stall, fallback,
+oops, panic, or machine check.
