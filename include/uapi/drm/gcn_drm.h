@@ -24,6 +24,7 @@ enum drm_gcn_param {
 };
 
 #define DRM_GCN_FORMAT_RGB565		(1ULL << 0)
+#define DRM_GCN_FORMAT_XRGB8888		(1ULL << 1)
 #define DRM_GCN_LAYOUT_TILED_4X4		(1ULL << 0)
 #define DRM_GCN_LAYOUT_LINEAR		(1ULL << 1)
 
@@ -41,6 +42,7 @@ enum drm_gcn_param {
 #define DRM_GCN_FEATURE_SYSTEM_GEM		(1ULL << 11)
 #define DRM_GCN_FEATURE_BLIT_SCALED_SYSTEM_RGB565	(1ULL << 12)
 #define DRM_GCN_FEATURE_SYSTEM_GEM_LINEAR	(1ULL << 13)
+#define DRM_GCN_FEATURE_BLIT_SCALED_SYSTEM_XRGB8888_TO_RGB565	(1ULL << 14)
 
 struct drm_gcn_get_param {
 	__u32 param;
@@ -51,6 +53,7 @@ struct drm_gcn_get_param {
 
 enum drm_gcn_gem_format {
 	DRM_GCN_GEM_FORMAT_RGB565 = 1,
+	DRM_GCN_GEM_FORMAT_XRGB8888 = 2,
 };
 
 enum drm_gcn_gem_layout {
@@ -178,7 +181,8 @@ struct drm_gcn_submit {
 
 /*
  * Scale one source rectangle into one destination rectangle using nearest
- * sampling. Source and destination may name the same object.
+ * sampling. Matching RGB565 objects may name the same object. A linear
+ * system-memory XRGB8888 source may target a distinct RGB565 system object.
  */
 struct drm_gcn_blit_scaled {
 	__u32 ctx_id;

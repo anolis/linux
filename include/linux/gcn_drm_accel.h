@@ -55,6 +55,14 @@ struct gcn_drm_accel_ops {
 					 u16 src_rect_height, u16 dst_x,
 					 u16 dst_y, u16 dst_rect_width,
 					 u16 dst_rect_height);
+	int (*blit_scaled_system_xrgb8888)(const void *src, void *dst,
+					   u16 src_width, u16 src_height,
+					   u16 dst_width, u16 dst_height,
+					   u32 dst_layout, u16 src_x, u16 src_y,
+					   u16 src_rect_width,
+					   u16 src_rect_height, u16 dst_x,
+					   u16 dst_y, u16 dst_rect_width,
+					   u16 dst_rect_height);
 };
 
 int gcn_drm_register_accel(const struct gcn_drm_accel_ops *ops);

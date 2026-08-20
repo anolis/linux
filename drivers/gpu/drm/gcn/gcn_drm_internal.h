@@ -42,6 +42,7 @@ int gcn_drm_provider_blit_scaled(const struct gcn_drm_accel_ops *provider,
 int gcn_drm_provider_blit_scaled_system(const void *src, void *dst,
 					u16 src_width, u16 src_height,
 					u16 dst_width, u16 dst_height,
+					u32 src_format, u32 dst_format,
 					u32 src_layout, u32 dst_layout,
 					const struct drm_gcn_blit_scaled *args);
 

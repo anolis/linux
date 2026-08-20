@@ -69,6 +69,23 @@ static uint16_t same_object_pattern(unsigned int x, unsigned int y)
 	return y * TEST_WIDTH + x;
 }
 
+static uint32_t xrgb8888_source_pattern(unsigned int x, unsigned int y)
+{
+	uint32_t alpha = (x * 13 + y * 29) & 0xff;
+	uint32_t red = (x * 37 + y * 11 + 3) & 0xff;
+	uint32_t green = (x * 17 + y * 43 + 5) & 0xff;
+	uint32_t blue = (x * 53 + y * 7 + 9) & 0xff;
+
+	return (alpha << 24) | (red << 16) | (green << 8) | blue;
+}
+
+static uint16_t xrgb8888_to_rgb565(uint32_t pixel)
+{
+	return ((pixel >> 8) & 0xf800) |
+	       ((pixel >> 5) & 0x07e0) |
+	       ((pixel >> 3) & 0x001f);
+}
+
 struct same_object_blit_case {
 	const char *name;
 	uint16_t src_x;
@@ -300,18 +317,29 @@ static int get_param(int fd, uint32_t param, uint64_t *value)
 	return 0;
 }
 
+static int
+create_bo_size_format_layout_flags(int fd, struct drm_gcn_gem_create *args,
+				   uint32_t width, uint32_t height,
+				   uint32_t format, uint32_t layout,
+				   uint32_t flags)
+{
+	memset(args, 0, sizeof(*args));
+	args->width = width;
+	args->height = height;
+	args->format = format;
+	args->layout = layout;
+	args->flags = flags;
+	return ioctl(fd, DRM_IOCTL_GCN_GEM_CREATE, args);
+}
+
 static int create_bo_size_layout_flags(int fd,
 				       struct drm_gcn_gem_create *args,
 				       uint32_t width, uint32_t height,
 				       uint32_t layout, uint32_t flags)
 {
-	memset(args, 0, sizeof(*args));
-	args->width = width;
-	args->height = height;
-	args->format = DRM_GCN_GEM_FORMAT_RGB565;
-	args->layout = layout;
-	args->flags = flags;
-	return ioctl(fd, DRM_IOCTL_GCN_GEM_CREATE, args);
+	return create_bo_size_format_layout_flags(fd, args, width, height,
+						  DRM_GCN_GEM_FORMAT_RGB565,
+						  layout, flags);
 }
 
 static int create_bo_size_flags(int fd, struct drm_gcn_gem_create *args,
@@ -1316,6 +1344,131 @@ static void test_full_scaled_system_blit(int fd)
 	test_full_system_layout(fd, DRM_GCN_GEM_LAYOUT_LINEAR, "linear");
 }
 
+static void test_full_xrgb8888_to_rgb565_system_blit(int fd)
+{
+	struct drm_gcn_ctx_create ctx = {};
+	struct drm_gcn_ctx_free free_ctx;
+	struct drm_gcn_gem_create src = {};
+	struct drm_gcn_gem_create dst = {};
+	struct drm_gcn_blit_scaled blit;
+	struct drm_gcn_wait wait_args;
+	uint32_t *src_map = MAP_FAILED;
+	uint16_t *dst_map = MAP_FAILED;
+	uint64_t free_before = 0;
+	uint64_t free_after = 0;
+
+	if (get_param(fd, DRM_GCN_PARAM_MEM1_FREE_BYTES, &free_before)) {
+		fail("query MEM1 before XRGB8888 system scale");
+		return;
+	}
+	if (create_bo_size_format_layout_flags(fd, &src, FULL_SRC_WIDTH,
+					       FULL_SRC_HEIGHT,
+					       DRM_GCN_GEM_FORMAT_XRGB8888,
+					       DRM_GCN_GEM_LAYOUT_LINEAR,
+					       DRM_GCN_GEM_CREATE_SYSTEM) ||
+	    create_bo_size_layout_flags(fd, &dst, FULL_DST_WIDTH,
+					FULL_DST_HEIGHT,
+					DRM_GCN_GEM_LAYOUT_LINEAR,
+					DRM_GCN_GEM_CREATE_SYSTEM)) {
+		fail("create XRGB8888-to-RGB565 system objects");
+		goto out;
+	}
+	if (src.size != FULL_SRC_WIDTH * FULL_SRC_HEIGHT * sizeof(*src_map)) {
+		fail_value("XRGB8888 source size", src.size,
+			   FULL_SRC_WIDTH * FULL_SRC_HEIGHT * sizeof(*src_map));
+		goto out;
+	}
+
+	src_map = map_bo(fd, &src);
+	dst_map = map_bo(fd, &dst);
+	if (src_map == MAP_FAILED || dst_map == MAP_FAILED) {
+		fail("map XRGB8888-to-RGB565 system objects");
+		goto out;
+	}
+	for (unsigned int y = 0; y < FULL_SRC_HEIGHT; y++) {
+		for (unsigned int x = 0; x < FULL_SRC_WIDTH; x++)
+			src_map[(size_t)y * FULL_SRC_WIDTH + x] =
+				xrgb8888_source_pattern(x, y);
+	}
+	for (unsigned int y = 0; y < FULL_DST_HEIGHT; y++) {
+		for (unsigned int x = 0; x < FULL_DST_WIDTH; x++)
+			dst_map[(size_t)y * FULL_DST_WIDTH + x] = 0x39e7;
+	}
+
+	if (ioctl(fd, DRM_IOCTL_GCN_CTX_CREATE, &ctx)) {
+		fail("create XRGB8888 system-scale context");
+		goto out;
+	}
+	blit = (struct drm_gcn_blit_scaled) {
+		.ctx_id = ctx.id,
+		.src_handle = src.handle,
+		.dst_handle = dst.handle,
+		.src_width = FULL_SRC_WIDTH,
+		.src_height = FULL_SRC_HEIGHT,
+		.dst_width = FULL_DST_WIDTH,
+		.dst_height = FULL_DST_HEIGHT,
+	};
+	if (ioctl(fd, DRM_IOCTL_GCN_BLIT_SCALED, &blit)) {
+		fail("submit XRGB8888-to-RGB565 system scale");
+		goto out_ctx;
+	}
+	wait_args = (struct drm_gcn_wait) {
+		.handle = dst.handle,
+		.flags = DRM_GCN_WAIT_WRITE,
+		.timeout_ns = monotonic_ns() + 1000000000ULL,
+	};
+	if (ioctl(fd, DRM_IOCTL_GCN_WAIT, &wait_args)) {
+		fail("wait for XRGB8888-to-RGB565 destination");
+		goto out_ctx;
+	}
+
+	for (unsigned int y = 0; y < FULL_DST_HEIGHT; y++) {
+		for (unsigned int x = 0; x < FULL_DST_WIDTH; x++) {
+			unsigned int source_x = scaled_source_offset(x,
+					FULL_SRC_WIDTH, FULL_DST_WIDTH);
+			unsigned int source_y = scaled_source_offset(y,
+					FULL_SRC_HEIGHT, FULL_DST_HEIGHT);
+			uint32_t source_pixel =
+				xrgb8888_source_pattern(source_x, source_y);
+			uint16_t expected = xrgb8888_to_rgb565(source_pixel);
+			uint16_t actual = dst_map[(size_t)y * FULL_DST_WIDTH + x];
+
+			if (actual != expected) {
+				fprintf(stderr,
+					"FAIL: XRGB8888 scale mismatch at (%u,%u): got=0x%04x expected=0x%04x\n",
+					x, y, actual, expected);
+				failures++;
+				goto out_ctx;
+			}
+		}
+	}
+	puts("XRGB8888: linear 320x240 to RGB565 640x480 matched all 307200 pixels");
+
+out_ctx:
+	free_ctx.id = ctx.id;
+	free_ctx.pad = 0;
+	if (ioctl(fd, DRM_IOCTL_GCN_CTX_FREE, &free_ctx))
+		fail("free XRGB8888 system-scale context");
+out:
+	if (dst_map != MAP_FAILED && munmap(dst_map, dst.size))
+		fail("unmap XRGB8888 scale destination");
+	if (src_map != MAP_FAILED && munmap(src_map, src.size))
+		fail("unmap XRGB8888 scale source");
+	if (dst.handle && close_bo(fd, dst.handle))
+		fail("close XRGB8888 scale destination");
+	if (src.handle && close_bo(fd, src.handle))
+		fail("close XRGB8888 scale source");
+	if (get_param(fd, DRM_GCN_PARAM_MEM1_FREE_BYTES, &free_after)) {
+		fail("query MEM1 after XRGB8888 system scale");
+	} else if (free_after != free_before) {
+		fail_value("XRGB8888 system scale leaked MEM1", free_after,
+			   free_before);
+	} else {
+		printf("XRGB8888: system objects preserved all %llu MEM1 bytes\n",
+		       (unsigned long long)free_after);
+	}
+}
+
 static int hold_mapping(const char *node)
 {
 	struct drm_gcn_gem_mmap mmap_args = {};
@@ -1500,6 +1653,7 @@ int main(int argc, char **argv)
 			       (unsigned long long)alignment);
 			if (!(features & DRM_GCN_FEATURE_MEM1_GEM) ||
 			    !(formats & DRM_GCN_FORMAT_RGB565) ||
+			    !(formats & DRM_GCN_FORMAT_XRGB8888) ||
 			    !(layouts & DRM_GCN_LAYOUT_TILED_4X4) ||
 			    !(layouts & DRM_GCN_LAYOUT_LINEAR))
 				fail_value("provider capability bits", features, 0);
@@ -1541,16 +1695,21 @@ int main(int argc, char **argv)
 			test_wide_scaled_reduce(fd);
 		if ((features & (DRM_GCN_FEATURE_SYSTEM_GEM |
 				 DRM_GCN_FEATURE_BLIT_SCALED_SYSTEM_RGB565 |
-				 DRM_GCN_FEATURE_SYSTEM_GEM_LINEAR)) ==
+				 DRM_GCN_FEATURE_SYSTEM_GEM_LINEAR |
+				 DRM_GCN_FEATURE_BLIT_SCALED_SYSTEM_XRGB8888_TO_RGB565)) ==
 		    (DRM_GCN_FEATURE_SYSTEM_GEM |
 		     DRM_GCN_FEATURE_BLIT_SCALED_SYSTEM_RGB565 |
-		     DRM_GCN_FEATURE_SYSTEM_GEM_LINEAR))
+		     DRM_GCN_FEATURE_SYSTEM_GEM_LINEAR |
+		     DRM_GCN_FEATURE_BLIT_SCALED_SYSTEM_XRGB8888_TO_RGB565)) {
 			test_full_scaled_system_blit(fd);
+			test_full_xrgb8888_to_rgb565_system_blit(fd);
+		}
 		else
 			fail_value("system-memory scaled features", features,
 				   DRM_GCN_FEATURE_SYSTEM_GEM |
 				   DRM_GCN_FEATURE_BLIT_SCALED_SYSTEM_RGB565 |
-				   DRM_GCN_FEATURE_SYSTEM_GEM_LINEAR);
+				   DRM_GCN_FEATURE_SYSTEM_GEM_LINEAR |
+				   DRM_GCN_FEATURE_BLIT_SCALED_SYSTEM_XRGB8888_TO_RGB565);
 	}
 
 	close(other_fd);

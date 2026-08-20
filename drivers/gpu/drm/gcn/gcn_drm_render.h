@@ -64,6 +64,28 @@ gcn_drm_render_validate_scaled(const struct drm_gcn_blit_scaled *args,
 	return 0;
 }
 
+static inline int
+gcn_drm_valid_system_formats(u32 src_format, u32 src_layout,
+			     u32 dst_format, u32 dst_layout,
+			     bool same_object)
+{
+	if (dst_format != DRM_GCN_GEM_FORMAT_RGB565 ||
+	    (dst_layout != DRM_GCN_GEM_LAYOUT_TILED_4X4 &&
+	     dst_layout != DRM_GCN_GEM_LAYOUT_LINEAR))
+		return -EINVAL;
+
+	if (src_format == DRM_GCN_GEM_FORMAT_RGB565 &&
+	    (src_layout == DRM_GCN_GEM_LAYOUT_TILED_4X4 ||
+	     src_layout == DRM_GCN_GEM_LAYOUT_LINEAR))
+		return 0;
+
+	if (src_format == DRM_GCN_GEM_FORMAT_XRGB8888 &&
+	    src_layout == DRM_GCN_GEM_LAYOUT_LINEAR && !same_object)
+		return 0;
+
+	return -EINVAL;
+}
+
 static inline void
 gcn_drm_render_decode_blit_rect(u64 data,
 				struct gcn_drm_render_blit_rect *rect)
@@ -135,6 +157,7 @@ static inline int gcn_drm_render_validate_rect(u64 data, u16 dst_width,
 static inline int
 gcn_drm_render_bo_size(const struct drm_gcn_gem_create *args, u64 *size)
 {
+	u64 bytes_per_pixel;
 	u64 bytes;
 
 	if (!args || !size ||
@@ -143,15 +166,26 @@ gcn_drm_render_bo_size(const struct drm_gcn_gem_create *args, u64 *size)
 	    args->width > GCN_DRM_RENDER_MAX_WIDTH ||
 	    args->height > GCN_DRM_RENDER_MAX_HEIGHT ||
 	    (args->width & 3) || (args->height & 3) ||
-	    args->format != DRM_GCN_GEM_FORMAT_RGB565 ||
 	    (args->layout != DRM_GCN_GEM_LAYOUT_TILED_4X4 &&
-	     args->layout != DRM_GCN_GEM_LAYOUT_LINEAR) ||
-	    (args->layout == DRM_GCN_GEM_LAYOUT_LINEAR &&
-	     !(args->flags & DRM_GCN_GEM_CREATE_SYSTEM)))
+	     args->layout != DRM_GCN_GEM_LAYOUT_LINEAR))
 		return -EINVAL;
 
+	if (args->format == DRM_GCN_GEM_FORMAT_RGB565) {
+		if (args->layout == DRM_GCN_GEM_LAYOUT_LINEAR &&
+		    !(args->flags & DRM_GCN_GEM_CREATE_SYSTEM))
+			return -EINVAL;
+		bytes_per_pixel = sizeof(u16);
+	} else if (args->format == DRM_GCN_GEM_FORMAT_XRGB8888) {
+		if (!(args->flags & DRM_GCN_GEM_CREATE_SYSTEM) ||
+		    args->layout != DRM_GCN_GEM_LAYOUT_LINEAR)
+			return -EINVAL;
+		bytes_per_pixel = sizeof(u32);
+	} else {
+		return -EINVAL;
+	}
+
 	if (check_mul_overflow((u64)args->width, (u64)args->height, &bytes) ||
-	    check_mul_overflow(bytes, 2ULL, &bytes))
+	    check_mul_overflow(bytes, bytes_per_pixel, &bytes))
 		return -EOVERFLOW;
 
 	*size = PAGE_ALIGN(bytes);

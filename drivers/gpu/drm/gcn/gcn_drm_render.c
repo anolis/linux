@@ -261,6 +261,11 @@ static int gcn_drm_ioctl_gem_create(struct drm_device *drm, void *data,
 			return ret;
 		if (!(info.features & DRM_GCN_FEATURE_SYSTEM_GEM))
 			return -EOPNOTSUPP;
+		if (args->format == DRM_GCN_GEM_FORMAT_XRGB8888 &&
+		    (!(info.formats & DRM_GCN_FORMAT_XRGB8888) ||
+		     !(info.features &
+		       DRM_GCN_FEATURE_BLIT_SCALED_SYSTEM_XRGB8888_TO_RGB565)))
+			return -EOPNOTSUPP;
 		if (args->layout == DRM_GCN_GEM_LAYOUT_LINEAR &&
 		    !(info.features & DRM_GCN_FEATURE_SYSTEM_GEM_LINEAR))
 			return -EOPNOTSUPP;
@@ -594,6 +599,7 @@ gcn_drm_blit_scaled_system_locked(struct drm_gem_object *src_gem,
 	ret = gcn_drm_provider_blit_scaled_system(src_map.vaddr, dst_addr,
 						  src_width, src_height,
 						  dst_width, dst_height,
+						  src->format, dst->format,
 						  src->layout, dst->layout, args);
 
 out_unmap_dst:
@@ -672,15 +678,13 @@ static int gcn_drm_ioctl_blit_scaled(struct drm_device *drm, void *data,
 		src_height = system_src->height;
 		dst_width = system_dst->width;
 		dst_height = system_dst->height;
-		if (system_src->format != system_dst->format ||
-		    system_src->format != DRM_GCN_GEM_FORMAT_RGB565 ||
-		    (system_src->layout != DRM_GCN_GEM_LAYOUT_TILED_4X4 &&
-		     system_src->layout != DRM_GCN_GEM_LAYOUT_LINEAR) ||
-		    (system_dst->layout != DRM_GCN_GEM_LAYOUT_TILED_4X4 &&
-		     system_dst->layout != DRM_GCN_GEM_LAYOUT_LINEAR)) {
-			ret = -EINVAL;
+		ret = gcn_drm_valid_system_formats(system_src->format,
+						   system_src->layout,
+						   system_dst->format,
+						   system_dst->layout,
+						   src_gem == dst_gem);
+		if (ret)
 			goto out_put;
-		}
 		system_objects = true;
 	} else {
 		ret = -EINVAL;

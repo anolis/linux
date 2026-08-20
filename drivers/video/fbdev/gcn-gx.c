@@ -774,6 +774,28 @@ static void gx_copy_rect_to_tiled(const u16 *src, u16 src_width,
 	}
 }
 
+static void
+gx_copy_xrgb8888_rect_to_tiled(const u32 *src, u16 src_width,
+			       u16 src_x, u16 src_y, u16 *dst,
+			       u16 dst_width, u16 dst_height,
+			       u16 rect_width, u16 rect_height)
+{
+	u16 x;
+	u16 y;
+
+	memset(dst, 0, (size_t)dst_width * dst_height * sizeof(*dst));
+	for (y = 0; y < rect_height; y++) {
+		for (x = 0; x < rect_width; x++) {
+			u32 pixel = src[(size_t)(src_y + y) * src_width + src_x + x];
+
+			dst[gx_tiled_rgb565_index(x, y, dst_width)] =
+				((pixel >> 8) & 0xf800) |
+				((pixel >> 5) & 0x07e0) |
+				((pixel >> 3) & 0x001f);
+		}
+	}
+}
+
 static void gx_copy_tiled_to_layout(const u16 *src, u16 *dst, u16 width,
 				    u16 height, u32 layout)
 {
@@ -2912,7 +2934,7 @@ static int gcn_gx_drm_mem1_info(struct gcn_drm_mem1_info *info)
 	info->alignment = PAGE_SIZE;
 	info->max_width = 640;
 	info->max_height = 576;
-	info->formats = DRM_GCN_FORMAT_RGB565;
+	info->formats = DRM_GCN_FORMAT_RGB565 | DRM_GCN_FORMAT_XRGB8888;
 	info->layouts = DRM_GCN_LAYOUT_TILED_4X4 | DRM_GCN_LAYOUT_LINEAR;
 	info->features = DRM_GCN_FEATURE_SUBMIT_RGB565 |
 			 DRM_GCN_FEATURE_FILL_RGB565 |
@@ -2923,7 +2945,8 @@ static int gcn_gx_drm_mem1_info(struct gcn_drm_mem1_info *info)
 			 DRM_GCN_FEATURE_BLIT_SCALED_RGB565 |
 			 DRM_GCN_FEATURE_SYSTEM_GEM |
 			 DRM_GCN_FEATURE_BLIT_SCALED_SYSTEM_RGB565 |
-			 DRM_GCN_FEATURE_SYSTEM_GEM_LINEAR;
+			 DRM_GCN_FEATURE_SYSTEM_GEM_LINEAR |
+			 DRM_GCN_FEATURE_BLIT_SCALED_SYSTEM_XRGB8888_TO_RGB565;
 	mutex_unlock(&gx_mem1_lock);
 	return 0;
 }
@@ -3290,6 +3313,16 @@ out_unlock:
 	return ret;
 }
 
+static bool gx_valid_scaled_source(u32 format, u32 layout, bool system_memory)
+{
+	if (format == DRM_GCN_GEM_FORMAT_RGB565)
+		return layout == DRM_GCN_GEM_LAYOUT_TILED_4X4 ||
+		       layout == DRM_GCN_GEM_LAYOUT_LINEAR;
+
+	return format == DRM_GCN_GEM_FORMAT_XRGB8888 && system_memory &&
+	       layout == DRM_GCN_GEM_LAYOUT_LINEAR;
+}
+
 static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 					      void *dst_addr, u16 src_width,
 					      u16 src_height, u16 dst_width,
@@ -3298,7 +3331,8 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 					      u16 src_rect_height, u16 dst_x,
 					      u16 dst_y, u16 dst_rect_width,
 					      u16 dst_rect_height,
-					      u32 src_layout, u32 dst_layout,
+					      u32 src_format, u32 src_layout,
+					      u32 dst_layout,
 					      bool system_memory)
 {
 	void *crop = gx_tex_buf_alt;
@@ -3327,15 +3361,16 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	    dst_rect_width > dst_width - dst_x ||
 	    dst_rect_height > dst_height - dst_y)
 		return -EINVAL;
-	if ((src_layout != DRM_GCN_GEM_LAYOUT_TILED_4X4 &&
-	     src_layout != DRM_GCN_GEM_LAYOUT_LINEAR) ||
+	if (!gx_valid_scaled_source(src_format, src_layout, system_memory) ||
 	    (dst_layout != DRM_GCN_GEM_LAYOUT_TILED_4X4 &&
 	     dst_layout != DRM_GCN_GEM_LAYOUT_LINEAR) ||
 	    (!system_memory &&
 	     (src_layout != DRM_GCN_GEM_LAYOUT_TILED_4X4 ||
 	      dst_layout != DRM_GCN_GEM_LAYOUT_TILED_4X4)))
 		return -EINVAL;
-	src_bytes = (size_t)src_width * src_height * sizeof(u16);
+	src_bytes = (size_t)src_width * src_height *
+		    (src_format == DRM_GCN_GEM_FORMAT_XRGB8888 ? sizeof(u32) :
+								     sizeof(u16));
 	dst_bytes = (size_t)dst_width * dst_height * sizeof(u16);
 	if (!READ_ONCE(gx_accel_ready))
 		return -ENODEV;
@@ -3379,9 +3414,16 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	 * edges and preserves same-object overlap semantics.
 	 */
 	if (system_memory) {
-		gx_copy_rect_to_tiled(src_addr, src_width, src_x, src_y,
-				      src_layout, crop, crop_width, crop_height,
-				      src_rect_width, src_rect_height);
+		if (src_format == DRM_GCN_GEM_FORMAT_XRGB8888)
+			gx_copy_xrgb8888_rect_to_tiled(src_addr, src_width,
+						       src_x, src_y, crop, crop_width,
+						       crop_height, src_rect_width,
+						       src_rect_height);
+		else
+			gx_copy_rect_to_tiled(src_addr, src_width, src_x, src_y,
+					      src_layout, crop, crop_width,
+					      crop_height, src_rect_width,
+					      src_rect_height);
 		flush_dcache_range((unsigned long)crop,
 				   (unsigned long)crop + crop_bytes);
 	} else {
@@ -3528,7 +3570,8 @@ static int gcn_gx_drm_blit_scaled_rgb565(void *src_allocation,
 			dst->cpu_addr, src_width, src_height, dst_width,
 			dst_height, src_x, src_y, src_rect_width,
 			src_rect_height, dst_x, dst_y, dst_rect_width,
-			dst_rect_height, DRM_GCN_GEM_LAYOUT_TILED_4X4,
+			dst_rect_height, DRM_GCN_GEM_FORMAT_RGB565,
+			DRM_GCN_GEM_LAYOUT_TILED_4X4,
 			DRM_GCN_GEM_LAYOUT_TILED_4X4, false);
 }
 
@@ -3546,8 +3589,25 @@ static int gcn_gx_drm_blit_scaled_system_rgb565(const void *src, void *dst,
 	return gcn_gx_drm_blit_scaled_rgb565_core(src, dst, src_width,
 			src_height, dst_width, dst_height, src_x, src_y,
 			src_rect_width, src_rect_height, dst_x, dst_y,
-			dst_rect_width, dst_rect_height, src_layout, dst_layout,
-			true);
+			dst_rect_width, dst_rect_height,
+			DRM_GCN_GEM_FORMAT_RGB565, src_layout, dst_layout, true);
+}
+
+static int
+gcn_gx_drm_blit_scaled_system_xrgb8888(const void *src, void *dst,
+				       u16 src_width, u16 src_height,
+				       u16 dst_width, u16 dst_height,
+				       u32 dst_layout, u16 src_x, u16 src_y,
+				       u16 src_rect_width, u16 src_rect_height,
+				       u16 dst_x, u16 dst_y,
+				       u16 dst_rect_width, u16 dst_rect_height)
+{
+	return gcn_gx_drm_blit_scaled_rgb565_core(src, dst, src_width,
+			src_height, dst_width, dst_height, src_x, src_y,
+			src_rect_width, src_rect_height, dst_x, dst_y,
+			dst_rect_width, dst_rect_height,
+			DRM_GCN_GEM_FORMAT_XRGB8888,
+			DRM_GCN_GEM_LAYOUT_LINEAR, dst_layout, true);
 }
 
 static const struct gcn_drm_accel_ops gcn_gx_drm_accel_ops = {
@@ -3565,6 +3625,7 @@ static const struct gcn_drm_accel_ops gcn_gx_drm_accel_ops = {
 	.blit_rect_rgb565 = gcn_gx_drm_blit_rect_rgb565,
 	.blit_scaled_rgb565 = gcn_gx_drm_blit_scaled_rgb565,
 	.blit_scaled_system_rgb565 = gcn_gx_drm_blit_scaled_system_rgb565,
+	.blit_scaled_system_xrgb8888 = gcn_gx_drm_blit_scaled_system_xrgb8888,
 };
 #endif
 

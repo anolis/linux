@@ -374,6 +374,7 @@ int gcn_drm_provider_blit_scaled(const struct gcn_drm_accel_ops *provider,
 int gcn_drm_provider_blit_scaled_system(const void *src, void *dst,
 					u16 src_width, u16 src_height,
 					u16 dst_width, u16 dst_height,
+					u32 src_format, u32 dst_format,
 					u32 src_layout, u32 dst_layout,
 					const struct drm_gcn_blit_scaled *args)
 {
@@ -382,7 +383,9 @@ int gcn_drm_provider_blit_scaled_system(const void *src, void *dst,
 
 	mutex_lock(&gcn_drm_accel_lock);
 	provider = gcn_drm_accel;
-	if (provider && provider->blit_scaled_system_rgb565 &&
+	if (provider && src_format == DRM_GCN_GEM_FORMAT_RGB565 &&
+	    dst_format == DRM_GCN_GEM_FORMAT_RGB565 &&
+	    provider->blit_scaled_system_rgb565 &&
 	    try_module_get(provider->owner)) {
 		ret = provider->blit_scaled_system_rgb565(src, dst,
 				src_width, src_height, dst_width, dst_height,
@@ -390,6 +393,18 @@ int gcn_drm_provider_blit_scaled_system(const void *src, void *dst,
 				args->src_x, args->src_y, args->src_width,
 				args->src_height, args->dst_x, args->dst_y,
 				args->dst_width, args->dst_height);
+		module_put(provider->owner);
+	} else if (provider &&
+		   src_format == DRM_GCN_GEM_FORMAT_XRGB8888 &&
+		   dst_format == DRM_GCN_GEM_FORMAT_RGB565 &&
+		   src_layout == DRM_GCN_GEM_LAYOUT_LINEAR &&
+		   provider->blit_scaled_system_xrgb8888 &&
+		   try_module_get(provider->owner)) {
+		ret = provider->blit_scaled_system_xrgb8888(src, dst,
+				src_width, src_height, dst_width, dst_height,
+				dst_layout, args->src_x, args->src_y,
+				args->src_width, args->src_height, args->dst_x,
+				args->dst_y, args->dst_width, args->dst_height);
 		module_put(provider->owner);
 	}
 	mutex_unlock(&gcn_drm_accel_lock);
