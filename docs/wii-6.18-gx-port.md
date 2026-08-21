@@ -11346,3 +11346,57 @@ and do not interfere with Terminal or Files interaction. Finish with F12 and
 require child reap, PTY count zero, fbcon restoration, clean GX unload,
 continuous uptime, and no GX/DRM timeout, FIFO stall, fallback, oops, panic, or
 machine check.
+
+### Stage SSH-tunneled read-only VNC
+
+- Test branch: `feature/wii-kolibri-shell`
+- Candidate commit: `c24ac2f39`
+- Upstream dependency: LibVNCServer `0.9.15`, commit
+  `9b54b1ec32731bd23158ca014dc18014db4194c3`
+
+Export the shell-owned current RGB565 buffer directly through LibVNCServer.
+After each successful KMS presentation, switch the server to the newly visible
+buffer and mark the complete 640 by 480 frame modified. Process VNC sockets in
+the existing non-threaded event loop. This avoids X11, Wayland, fbdev, XFB
+readback, a second KMS client, and an additional framebuffer copy.
+
+This first milestone is intentionally read-only. Keyboard and pointer callbacks
+discard remote events. The RFB listener binds only to `127.0.0.1:5900`, because
+the minimal library is built without TLS and VNC authentication is not an
+acceptable network boundary. Remote access must use an authenticated SSH local
+forward to the Wii loopback listener.
+
+`tools/wii-build-libvncserver.sh` reproducibly fetches the pinned official
+release and cross-builds a minimal static PowerPC library. Compression, TLS,
+WebSockets, threads, examples, tests, and desktop-stack integrations are
+disabled. `tools/wii-gcn-build-clients.sh` retains its dependency-free default
+and enables VNC only when `WII_LIBVNCSERVER_PREFIX` points to a validated install.
+
+The checksum-pinned artifacts are:
+
+- unchanged `zImage` / `dtbImage.wii` SHA-256:
+  `85137fa760fef6e840d5ef6cc0a74b8f1cf187a7f0a59a4e8b73fb3165b03463`
+- unchanged `gcn-gx.ko` SHA-256:
+  `bebd391507cc57104aa11a96f80783e56e13ed7cb26860f56027cdd1c8a4950c`
+- static minimal `libvncserver.a` SHA-256:
+  `8ec7f3793eb205f1086883846a0695d32d42372aa0e9a669763174e949f1fbbc`
+- static PowerPC VNC shell SHA-256:
+  `6a0b62128ec7acd602f3e0d925cad8313280f77aa4201fad92ac8b9a1a646664`
+
+Host validation passed warning-clean dependency-free and VNC-enabled static
+PowerPC builds, ELF verification as a 32-bit big-endian executable, ShellCheck
+for both build helpers, `git diff --check`, and strict checkpatch with zero
+findings after explicitly excluding camelCase identifiers belonging to the
+external LibVNCServer API.
+
+Hardware acceptance requires the server to listen on Wii loopback only and a
+direct connection to `10.3.10.59:5900` to fail. Establish an SSH local forward,
+connect a standard VNC viewer, and require a correctly colored, crisp 640 by 480
+desktop. Open System locally before launch or through a controlled test mode and
+confirm one-second CPU, memory, uptime, network, traffic, and GX/DRM updates in
+the remote frame. Capture a host PNG for durable review. Require no display
+stalls or corruption under a sustained viewer connection and no effect from
+remote input. Finish by disconnecting, terminating with SIGTERM or F12, and
+require child reap, PTY count zero, fbcon restoration, clean GX unload,
+continuous uptime, and no GX/DRM timeout, FIFO stall, fallback, oops, panic, or
+machine check.
