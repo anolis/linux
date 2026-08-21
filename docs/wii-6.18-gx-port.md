@@ -11183,3 +11183,39 @@ owns a controlling PTY, the Terminal window owns its output and input, the
 desktop exclusively owns physical input while active, and all resources unwind
 cleanly back to fbcon. The next userspace milestone can build process launching
 and application lifecycle management on this validated ownership model.
+
+### Stage restartable Terminal process lifecycle
+
+- Test branch: `feature/wii-kolibri-shell`
+- Candidate commit: `4b179fac8`
+
+Extend the accepted PTY ownership boundary into a minimal application lifecycle.
+The Terminal title now reports `Running` while its child owns a PTY and `Exited`
+after the child is reaped. Activating the Terminal launcher after `exit` resets
+the bounded terminal state and creates a fresh PTY, controlling session, and
+interactive shell. Activating or reopening a Terminal whose child remains alive
+must only raise the existing window; it must never create a duplicate process.
+An unsuccessful restart remains visible as an explicit launch-failed message.
+
+The checksum-pinned artifacts are:
+
+- unchanged `zImage` / `dtbImage.wii` SHA-256:
+  `85137fa760fef6e840d5ef6cc0a74b8f1cf187a7f0a59a4e8b73fb3165b03463`
+- unchanged `gcn-gx.ko` SHA-256:
+  `bebd391507cc57104aa11a96f80783e56e13ed7cb26860f56027cdd1c8a4950c`
+- static PowerPC `wii-kolibri-shell` SHA-256:
+  `658af2f01fecc77e28b782e96e740a04f9b34e82c75009e53e08480911d59eed`
+
+Host validation passed warning-clean static PowerPC compilation against the
+installed target UAPI, `git diff --check`, and strict checkpatch with zero
+errors, warnings, or checks.
+
+Hardware acceptance requires the initial prompt and `Running` title, followed
+by `exit`, the process-exited marker, and an `Exited` title. Press F1 or activate
+the Terminal launcher and require a clean new prompt and `Running` title. Repeat
+exit and restart at least twice. Separately set a shell variable, hide Terminal
+with F4, reopen it with F1, and verify the same process and variable survived.
+At every point require at most one shell child and one allocated PTY. Finish by
+pressing F12 while a child is running; require child reap, PTY count zero,
+restored fbcon, clean GX unload, continuous uptime, and no GX/DRM timeout, FIFO
+stall, fallback, oops, panic, or machine check.
