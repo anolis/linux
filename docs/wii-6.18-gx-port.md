@@ -10982,3 +10982,42 @@ This establishes the first usable desktop-userspace milestone on the standard
 Wii DRM/KMS ABI. Further work can proceed within userspace: add relative pointer
 input, movable and focused windows, process launching, and a PTY-backed terminal
 before replacing the Jessie development root with the minimal Buildroot image.
+
+### Stage direct evdev pointer input
+
+- Test branch: `feature/wii-kolibri-shell`
+- Candidate commit: `eafcc691c`
+
+Add pointer interaction to the accepted native shell without introducing
+libinput or another userspace dependency. The Wii detected a Microsoft
+three-button IntelliEye mouse as `/dev/input/event2` with relative X, relative
+Y, wheel, and left-button capabilities. Extend shell input discovery to accept
+both keyboard and relative-pointer devices and coalesce queued motion before
+each KMS presentation.
+
+Render a compact high-contrast pointer over the completed desktop composition.
+Clamp movement to the 640 by 480 workspace, update launcher selection on hover,
+activate the selected application on left click, cycle the launcher with the
+wheel, and route a click on the window close control through normal shell
+termination and CRTC restoration. Keyboard behavior remains unchanged.
+
+The checksum-pinned artifacts are:
+
+- unchanged `zImage` / `dtbImage.wii` SHA-256:
+  `85137fa760fef6e840d5ef6cc0a74b8f1cf187a7f0a59a4e8b73fb3165b03463`
+- unchanged `gcn-gx.ko` SHA-256:
+  `bebd391507cc57104aa11a96f80783e56e13ed7cb26860f56027cdd1c8a4950c`
+- static PowerPC `wii-kolibri-shell` SHA-256:
+  `df14b0c0d2dac003a19257a53ad306264bc20b9473d553d802e565394cd0fecc`
+
+Host validation passed warning-clean static PowerPC compilation against the
+installed target UAPI, `git diff --check`, and strict checkpatch with zero
+errors, warnings, or checks.
+
+Hardware acceptance requires discovery of both the Dell keyboard and Microsoft
+mouse, responsive cursor motion without trails or display corruption, correct
+launcher hover selection, left-click activation of every application view, and
+wheel selection. Clicking the close control must terminate without an error and
+restore the prior DRM fbcon CRTC. Afterward GX must unload cleanly and return AVE
+to CPU scanout. Require no GX/DRM timeout, FIFO stall, fallback, oops, panic, or
+machine check.
