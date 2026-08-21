@@ -378,6 +378,13 @@ static void terminal_feed_byte(struct shell_terminal *terminal,
 	}
 }
 
+static void terminal_feed_text(struct shell_terminal *terminal,
+			       const char *text)
+{
+	while (*text)
+		terminal_feed_byte(terminal, *text++);
+}
+
 static int terminal_write(struct shell_terminal *terminal,
 			  const void *data, size_t length)
 {
@@ -413,9 +420,12 @@ static int start_terminal(struct shell_terminal *terminal)
 	pid_t child;
 	int master;
 
+	if (terminal->master_fd >= 0 || terminal->child_pid > 0)
+		return 0;
+	memset(terminal, 0, sizeof(*terminal));
+	terminal->master_fd = -1;
 	terminal_clear(terminal);
 	terminal->color = COLOR_TEXT;
-	terminal->master_fd = -1;
 	master = open("/dev/ptmx", O_RDWR | O_NOCTTY | O_CLOEXEC);
 	if (master < 0 || ioctl(master, TIOCSPTLCK, &unlock) < 0 ||
 	    ioctl(master, TIOCGPTN, &number) < 0) {
@@ -513,13 +523,10 @@ static int drain_terminal(struct shell_terminal *terminal)
 		pid_t result = waitpid(terminal->child_pid, &status, WNOHANG);
 
 		if (result == terminal->child_pid) {
-			static const char message[] = "\r\n[process exited]\r\n";
-			size_t i;
-
 			terminal->child_pid = 0;
 			terminal->child_exited = 1;
-			for (i = 0; i < sizeof(message) - 1; i++)
-				terminal_feed_byte(terminal, message[i]);
+			terminal_feed_text(terminal,
+					   "\r\n[process exited]\r\n");
 			changed = 1;
 		}
 	}
@@ -725,6 +732,11 @@ static void draw_window(struct test_buffer *buffer,
 	fill_rect(buffer, window->x, window->y, 3, 28, frame);
 	draw_text(buffer, window->x + 14, window->y + 6,
 		  app_titles[window->app], rgb565(COLOR_TEXT));
+	if (window->app == SHELL_APP_TERMINAL)
+		draw_text(buffer, window->x + 102, window->y + 6,
+			  shell->terminal.child_pid > 0 ? "Running" : "Exited",
+			  rgb565(shell->terminal.child_pid > 0 ?
+				 COLOR_TEAL : COLOR_MUTED));
 	fill_rect(buffer, window->x + window->width - 24, window->y + 8,
 		  12, 12, rgb565(COLOR_RED));
 
@@ -921,6 +933,12 @@ static void raise_window(struct shell_state *shell, unsigned int app)
 
 static void open_window(struct shell_state *shell, unsigned int app)
 {
+	if (app == SHELL_APP_TERMINAL && shell->terminal.child_pid <= 0 &&
+	    shell->terminal.master_fd < 0 && start_terminal(&shell->terminal) < 0) {
+		shell->terminal.child_exited = 1;
+		terminal_feed_text(&shell->terminal, "[launch failed]\r\n");
+		perror("restart terminal");
+	}
 	shell->windows[app].visible = 1;
 	raise_window(shell, app);
 }
