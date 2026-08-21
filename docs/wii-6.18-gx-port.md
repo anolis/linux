@@ -10781,3 +10781,46 @@ compositor renders ahead while the current buffer is visible. The next
 desktop-oriented milestone should use three buffers and keep one page flip
 pending while software prepares the next buffer, testing whether pipelined
 standard KMS presentation reaches the full display cadence.
+
+### Stage triple-buffered standard-KMS render-ahead
+
+- Test branch: `test/wii-kms-triple-buffer`
+- Candidate commit: `1f1cc5644`
+
+Replace the accepted animation client's deliberately serialized scheduling
+with the ownership model used by a software compositor. Three ordinary 640 by
+480 XRGB8888 dumb buffers rotate through distinct roles: one is visible, one
+has been accepted as the pending KMS page flip, and userspace redraws only the
+third while the flip event is pending. After the event, the prepared buffer is
+submitted immediately and the retired scanout buffer becomes the next render
+target. The client never writes either a visible or pending framebuffer.
+
+The first pending frame is prepared before the timed loop. Every later frame
+is software-rendered while the preceding flip waits for vblank. Existing
+event-serial validation, elapsed-time reporting, target-UAPI build procedure,
+and bounded cleanup remain unchanged. The accepted two-buffer draw-after-event
+mode remains available as the direct 14.986 Hz control.
+
+The checksum-pinned artifacts are:
+
+- unchanged `zImage` / `dtbImage.wii` SHA-256:
+  `85137fa760fef6e840d5ef6cc0a74b8f1cf187a7f0a59a4e8b73fb3165b03463`
+- unchanged `gcn-gx.ko` SHA-256:
+  `bebd391507cc57104aa11a96f80783e56e13ed7cb26860f56027cdd1c8a4950c`
+- triple-buffered static PowerPC `wii-drm-test` SHA-256:
+  `3d536c209ebb250e1efc9da3abff4052fa7d11426711bf04718682b9b506febc`
+
+Host validation passed warning-clean native and static PowerPC builds,
+`git diff --check`, and strict full-patch checkpatch with zero errors,
+warnings, or checks. The client is a statically linked 32-bit big-endian
+PowerPC executable built against installed target UAPI headers.
+
+Hardware acceptance requires 300 zero-delay `--animate --pipeline` XRGB8888
+flips through the unchanged accepted GX module. Require every event with
+advancing vblank, GX XRGB8888 and PE-finish counter agreement, normal DRM
+master release, console restoration, and no graphics fault. Direct observation
+must show a crisp, correctly colored, coherent animation with no tearing,
+stale region, blanking, or corruption. Reaching approximately 29.97 Hz will
+confirm that software drawing and GX scanout conversion overlap within one
+display interval; remaining near 15 Hz will identify another serialization or
+deadline constraint requiring investigation before desktop userspace work.
