@@ -15,6 +15,7 @@
 #ifdef WII_HAVE_VNC
 #include <arpa/inet.h>
 #include <rfb/rfb.h>
+#include <rfb/keysym.h>
 #endif
 
 #define ARRAY_SIZE(array) (sizeof(array) / sizeof((array)[0]))
@@ -142,6 +143,8 @@ struct shell_system {
 #ifdef WII_HAVE_VNC
 struct shell_vnc {
 	rfbScreenInfoPtr screen;
+	int buttons;
+	int changed;
 };
 #endif
 
@@ -898,20 +901,114 @@ static void refresh_system(struct shell_system *system)
 }
 
 #ifdef WII_HAVE_VNC
+static int handle_files_key(struct shell_files *files, unsigned int key);
+static int handle_key(struct shell_state *shell, unsigned int key);
+static int handle_key_event(struct shell_state *shell, unsigned int key,
+			    int value);
+static int update_pointer(struct shell_state *shell, int delta_x, int delta_y);
+static int handle_pointer_button(struct shell_state *shell, int pressed);
+
+static unsigned int vnc_keysym_key(rfbKeySym keysym)
+{
+	static const unsigned int letter_keys[] = {
+		KEY_A, KEY_B, KEY_C, KEY_D, KEY_E, KEY_F, KEY_G,
+		KEY_H, KEY_I, KEY_J, KEY_K, KEY_L, KEY_M, KEY_N,
+		KEY_O, KEY_P, KEY_Q, KEY_R, KEY_S, KEY_T, KEY_U,
+		KEY_V, KEY_W, KEY_X, KEY_Y, KEY_Z,
+	};
+	static const unsigned int digit_keys[] = {
+		KEY_0, KEY_1, KEY_2, KEY_3, KEY_4,
+		KEY_5, KEY_6, KEY_7, KEY_8, KEY_9,
+	};
+	static const unsigned int function_keys[] = {
+		KEY_F1, KEY_F2, KEY_F3, KEY_F4, KEY_F5, KEY_F6,
+		KEY_F7, KEY_F8, KEY_F9, KEY_F10, KEY_F11, KEY_F12,
+	};
+
+	if (keysym >= XK_A && keysym <= XK_Z)
+		keysym += XK_a - XK_A;
+	if (keysym >= XK_a && keysym <= XK_z)
+		return letter_keys[keysym - XK_a];
+	if (keysym >= XK_0 && keysym <= XK_9)
+		return digit_keys[keysym - XK_0];
+	if (keysym >= XK_F1 && keysym <= XK_F10)
+		return function_keys[keysym - XK_F1];
+	if (keysym == XK_F11)
+		return KEY_F11;
+	if (keysym == XK_F12)
+		return KEY_F12;
+
+	switch (keysym) {
+	case XK_BackSpace: return KEY_BACKSPACE;
+	case XK_Tab: return KEY_TAB;
+	case XK_Return: return KEY_ENTER;
+	case XK_Escape: return KEY_ESC;
+	case XK_Delete: return KEY_DELETE;
+	case XK_Home: return KEY_HOME;
+	case XK_Left: return KEY_LEFT;
+	case XK_Up: return KEY_UP;
+	case XK_Right: return KEY_RIGHT;
+	case XK_Down: return KEY_DOWN;
+	case XK_Page_Up: return KEY_PAGEUP;
+	case XK_Page_Down: return KEY_PAGEDOWN;
+	case XK_End: return KEY_END;
+	case XK_KP_Enter: return KEY_KPENTER;
+	case XK_Shift_L: return KEY_LEFTSHIFT;
+	case XK_Shift_R: return KEY_RIGHTSHIFT;
+	case XK_Control_L: return KEY_LEFTCTRL;
+	case XK_Control_R: return KEY_RIGHTCTRL;
+	case XK_Caps_Lock: return KEY_CAPSLOCK;
+	case XK_space: return KEY_SPACE;
+	case XK_minus: return KEY_MINUS;
+	case XK_equal: return KEY_EQUAL;
+	case XK_bracketleft: return KEY_LEFTBRACE;
+	case XK_bracketright: return KEY_RIGHTBRACE;
+	case XK_backslash: return KEY_BACKSLASH;
+	case XK_semicolon: return KEY_SEMICOLON;
+	case XK_apostrophe: return KEY_APOSTROPHE;
+	case XK_grave: return KEY_GRAVE;
+	case XK_comma: return KEY_COMMA;
+	case XK_period: return KEY_DOT;
+	case XK_slash: return KEY_SLASH;
+	default: return KEY_RESERVED;
+	}
+}
+
 static void vnc_key_event(rfbBool down, rfbKeySym key, rfbClientPtr client)
 {
-	(void)down;
-	(void)key;
-	(void)client;
+	struct shell_state *shell = client->screen->screenData;
+	unsigned int input_key = vnc_keysym_key(key);
+
+	if (input_key != KEY_RESERVED)
+		shell->vnc.changed |= handle_key_event(shell, input_key,
+						      down ? 1 : 0);
 }
 
 static void vnc_pointer_event(int buttons, int x, int y,
 			      rfbClientPtr client)
 {
-	(void)buttons;
-	(void)x;
-	(void)y;
-	(void)client;
+	struct shell_state *shell = client->screen->screenData;
+	int previous = shell->vnc.buttons;
+
+	shell->vnc.changed |= update_pointer(shell, x - shell->pointer_x,
+					      y - shell->pointer_y);
+	if ((buttons ^ previous) & 1)
+		shell->vnc.changed |= handle_pointer_button(shell, buttons & 1);
+	if ((buttons & 8) && !(previous & 8)) {
+		if (shell->focused == SHELL_APP_FILES)
+			shell->vnc.changed |= handle_files_key(&shell->files,
+							    KEY_UP);
+		else
+			shell->vnc.changed |= handle_key(shell, KEY_UP);
+	}
+	if ((buttons & 16) && !(previous & 16)) {
+		if (shell->focused == SHELL_APP_FILES)
+			shell->vnc.changed |= handle_files_key(&shell->files,
+							    KEY_DOWN);
+		else
+			shell->vnc.changed |= handle_key(shell, KEY_DOWN);
+	}
+	shell->vnc.buttons = buttons;
 }
 
 static int start_vnc(struct shell_state *shell, struct test_buffer *buffer)
@@ -951,14 +1048,21 @@ static int start_vnc(struct shell_state *shell, struct test_buffer *buffer)
 		return -1;
 	}
 	shell->vnc.screen = screen;
-	printf("wii-kolibri-shell: read-only VNC on 127.0.0.1:5900\n");
+	printf("wii-kolibri-shell: interactive VNC on 127.0.0.1:5900\n");
 	return 0;
 }
 
-static void process_vnc(struct shell_state *shell)
+static int process_vnc(struct shell_state *shell)
 {
-	if (shell->vnc.screen)
-		(void)rfbProcessEvents(shell->vnc.screen, 0);
+	int changed;
+
+	if (!shell->vnc.screen)
+		return 0;
+	shell->vnc.changed = 0;
+	(void)rfbProcessEvents(shell->vnc.screen, 0);
+	changed = shell->vnc.changed;
+	shell->vnc.changed = 0;
+	return changed;
 }
 
 static void update_vnc(struct shell_state *shell, struct test_buffer *buffer)
@@ -985,9 +1089,10 @@ static int start_vnc(struct shell_state *shell, struct test_buffer *buffer)
 	return 0;
 }
 
-static void process_vnc(struct shell_state *shell)
+static int process_vnc(struct shell_state *shell)
 {
 	(void)shell;
+	return 0;
 }
 
 static void update_vnc(struct shell_state *shell, struct test_buffer *buffer)
@@ -2101,6 +2206,7 @@ int main(int argc, char **argv)
 			perror("poll input");
 			goto out;
 		}
+		changed |= process_vnc(&shell);
 		second = shell_monotonic_ms() / 1000;
 		if (second != last_second) {
 			last_second = second;
@@ -2113,7 +2219,6 @@ int main(int argc, char **argv)
 			perror("page flip");
 			goto out;
 		}
-		process_vnc(&shell);
 	}
 	status = EXIT_SUCCESS;
 
