@@ -39,8 +39,13 @@ powerpc-linux-gnu-gcc "${common_flags[@]}" \
 powerpc-linux-gnu-gcc "${common_flags[@]}" \
 	"$repo/tools/wii-drm-test.c" \
 	-o "$output_dir/wii-drm-test"
+powerpc-linux-gnu-gcc "${common_flags[@]}" \
+	-I"$repo/include" \
+	"$repo/tools/wii-kolibri-shell.c" \
+	-o "$output_dir/wii-kolibri-shell"
 
 sha256sum "$output_dir/wii-gcn-render-test" \
 	"$output_dir/wii-gcn-kms-render-test" \
 	"$output_dir/wii-gcn-kms-flip-test" \
-	"$output_dir/wii-drm-test"
+	"$output_dir/wii-drm-test" \
+	"$output_dir/wii-kolibri-shell"
