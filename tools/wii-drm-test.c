@@ -349,7 +349,7 @@ static int wait_flip_event(int fd, __u64 expected, __u32 *sequence)
 
 static int run_flips(int fd, __u32 crtc_id, struct test_buffer *buffers,
 		     unsigned int count, unsigned int delay_ms,
-		     enum test_pixel_format format, int animate)
+		     enum test_pixel_format format, int animate, int pipeline)
 {
 	__u64 start_ns = monotonic_ns();
 	__u64 elapsed_ns;
@@ -357,8 +357,13 @@ static int run_flips(int fd, __u32 crtc_id, struct test_buffer *buffers,
 	unsigned int i;
 	__u32 last_sequence = 0;
 
+	if (pipeline)
+		draw_pattern(buffers[1].map, buffers[1].create.pitch, 8,
+			     format);
+
 	for (i = 0; i < count && !stop; i++) {
-		struct test_buffer *next = &buffers[(i + 1) & 1];
+		unsigned int next_index = pipeline ? (i + 1) % 3 : (i + 1) & 1;
+		struct test_buffer *next = &buffers[next_index];
 		struct drm_mode_crtc_page_flip flip = {
 			.crtc_id = crtc_id,
 			.fb_id = next->fb.fb_id,
@@ -367,12 +372,20 @@ static int run_flips(int fd, __u32 crtc_id, struct test_buffer *buffers,
 		};
 		int marker_x = 8 + i * 7 % (TEST_WIDTH - 32);
 
-		if (animate)
+		if (animate && !pipeline)
 			draw_pattern(next->map, next->create.pitch, marker_x,
 				     format);
 
 		if (xioctl(fd, DRM_IOCTL_MODE_PAGE_FLIP, &flip) < 0)
 			return -1;
+		if (pipeline && i + 1 < count) {
+			unsigned int frame = i + 2;
+			struct test_buffer *future = &buffers[frame % 3];
+
+			marker_x = 8 + (frame - 1) * 7 % (TEST_WIDTH - 32);
+			draw_pattern(future->map, future->create.pitch, marker_x,
+				     format);
+		}
 		if (wait_flip_event(fd, flip.user_data, &last_sequence) < 0)
 			return -1;
 		if (delay_ms && poll(NULL, 0, delay_ms) < 0 && errno != EINTR)
@@ -395,13 +408,14 @@ static void usage(const char *program)
 {
 	fprintf(stderr, "Usage: %s [--format xrgb8888|rgb565] ", program);
 	fprintf(stderr, "[--flips COUNT] [--delay-ms MSEC] ");
-	fprintf(stderr, "[--animate] [--exit-after-flips] [CARD]\n");
+	fprintf(stderr, "[--animate] [--pipeline] [--exit-after-flips] [CARD]\n");
 }
 
 int main(int argc, char **argv)
 {
 	const char *card = "/dev/dri/card0";
-	struct test_buffer buffers[2] = {
+	struct test_buffer buffers[3] = {
+		{ .map = MAP_FAILED },
 		{ .map = MAP_FAILED },
 		{ .map = MAP_FAILED },
 	};
@@ -414,6 +428,7 @@ int main(int argc, char **argv)
 	unsigned int flip_count = 0;
 	unsigned int delay_ms = 250;
 	int animate = 0;
+	int pipeline = 0;
 	int exit_after_flips = 0;
 	unsigned int buffer_count;
 	unsigned int created = 0;
@@ -463,6 +478,10 @@ int main(int argc, char **argv)
 			animate = 1;
 			continue;
 		}
+		if (!strcmp(argv[i], "--pipeline")) {
+			pipeline = 1;
+			continue;
+		}
 		if (!strcmp(argv[i], "--help")) {
 			usage(argv[0]);
 			return EXIT_SUCCESS;
@@ -478,7 +497,11 @@ int main(int argc, char **argv)
 		fprintf(stderr, "--animate and --exit-after-flips require --flips\n");
 		return EXIT_FAILURE;
 	}
-	buffer_count = flip_count ? 2 : 1;
+	if (pipeline && !animate) {
+		fprintf(stderr, "--pipeline requires --animate\n");
+		return EXIT_FAILURE;
+	}
+	buffer_count = flip_count ? (pipeline ? 3 : 2) : 1;
 
 	fd = open(card, O_RDWR | O_CLOEXEC);
 	if (fd < 0) {
@@ -546,7 +569,7 @@ int main(int argc, char **argv)
 	signal(SIGTERM, handle_signal);
 	if (flip_count &&
 	    run_flips(fd, crtc.crtc_id, buffers, flip_count, delay_ms,
-		      format, animate) < 0) {
+		      format, animate, pipeline) < 0) {
 		perror("page-flip test");
 		goto out;
 	}
