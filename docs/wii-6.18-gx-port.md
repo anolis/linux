@@ -10642,3 +10642,47 @@ countdown operationally expensive. `gumboot/gumboot.lst` was changed from
 The original menu remains on the boot partition as
 `gumboot.lst.backup.97141c35`, and the partition was unmounted after verified
 installation. This is deployment configuration, not a tracked kernel change.
+
+### Stage standard XRGB8888 KMS scanout benchmark
+
+- Test branch: `test/wii-gx-kms-scanout-benchmark`
+- Candidate commit: `9fc3c5efe`
+
+Measure the desktop-critical path separately from the custom GCN render UAPI.
+An ordinary DRM client creates two 640 by 480 XRGB8888 dumb buffers, installs
+them through the standard KMS framebuffer API, and submits serialized
+zero-delay page flips with vblank events. This is the interface an unmodified
+software compositor or X server uses for presentation. It exercises the DRM
+XRGB8888 shadow-plane conversion callback directly; it does not first render
+through a custom RGB565 object.
+
+Extend the existing raw-ioctl client to report total elapsed time, average
+time per completed flip, and effective flip rate. An opt-in
+`--exit-after-flips` mode releases DRM master after a bounded run so the exact
+same binary can measure CPU fallback and GX acceleration without an external
+signal. Build it with the existing installed-PowerPC-UAPI procedure so ioctl
+direction bits come from the target architecture.
+
+The checksum-pinned artifacts are:
+
+- unchanged `zImage` / `dtbImage.wii` SHA-256:
+  `85137fa760fef6e840d5ef6cc0a74b8f1cf187a7f0a59a4e8b73fb3165b03463`
+- unchanged `gcn-gx.ko` SHA-256:
+  `bebd391507cc57104aa11a96f80783e56e13ed7cb26860f56027cdd1c8a4950c`
+- static PowerPC `wii-drm-test` SHA-256:
+  `6157f124ab9ebc8be76160057f34a92e520a1377099ca02a4b539b80f6a02636`
+
+Host validation passed warning-clean native and static PowerPC builds,
+shellcheck and `bash -n` for the client builder, `git diff --check`, and strict
+full-patch checkpatch with zero errors, warnings, or checks. The resulting test
+client is a statically linked 32-bit big-endian PowerPC executable.
+
+Hardware acceptance requires independently verifying all deployed checksums.
+With no GX module loaded, run 300 XRGB8888 flips at zero client delay and
+record elapsed time, average latency, effective rate, and final vblank. Load
+the unchanged accepted GX module and repeat the exact command. Require all 300
+page-flip events in both runs, advancing vblank, the GX XRGB8888 activation
+positive control and frame counters, clean DRM-master release and console
+restoration after each run, and no AVE/GX/DRM timeout, FIFO stall, fallback,
+oops, panic, or machine check. The comparison determines whether standard KMS
+scanout or custom render staging is the next desktop-performance bottleneck.
