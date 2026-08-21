@@ -11282,3 +11282,25 @@ confirm path and selection persist, while Terminal remains interactive and
 owns its original PTY. Finish with F12 and require child reap, PTY count zero,
 fbcon restoration, clean GX unload, continuous uptime, and no GX/DRM timeout,
 FIFO stall, fallback, oops, panic, or machine check.
+
+Hardware result: accepted. The checksum-verified candidate opened `/` lazily and
+rendered the sorted root listing with stable selection and status. The user
+exercised arrow, page, Home/End, and wheel scrolling; nested keyboard and mouse
+directory traversal; changing path display; and parent navigation, reporting no
+visual or interaction defects. The initially suggested `/etc/network` target
+was absent from this root filesystem, so `/bin` provided the deterministic
+bounded-list control instead.
+
+Opening `/bin`, which contains 113 entries on this image, produced the expected
+`64+ entries` status. Selecting a regular file and pressing Enter reported the
+file without executing it. Hiding and reopening Files preserved `/bin` and its
+selection. Returning to Terminal and executing `echo FILES-OK` succeeded; the
+pre-teardown audit confirmed that original child PID 562 still owned the only
+allocated PTY and that Files had spawned no helper process.
+
+F12 exited the desktop with code zero, reaped child 562, returned PTY count to
+zero, and restored `gcn-vidrmfb`. GX unloaded cleanly and AVE chroma exchange
+returned to CPU scanout. Wii uptime remained continuous, and the final kernel
+audit found no GX/DRM timeout, FIFO stall, fallback, oops, panic, or machine
+check. This accepts direct filesystem browsing as the shell's second functional
+application surface.
