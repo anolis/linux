@@ -145,6 +145,8 @@ struct shell_vnc {
 	rfbScreenInfoPtr screen;
 	int buttons;
 	int changed;
+	int shift_down;
+	int control_down;
 };
 #endif
 
@@ -979,9 +981,13 @@ static void vnc_key_event(rfbBool down, rfbKeySym key, rfbClientPtr client)
 	struct shell_state *shell = client->screen->screenData;
 	unsigned int input_key = vnc_keysym_key(key);
 
-	if (input_key != KEY_RESERVED)
-		shell->vnc.changed |= handle_key_event(shell, input_key,
-						      down ? 1 : 0);
+	if (input_key == KEY_RESERVED)
+		return;
+	if (input_key == KEY_LEFTSHIFT || input_key == KEY_RIGHTSHIFT)
+		shell->vnc.shift_down = down;
+	if (input_key == KEY_LEFTCTRL || input_key == KEY_RIGHTCTRL)
+		shell->vnc.control_down = down;
+	shell->vnc.changed |= handle_key_event(shell, input_key, down ? 1 : 0);
 }
 
 static void vnc_pointer_event(int buttons, int x, int y,
@@ -1011,6 +1017,27 @@ static void vnc_pointer_event(int buttons, int x, int y,
 	shell->vnc.buttons = buttons;
 }
 
+static void vnc_client_gone(rfbClientPtr client)
+{
+	struct shell_state *shell = client->screen->screenData;
+
+	if (shell->vnc.buttons & 1)
+		shell->vnc.changed |= handle_pointer_button(shell, 0);
+	if (shell->vnc.shift_down)
+		(void)handle_key_event(shell, KEY_LEFTSHIFT, 0);
+	if (shell->vnc.control_down)
+		(void)handle_key_event(shell, KEY_LEFTCTRL, 0);
+	shell->vnc.buttons = 0;
+	shell->vnc.shift_down = 0;
+	shell->vnc.control_down = 0;
+}
+
+static enum rfbNewClientAction vnc_new_client(rfbClientPtr client)
+{
+	client->clientGoneHook = vnc_client_gone;
+	return RFB_CLIENT_ACCEPT;
+}
+
 static int start_vnc(struct shell_state *shell, struct test_buffer *buffer)
 {
 	char program[] = "wii-kolibri-shell";
@@ -1032,6 +1059,7 @@ static int start_vnc(struct shell_state *shell, struct test_buffer *buffer)
 	screen->alwaysShared = TRUE;
 	screen->kbdAddEvent = vnc_key_event;
 	screen->ptrAddEvent = vnc_pointer_event;
+	screen->newClientHook = vnc_new_client;
 	screen->serverFormat.bitsPerPixel = 16;
 	screen->serverFormat.depth = 16;
 	screen->serverFormat.bigEndian = TRUE;
