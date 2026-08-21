@@ -10555,3 +10555,58 @@ module remained loaded, and the final kernel-log search found no GX/DRM
 timeout, FIFO stall, fallback, oops, panic, or machine check. The user was not
 present at the display during this run, so the required visual replay remains
 the only open acceptance item.
+
+### Support write-only AVE command-register readback
+
+- Test branch: `test/wii-ave-write-only-readback`
+- Candidate commit: `8101c449d`
+
+A second physical Wii running the accepted kernel exposed a hardware behavior
+not seen on the original development console. The dedicated AVE I2C adapter
+registered normally, address `0x70` acknowledged, both GPIO lines returned to
+idle-high, and ordinary AVE registers returned coherent initialized state.
+However, command-style registers `0x62`, `0x65`, and `0x6a` all read `0xff`.
+The DRM driver successfully sent its chroma-exchange write but rejected the
+non-reflecting `0x62` readback with `-EIO`, so `/dev/dri/card0` was never
+registered. The optical drive on this parts console is also broken, but it is
+outside the VI, AVE, and GX path and is not used as evidence for this failure.
+
+Retain strict reflected verification where available. After a successful
+two-byte write, an exact `0x62` readback still passes and every non-`0xff`
+mismatch still fails. If `0x62` reads `0xff`, perform a second combined read of
+ordinary AVE control register `0x01`. Accept the acknowledged write as a
+write-only-register revision only when that control read succeeds and returns
+a non-`0xff` value. A transfer error, short transfer, or all-ones control read
+continues to fail probe. Log the degraded capability once and apply the same
+rule to initial enable, CPU/GX ownership changes, restore, and shutdown.
+
+Candidate artifacts are:
+
+- `zImage` / `dtbImage.wii` SHA-256:
+  `85137fa760fef6e840d5ef6cc0a74b8f1cf187a7f0a59a4e8b73fb3165b03463`
+- `vmlinux` SHA-256:
+  `11b88eb6135270f8f19df739c8cdae18488e0128783372b5c10529895bba2d3a`
+- `vmlinux.unstripped` SHA-256:
+  `4984ee71e0b0dde26ee24273f0d6a39731f5460d54ea9aa9c57ae1f592c1058f`
+- unchanged `gcn-gx.ko` SHA-256:
+  `bebd391507cc57104aa11a96f80783e56e13ed7cb26860f56027cdd1c8a4950c`
+- unchanged strict PowerPC render client SHA-256:
+  `cc8549c106799492a87b1d210267c0499ad87ef83580524f26d33f496b9cd2e6`
+- unchanged sustained KMS page-flip client SHA-256:
+  `c8127596f7fe3c0ab72b1e16702f76787b33bc59dafc550af327ea9fb5a0305f`
+
+Host validation passed strict checkpatch with zero diagnostics, `git diff
+--check`, a warning-clean PowerPC build of `gcn_drm_drv.o`, and a complete
+`make -j16 modules zImage`. A clean exact-commit UML build passed all 12
+`gcn_drm_render` tests and all 3 `gcn_gx_mem1` tests.
+
+Hardware acceptance requires deploying and independently verifying the exact
+kernel on the second Wii. Require DRM probe to log write-only `0x62` handling
+with readable control `0x22`, enable chroma exchange, register `/dev/dri/card0`,
+and produce a working CPU console. Then load the unchanged checksum-pinned GX
+module and run the complete strict client plus a visible optimized native KMS
+replay. Require byte-exact destination pixels, correct red/green/blue/white
+quadrants and magenta/gold checkerboard, coherent marker motion, and no seam,
+tearing, blanking, stale region, or corruption. Finally restore the console,
+unload GX, verify the write-only restore path, and require no AVE/GX/DRM
+timeout, stall, fallback, oops, panic, or machine check.
