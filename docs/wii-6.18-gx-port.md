@@ -10949,8 +10949,9 @@ checkpatch with zero errors, warnings, or checks.
 Hardware acceptance requires a crisp, correctly colored, stable full-frame
 desktop with a visibly updating clock and status indicator. When a USB keyboard
 is available, launcher selection and all three application views must respond
-correctly. Esc or F12 must restore the native CPU console. Require successful
-DRM master release and no GX/DRM timeout, FIFO stall, fallback, oops, panic, or
+correctly. Esc or F12 must restore the prior DRM fbcon CRTC. After the test,
+unloading GX must return AVE scanout to the CPU path. Require successful DRM
+master release and no GX/DRM timeout, FIFO stall, fallback, oops, panic, or
 machine check. This test validates the minimum native desktop architecture; it
 does not yet provide processes, movable windows, pointer input, or a terminal
 pseudoterminal.
@@ -10963,3 +10964,21 @@ signal interrupting the evdev `poll()` was logged as `Interrupted system call`
 and returned failure, even though CRTC cleanup still executed. Commit
 `448f0b82b` treats an interrupted poll as a normal exit when the signal handler
 has set the stop flag. The corrected candidate must be rerun before acceptance.
+
+Hardware result: accepted. The checksum-verified corrected candidate detected
+the Dell USB keyboard on `/dev/input/event1`, acquired DRM master, and displayed
+the complete 640 by 480 RGB565 desktop. The user exercised the visible shell and
+reported that it worked perfectly. The panel, launcher selection, application
+views, text, colors, clock/status updates, and local keyboard handling were
+clear, stable, and responsive.
+
+Esc terminated the corrected shell with no runtime error in its log. The shell
+released its dumb framebuffers and restored the prior `gcn-vidrmfb` CRTC. The
+test teardown then unloaded `gcn_gx`; the kernel recorded AVE chroma exchange
+returning to CPU scanout and clean accelerator unregistration. The final audit
+found no GX/DRM timeout, FIFO stall, fallback, oops, panic, or machine check.
+
+This establishes the first usable desktop-userspace milestone on the standard
+Wii DRM/KMS ABI. Further work can proceed within userspace: add relative pointer
+input, movable and focused windows, process launching, and a PTY-backed terminal
+before replacing the Jessie development root with the minimal Buildroot image.
