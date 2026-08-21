@@ -51,6 +51,7 @@ struct font_data {
 #define FILES_ENTRY_COUNT 64
 #define FILES_VISIBLE_ROWS 10
 #define FILES_PATH_SIZE 512
+#define SYSTEM_NETWORK_NAME 16
 
 enum shell_app {
 	SHELL_APP_TERMINAL,
@@ -117,12 +118,29 @@ struct shell_files {
 	int loaded;
 };
 
+struct shell_system {
+	uint64_t cpu_total;
+	uint64_t cpu_idle;
+	uint64_t uptime_seconds;
+	uint64_t network_rx_bytes;
+	uint64_t network_tx_bytes;
+	unsigned long memory_total_kb;
+	unsigned long memory_available_kb;
+	unsigned int cpu_percent;
+	char network_name[SYSTEM_NETWORK_NAME];
+	int network_up;
+	int gx_loaded;
+	int drm_present;
+	int valid;
+};
+
 struct shell_state {
 	struct test_buffer buffers[SHELL_BUFFER_COUNT];
 	struct shell_input inputs[SHELL_INPUT_COUNT];
 	struct shell_window windows[SHELL_APP_COUNT];
 	struct shell_terminal terminal;
 	struct shell_files files;
+	struct shell_system system;
 	unsigned int z_order[SHELL_APP_COUNT];
 	unsigned int input_count;
 	unsigned int visible;
@@ -700,6 +718,171 @@ static int files_move_selection(struct shell_files *files, int movement)
 	return 1;
 }
 
+static int read_u64_file(const char *path, uint64_t *value)
+{
+	unsigned long long parsed;
+	FILE *file;
+	int result;
+
+	file = fopen(path, "r");
+	if (!file)
+		return -1;
+	result = fscanf(file, "%llu", &parsed);
+	fclose(file);
+	if (result != 1)
+		return -1;
+	*value = parsed;
+	return 0;
+}
+
+static void system_read_cpu(struct shell_system *system)
+{
+	unsigned long long user = 0;
+	unsigned long long nice = 0;
+	unsigned long long kernel = 0;
+	unsigned long long idle = 0;
+	unsigned long long iowait = 0;
+	unsigned long long irq = 0;
+	unsigned long long softirq = 0;
+	unsigned long long steal = 0;
+	uint64_t total;
+	uint64_t idle_total;
+	FILE *file;
+
+	file = fopen("/proc/stat", "r");
+	if (!file)
+		return;
+	if (fscanf(file, "cpu %llu %llu %llu %llu %llu %llu %llu %llu",
+		   &user, &nice, &kernel, &idle, &iowait, &irq, &softirq,
+		   &steal) < 4) {
+		fclose(file);
+		return;
+	}
+	fclose(file);
+	total = user + nice + kernel + idle + iowait + irq + softirq + steal;
+	idle_total = idle + iowait;
+	if (system->cpu_total && total > system->cpu_total) {
+		uint64_t total_delta = total - system->cpu_total;
+		uint64_t idle_delta = idle_total - system->cpu_idle;
+
+		if (idle_delta > total_delta)
+			idle_delta = total_delta;
+		system->cpu_percent =
+			(total_delta - idle_delta) * 100 / total_delta;
+	}
+	system->cpu_total = total;
+	system->cpu_idle = idle_total;
+}
+
+static void system_read_memory(struct shell_system *system)
+{
+	char line[128];
+	FILE *file;
+
+	system->memory_total_kb = 0;
+	system->memory_available_kb = 0;
+	file = fopen("/proc/meminfo", "r");
+	if (!file)
+		return;
+	while (fgets(line, sizeof(line), file)) {
+		unsigned long value;
+
+		if (sscanf(line, "MemTotal: %lu kB", &value) == 1)
+			system->memory_total_kb = value;
+		else if (sscanf(line, "MemAvailable: %lu kB", &value) == 1)
+			system->memory_available_kb = value;
+	}
+	fclose(file);
+}
+
+static int system_read_operstate(const char *name)
+{
+	char path[128];
+	char state[16];
+	FILE *file;
+
+	snprintf(path, sizeof(path), "/sys/class/net/%s/operstate", name);
+	file = fopen(path, "r");
+	if (!file)
+		return 0;
+	state[0] = '\0';
+	if (fscanf(file, "%15s", state) != 1)
+		state[0] = '\0';
+	fclose(file);
+	return !strcmp(state, "up");
+}
+
+static void system_copy_network_name(char *destination, const char *source)
+{
+	size_t length = strnlen(source, SYSTEM_NETWORK_NAME - 1);
+
+	memcpy(destination, source, length);
+	destination[length] = '\0';
+}
+
+static void system_read_network(struct shell_system *system)
+{
+	struct dirent *entry;
+	char fallback[SYSTEM_NETWORK_NAME] = "";
+	DIR *directory;
+
+	system->network_name[0] = '\0';
+	system->network_up = 0;
+	system->network_rx_bytes = 0;
+	system->network_tx_bytes = 0;
+	directory = opendir("/sys/class/net");
+	if (!directory)
+		return;
+	while ((entry = readdir(directory))) {
+		char candidate[SYSTEM_NETWORK_NAME];
+
+		if (entry->d_name[0] == '.' || !strcmp(entry->d_name, "lo"))
+			continue;
+		system_copy_network_name(candidate, entry->d_name);
+		if (!fallback[0])
+			system_copy_network_name(fallback, candidate);
+		if (system_read_operstate(candidate)) {
+			system_copy_network_name(system->network_name, candidate);
+			system->network_up = 1;
+			break;
+		}
+	}
+	closedir(directory);
+	if (!system->network_name[0])
+		strcpy(system->network_name, fallback);
+	if (system->network_name[0]) {
+		char path[128];
+
+		snprintf(path, sizeof(path),
+			 "/sys/class/net/%s/statistics/rx_bytes",
+			 system->network_name);
+		(void)read_u64_file(path, &system->network_rx_bytes);
+		snprintf(path, sizeof(path),
+			 "/sys/class/net/%s/statistics/tx_bytes",
+			 system->network_name);
+		(void)read_u64_file(path, &system->network_tx_bytes);
+	}
+}
+
+static void refresh_system(struct shell_system *system)
+{
+	unsigned long long uptime;
+	FILE *file;
+
+	system_read_cpu(system);
+	system_read_memory(system);
+	system_read_network(system);
+	file = fopen("/proc/uptime", "r");
+	if (file) {
+		if (fscanf(file, "%llu", &uptime) == 1)
+			system->uptime_seconds = uptime;
+		fclose(file);
+	}
+	system->gx_loaded = !access("/sys/module/gcn_gx", F_OK);
+	system->drm_present = !access("/sys/class/drm/card0", F_OK);
+	system->valid = 1;
+}
+
 static void fill_rect(struct test_buffer *buffer, int x, int y,
 		      int width, int height, uint16_t color)
 {
@@ -888,17 +1071,58 @@ static void draw_status_row(struct test_buffer *buffer, int x, int y,
 }
 
 static void draw_system(struct test_buffer *buffer,
+			const struct shell_state *shell,
 			const struct shell_window *window)
 {
+	const struct shell_system *system = &shell->system;
+	uint64_t memory_used_kb = system->memory_total_kb >
+		system->memory_available_kb ?
+		system->memory_total_kb - system->memory_available_kb : 0;
+	char graphics[28];
+	char network[28];
+	char traffic[28];
+	char memory[28];
+	char uptime[28];
+	char cpu[28];
+	unsigned int rx_mib = system->network_rx_bytes >> 20;
+	unsigned int tx_mib = system->network_tx_bytes >> 20;
 	int x = window->x + 26;
-	int y = window->y + 52;
+	int y = window->y + 44;
 
-	draw_status_row(buffer, x, y, "Processor", "Broadway PowerPC", COLOR_TEAL);
-	draw_status_row(buffer, x, y + 38, "Graphics", "GX DRM/KMS", COLOR_RED);
-	draw_status_row(buffer, x, y + 76, "Display", "640 x 480 RGB565",
-			COLOR_GOLD);
-	draw_status_row(buffer, x, y + 114, "Network", "Online", COLOR_TEAL);
-	draw_status_row(buffer, x, y + 152, "Session", "Ready", COLOR_VIOLET);
+	snprintf(cpu, sizeof(cpu), "%u%% Broadway", system->cpu_percent);
+	if (system->memory_total_kb)
+		snprintf(memory, sizeof(memory), "%llu / %lu MiB",
+			 (unsigned long long)(memory_used_kb / 1024),
+			 system->memory_total_kb / 1024);
+	else
+		strcpy(memory, "Unavailable");
+	snprintf(uptime, sizeof(uptime), "%lluh %02llum %02llus",
+		 (unsigned long long)(system->uptime_seconds / 3600),
+		 (unsigned long long)(system->uptime_seconds / 60 % 60),
+		 (unsigned long long)(system->uptime_seconds % 60));
+	if (system->network_name[0])
+		snprintf(network, sizeof(network), "%s %s", system->network_name,
+			 system->network_up ? "Up" : "Down");
+	else
+		strcpy(network, "No interface");
+	if (system->network_rx_bytes >> 20 > 999999)
+		rx_mib = 999999;
+	if (system->network_tx_bytes >> 20 > 999999)
+		tx_mib = 999999;
+	snprintf(traffic, sizeof(traffic), "R%uM T%uM", rx_mib, tx_mib);
+	snprintf(graphics, sizeof(graphics), "%s / %s",
+		 system->gx_loaded ? "GX" : "CPU",
+		 system->drm_present ? "DRM" : "No DRM");
+
+	draw_status_row(buffer, x, y, "CPU", cpu, COLOR_TEAL);
+	draw_status_row(buffer, x, y + 34, "Memory", memory, COLOR_GOLD);
+	draw_status_row(buffer, x, y + 68, "Uptime", uptime, COLOR_VIOLET);
+	draw_status_row(buffer, x, y + 102, "Network", network,
+			system->network_up ? COLOR_TEAL : COLOR_RED);
+	draw_status_row(buffer, x, y + 136, "Traffic", traffic, COLOR_BLUE);
+	draw_status_row(buffer, x, y + 170, "Graphics", graphics,
+			system->gx_loaded && system->drm_present ?
+			COLOR_TEAL : COLOR_RED);
 }
 
 static void draw_window(struct test_buffer *buffer,
@@ -935,7 +1159,7 @@ static void draw_window(struct test_buffer *buffer,
 		draw_files(buffer, shell, window);
 		break;
 	case SHELL_APP_SYSTEM:
-		draw_system(buffer, window);
+		draw_system(buffer, shell, window);
 		break;
 	default:
 		break;
@@ -1128,6 +1352,8 @@ static void open_window(struct shell_state *shell, unsigned int app)
 	}
 	if (app == SHELL_APP_FILES && !shell->files.loaded)
 		(void)files_load(&shell->files, "/");
+	if (app == SHELL_APP_SYSTEM)
+		refresh_system(&shell->system);
 	shell->windows[app].visible = 1;
 	raise_window(shell, app);
 }
@@ -1680,6 +1906,7 @@ int main(int argc, char **argv)
 		perror("start terminal");
 		goto out;
 	}
+	refresh_system(&shell.system);
 
 	drm_fd = open(card, O_RDWR | O_CLOEXEC);
 	if (drm_fd < 0) {
@@ -1754,6 +1981,8 @@ int main(int argc, char **argv)
 		if (second != last_second) {
 			last_second = second;
 			shell.cursor_visible = !shell.cursor_visible;
+			if (shell.windows[SHELL_APP_SYSTEM].visible)
+				refresh_system(&shell.system);
 			changed = 1;
 		}
 		if (changed && present_shell(drm_fd, crtc.crtc_id, &shell) < 0) {
