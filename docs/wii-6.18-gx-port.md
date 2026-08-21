@@ -11420,3 +11420,52 @@ This establishes correct remote display export and the intended SSH security
 boundary. Full milestone acceptance remains pending the sustained-update and
 clean-teardown audit; interactive remote input is a separate follow-on
 candidate.
+
+### Stage SSH-tunneled interactive VNC input
+
+- Test branch: `feature/wii-kolibri-shell`
+- Candidate commit: `995ea9f00`
+- Upstream dependency: LibVNCServer `0.9.15`, commit
+  `9b54b1ec32731bd23158ca014dc18014db4194c3`
+
+Route remote keyboard and pointer events through the same shell handlers already
+used by grabbed USB input devices. Translate supported X keysyms to Linux input
+codes, including modifiers, printable US keys, navigation, and F1 through F12.
+Map the VNC absolute pointer to the shell cursor and send left-button and wheel
+edge transitions through the existing launcher, focus, drag, close, and Files
+navigation paths.
+
+Keep all VNC work non-threaded in the shell event loop. Callback state only marks
+the shell dirty; redraw and KMS presentation still occur through the accepted
+triple-buffer path. Retain the loopback-only listener and mandatory authenticated
+SSH forward. The default build remains free of the optional VNC dependency.
+
+The checksum-pinned artifacts are:
+
+- unchanged `zImage` / `dtbImage.wii` SHA-256:
+  `85137fa760fef6e840d5ef6cc0a74b8f1cf187a7f0a59a4e8b73fb3165b03463`
+- unchanged `gcn-gx.ko` SHA-256:
+  `bebd391507cc57104aa11a96f80783e56e13ed7cb26860f56027cdd1c8a4950c`
+- unchanged static minimal `libvncserver.a` SHA-256:
+  `8ec7f3793eb205f1086883846a0695d32d42372aa0e9a669763174e949f1fbbc`
+- static PowerPC interactive-VNC shell SHA-256:
+  `26fef0ae0a67ac027563a906f1c8c90b1204a10438c823478184bfde7ef94074`
+
+Host validation passed warning-clean dependency-free and VNC-enabled static
+PowerPC builds, ELF verification as a 32-bit big-endian executable, ShellCheck
+for both build helpers, `git diff --check`, and strict checkpatch with zero
+findings after explicitly excluding camelCase identifiers belonging to the
+external LibVNCServer API.
+
+Hardware acceptance requires a VNC F3 event to open System and a captured frame
+to show that window. Two captures at least one second apart must show advancing
+uptime while the physical display remains crisp. Remotely open Terminal and type
+a distinctive command, requiring its echo and output in a capture. Exercise
+pointer focus, launcher activation, window dragging, close, Files selection, and
+wheel navigation. Verify local USB input still works after remote input and that
+disconnecting a viewer does not leave a pressed button or modifier state.
+
+Finish through remote F12 or SIGTERM and require exit zero, child reap, PTY count
+zero, fbcon restoration, clean GX unload, continuous uptime, and no GX/DRM
+timeout, FIFO stall, fallback, oops, panic, or machine check. A direct LAN
+connection to port 5900 must remain refused throughout.
