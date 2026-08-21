@@ -10910,3 +10910,47 @@ desktop can proceed now using standard RGB565 dumb buffers. Separately,
 improving full-frame XRGB8888 requires reducing its packed-to-tiled RGB565
 conversion and memory/cache traffic; that optimization is no longer a blocker
 for beginning desktop-userspace integration.
+
+### Stage the first native RGB565 desktop shell
+
+- Test branch: `feature/wii-kolibri-shell`
+- Candidate commit: `f1385d8fe`
+
+Begin desktop-userspace integration without replacing the known-working Jessie
+root filesystem or introducing Xorg. Add a dependency-free, statically linked
+PowerPC shell which uses only standard DRM/KMS and evdev UAPI. The design takes
+its size and interaction goals from KolibriOS and the Amiga-derived PowerPC
+desktop family while retaining Linux 6.18 as the hardware and process layer.
+
+The shell allocates three standard 640 by 480 RGB565 dumb buffers and rotates
+them through page flips. It renders a top panel, launcher, application window,
+status bar, clock, and terminal, file, and system views using the kernel's
+built-in 8 by 16 VGA font. It discovers keyboard-capable evdev nodes directly,
+supports arrow or Tab selection, Enter activation, F1 through F3 application
+selection, and Esc or F12 exit, and restores the previous CRTC before releasing
+its framebuffers. It requires no libdrm, toolkit, display server, or dynamic
+loader and therefore runs on both the current Jessie diagnostic image and the
+planned minimal Buildroot image.
+
+The checksum-pinned artifacts are:
+
+- unchanged `zImage` / `dtbImage.wii` SHA-256:
+  `85137fa760fef6e840d5ef6cc0a74b8f1cf187a7f0a59a4e8b73fb3165b03463`
+- unchanged `gcn-gx.ko` SHA-256:
+  `bebd391507cc57104aa11a96f80783e56e13ed7cb26860f56027cdd1c8a4950c`
+- static PowerPC `wii-kolibri-shell` SHA-256:
+  `3027906bb089b597d53f081f99955539bfb115cb4731e5e85f752565d2774b7a`
+
+Host validation passed warning-clean static PowerPC compilation against the
+installed target UAPI, ELF verification as a 32-bit big-endian PowerPC static
+executable, `git diff --check`, ShellCheck on the build helper, and strict
+checkpatch with zero errors, warnings, or checks.
+
+Hardware acceptance requires a crisp, correctly colored, stable full-frame
+desktop with a visibly updating clock and status indicator. When a USB keyboard
+is available, launcher selection and all three application views must respond
+correctly. Esc or F12 must restore the native CPU console. Require successful
+DRM master release and no GX/DRM timeout, FIFO stall, fallback, oops, panic, or
+machine check. This test validates the minimum native desktop architecture; it
+does not yet provide processes, movable windows, pointer input, or a terminal
+pseudoterminal.
