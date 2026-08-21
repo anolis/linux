@@ -11,6 +11,7 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <drm/drm.h>
@@ -69,6 +70,17 @@ static void *xcalloc(size_t count, size_t size)
 static __u64 user_ptr(const void *ptr)
 {
 	return (__u64)(uintptr_t)ptr;
+}
+
+static __u64 monotonic_ns(void)
+{
+	struct timespec now;
+
+	if (clock_gettime(CLOCK_MONOTONIC, &now) < 0) {
+		perror("clock_gettime");
+		exit(EXIT_FAILURE);
+	}
+	return (__u64)now.tv_sec * 1000000000ULL + now.tv_nsec;
 }
 
 static int get_resources(int fd, struct drm_mode_card_res *res,
@@ -338,6 +350,9 @@ static int wait_flip_event(int fd, __u64 expected, __u32 *sequence)
 static int run_flips(int fd, __u32 crtc_id, struct test_buffer *buffers,
 		     unsigned int count, unsigned int delay_ms)
 {
+	__u64 start_ns = monotonic_ns();
+	__u64 elapsed_ns;
+	__u64 rate_millihz;
 	unsigned int i;
 	__u32 last_sequence = 0;
 
@@ -357,14 +372,23 @@ static int run_flips(int fd, __u32 crtc_id, struct test_buffer *buffers,
 			return -1;
 	}
 
-	printf("wii-drm-test: flips=%u last-vblank=%u\n", i, last_sequence);
+	elapsed_ns = monotonic_ns() - start_ns;
+	rate_millihz = elapsed_ns ?
+		(__u64)i * 1000000000000ULL / elapsed_ns : 0;
+	printf("wii-drm-test: flips=%u last-vblank=%u elapsed-us=%llu",
+	       i, last_sequence, (unsigned long long)(elapsed_ns / 1000));
+	printf(" avg-us=%llu rate=%llu.%03llu-hz\n",
+	       (unsigned long long)(i ? elapsed_ns / i / 1000 : 0),
+	       (unsigned long long)(rate_millihz / 1000),
+	       (unsigned long long)(rate_millihz % 1000));
 	return i == count ? 0 : -1;
 }
 
 static void usage(const char *program)
 {
 	fprintf(stderr, "Usage: %s [--format xrgb8888|rgb565] ", program);
-	fprintf(stderr, "[--flips COUNT] [--delay-ms MSEC] [CARD]\n");
+	fprintf(stderr, "[--flips COUNT] [--delay-ms MSEC] ");
+	fprintf(stderr, "[--exit-after-flips] [CARD]\n");
 }
 
 int main(int argc, char **argv)
@@ -382,6 +406,7 @@ int main(int argc, char **argv)
 	__u32 connector_id;
 	unsigned int flip_count = 0;
 	unsigned int delay_ms = 250;
+	int exit_after_flips = 0;
 	unsigned int buffer_count;
 	unsigned int created = 0;
 	unsigned int i;
@@ -422,6 +447,10 @@ int main(int argc, char **argv)
 			delay_ms = parse_unsigned(argv[i], "flip delay", 60000);
 			continue;
 		}
+		if (!strcmp(argv[i], "--exit-after-flips")) {
+			exit_after_flips = 1;
+			continue;
+		}
 		if (!strcmp(argv[i], "--help")) {
 			usage(argv[0]);
 			return EXIT_SUCCESS;
@@ -432,6 +461,10 @@ int main(int argc, char **argv)
 		}
 		card = argv[i];
 		card_set = 1;
+	}
+	if (exit_after_flips && !flip_count) {
+		fprintf(stderr, "--exit-after-flips requires --flips\n");
+		return EXIT_FAILURE;
 	}
 	buffer_count = flip_count ? 2 : 1;
 
@@ -505,6 +538,10 @@ int main(int argc, char **argv)
 		goto out;
 	}
 	fflush(stdout);
+	if (exit_after_flips) {
+		status = EXIT_SUCCESS;
+		goto out;
+	}
 	while (!stop)
 		pause();
 	status = EXIT_SUCCESS;
