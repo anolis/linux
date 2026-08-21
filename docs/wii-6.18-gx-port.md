@@ -11102,3 +11102,48 @@ The shell now has a validated input, composition, and window-management core.
 The next milestone can bind a child process to a window, beginning with a
 PTY-backed terminal whose output and keyboard input are owned by the Terminal
 window rather than hard-coded shell content.
+
+### Stage a PTY-backed interactive Terminal
+
+- Test branch: `feature/wii-kolibri-shell`
+- Candidate commit: `93828c21f`
+
+Replace the accepted Terminal placeholder with a real application process owned
+by its window. Open and unlock `/dev/ptmx`, create a 50 by 14 devpts slave, fork
+an independent session with that slave as its controlling terminal, and execute
+interactive `/bin/sh`. The desktop owns the nonblocking PTY master and child PID,
+continues draining output while the Terminal window is hidden, and closes and
+reaps or terminates the child process group during desktop teardown.
+
+Add a bounded terminal cell grid and a small VT parser for printable bytes,
+carriage return, newline, backspace, tabs, scrolling, cursor movement, clear
+screen and line, saved cursor position, ANSI foreground colors, and ignored
+private mode sequences. Route letters, digits, shifted punctuation, Caps Lock,
+Ctrl characters, Enter, Backspace, Tab, Escape, and cursor/navigation sequences
+to the PTY only while Terminal is focused. F1 through F6 and F12 remain desktop
+controls; F12 is the unconditional desktop exit now that Escape belongs to the
+terminal application.
+
+The checksum-pinned artifacts are:
+
+- unchanged `zImage` / `dtbImage.wii` SHA-256:
+  `85137fa760fef6e840d5ef6cc0a74b8f1cf187a7f0a59a4e8b73fb3165b03463`
+- unchanged `gcn-gx.ko` SHA-256:
+  `bebd391507cc57104aa11a96f80783e56e13ed7cb26860f56027cdd1c8a4950c`
+- static PowerPC `wii-kolibri-shell` SHA-256:
+  `2751f27c2a4754f6cde9ef7f8ef24d12b6edba083af573c3c83d528c2f104032`
+
+Host validation passed warning-clean static PowerPC compilation against the
+installed target UAPI, `git diff --check`, and strict checkpatch with zero
+errors, warnings, or checks. Wii preflight confirmed a writable `/dev/ptmx`, a
+mounted devpts instance, executable `/bin/sh`, and available PTY capacity.
+
+Hardware acceptance requires a visible interactive prompt and successful
+execution of `echo`, `uname -m`, `clear`, and a command producing more than 14
+lines. Verify uppercase, shifted punctuation, Backspace, command-history arrows,
+and Ctrl-C. Start continuous output, hide Terminal with F4, reopen it with F1,
+and require output accumulated without blocking or corrupting the desktop. Run
+`exit` and require a visible process-exited marker and a reaped child. F12 must
+then terminate the desktop with code zero, restore the prior DRM fbcon CRTC, and
+allow GX to unload and return AVE to CPU scanout. Require no leaked child, PTY,
+GX/DRM timeout, FIFO stall, fallback, oops, panic, or machine check.
