@@ -11021,3 +11021,22 @@ wheel selection. Clicking the close control must terminate without an error and
 restore the prior DRM fbcon CRTC. Afterward GX must unload cleanly and return AVE
 to CPU scanout. Require no GX/DRM timeout, FIFO stall, fallback, oops, panic, or
 machine check.
+
+Hardware result: accepted. The checksum-verified candidate discovered the Dell
+keyboard as a keyboard and the Microsoft IntelliEye as a pointer, then acquired
+DRM master and rendered the RGB565 shell. The user exercised cursor movement,
+screen-edge clamping, launcher hover, left-click application activation, wheel
+selection, and the red close control and reported that everything worked
+perfectly. No cursor trail, display corruption, missed interaction, or visual
+regression was reported.
+
+The close control terminated the process with kernel-retained exit code zero.
+Its log contained only the expected two input-discovery lines and active-mode
+message. The shell restored `gcn-vidrmfb`; GX then unloaded, and the kernel
+recorded AVE returning to CPU scanout followed by clean accelerator
+unregistration. The final audit found no GX/DRM timeout, FIFO stall, fallback,
+oops, panic, or machine check.
+
+Direct keyboard and pointer input are now sufficient for the next shell phase:
+multiple independently positioned windows with focus, dragging, stacking, and
+application process ownership.
