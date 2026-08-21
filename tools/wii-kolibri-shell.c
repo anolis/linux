@@ -6,7 +6,9 @@
 #undef main
 
 #include <dirent.h>
+#include <limits.h>
 #include <linux/input.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <termios.h>
 
@@ -46,6 +48,9 @@ struct font_data {
 #define TERMINAL_COLUMNS 50
 #define TERMINAL_ROWS 14
 #define TERMINAL_CSI_PARAMS 4
+#define FILES_ENTRY_COUNT 64
+#define FILES_VISIBLE_ROWS 10
+#define FILES_PATH_SIZE 512
 
 enum shell_app {
 	SHELL_APP_TERMINAL,
@@ -95,11 +100,29 @@ struct shell_terminal {
 	int child_exited;
 };
 
+struct shell_file_entry {
+	char name[NAME_MAX + 1];
+	int directory;
+};
+
+struct shell_files {
+	struct shell_file_entry entries[FILES_ENTRY_COUNT];
+	char path[FILES_PATH_SIZE];
+	char status[64];
+	unsigned int count;
+	unsigned int selected;
+	unsigned int scroll;
+	uint64_t last_click_ms;
+	int last_clicked;
+	int loaded;
+};
+
 struct shell_state {
 	struct test_buffer buffers[SHELL_BUFFER_COUNT];
 	struct shell_input inputs[SHELL_INPUT_COUNT];
 	struct shell_window windows[SHELL_APP_COUNT];
 	struct shell_terminal terminal;
+	struct shell_files files;
 	unsigned int z_order[SHELL_APP_COUNT];
 	unsigned int input_count;
 	unsigned int visible;
@@ -537,6 +560,146 @@ static int drain_terminal(struct shell_terminal *terminal)
 	return changed;
 }
 
+static int file_entry_compare(const void *left, const void *right)
+{
+	const struct shell_file_entry *a = left;
+	const struct shell_file_entry *b = right;
+
+	if (!strcmp(a->name, ".."))
+		return -1;
+	if (!strcmp(b->name, ".."))
+		return 1;
+	if (a->directory != b->directory)
+		return b->directory - a->directory;
+	return strcmp(a->name, b->name);
+}
+
+static int files_load(struct shell_files *files, const char *path)
+{
+	struct shell_file_entry entries[FILES_ENTRY_COUNT];
+	struct dirent *directory_entry;
+	unsigned int count = 0;
+	int truncated = 0;
+	DIR *directory;
+
+	directory = opendir(path);
+	if (!directory) {
+		snprintf(files->status, sizeof(files->status),
+			 "Open failed: %s", strerror(errno));
+		return -1;
+	}
+	if (strcmp(path, "/")) {
+		strcpy(entries[count].name, "..");
+		entries[count++].directory = 1;
+	}
+	while ((directory_entry = readdir(directory))) {
+		struct shell_file_entry *entry;
+		char full_path[FILES_PATH_SIZE + NAME_MAX + 2];
+		struct stat status;
+		size_t name_length;
+
+		if (!strcmp(directory_entry->d_name, ".") ||
+		    !strcmp(directory_entry->d_name, ".."))
+			continue;
+		if (count == FILES_ENTRY_COUNT) {
+			truncated = 1;
+			break;
+		}
+		entry = &entries[count++];
+		name_length = strnlen(directory_entry->d_name, NAME_MAX);
+		memcpy(entry->name, directory_entry->d_name, name_length);
+		entry->name[name_length] = '\0';
+		entry->directory = directory_entry->d_type == DT_DIR;
+		if (directory_entry->d_type != DT_UNKNOWN &&
+		    directory_entry->d_type != DT_LNK)
+			continue;
+		if (!strcmp(path, "/"))
+			snprintf(full_path, sizeof(full_path), "/%s", entry->name);
+		else
+			snprintf(full_path, sizeof(full_path), "%s/%s", path,
+				 entry->name);
+		if (!stat(full_path, &status))
+			entry->directory = S_ISDIR(status.st_mode);
+	}
+	closedir(directory);
+	qsort(entries, count, sizeof(entries[0]), file_entry_compare);
+	memcpy(files->entries, entries, count * sizeof(entries[0]));
+	strncpy(files->path, path, sizeof(files->path) - 1);
+	files->path[sizeof(files->path) - 1] = '\0';
+	files->count = count;
+	files->selected = 0;
+	files->scroll = 0;
+	files->last_clicked = -1;
+	files->loaded = 1;
+	if (truncated)
+		snprintf(files->status, sizeof(files->status),
+			 "%u+ entries", count);
+	else
+		snprintf(files->status, sizeof(files->status),
+			 "%u entr%s", count, count == 1 ? "y" : "ies");
+	return 0;
+}
+
+static void files_parent_path(const char *path, char *parent, size_t size)
+{
+	char *separator;
+
+	strncpy(parent, path, size - 1);
+	parent[size - 1] = '\0';
+	separator = strrchr(parent, '/');
+	if (!separator || separator == parent)
+		strcpy(parent, "/");
+	else
+		*separator = '\0';
+}
+
+static int files_open_selected(struct shell_files *files)
+{
+	const struct shell_file_entry *entry;
+	char target[FILES_PATH_SIZE];
+
+	if (!files->count || files->selected >= files->count)
+		return 0;
+	entry = &files->entries[files->selected];
+	if (!entry->directory) {
+		snprintf(files->status, sizeof(files->status), "File: %.38s",
+			 entry->name);
+		return 1;
+	}
+	if (!strcmp(entry->name, "..")) {
+		files_parent_path(files->path, target, sizeof(target));
+	} else if (!strcmp(files->path, "/")) {
+		snprintf(target, sizeof(target), "/%s", entry->name);
+	} else if (snprintf(target, sizeof(target), "%s/%s", files->path,
+			    entry->name) >= (int)sizeof(target)) {
+		snprintf(files->status, sizeof(files->status), "Path too long");
+		return 1;
+	}
+	(void)files_load(files, target);
+	return 1;
+}
+
+static int files_move_selection(struct shell_files *files, int movement)
+{
+	int selected;
+
+	if (!files->count)
+		return 0;
+	selected = files->selected + movement;
+	if (selected < 0)
+		selected = 0;
+	if (selected >= (int)files->count)
+		selected = files->count - 1;
+	if (selected == (int)files->selected)
+		return 0;
+	files->selected = selected;
+	if (files->selected < files->scroll)
+		files->scroll = files->selected;
+	else if (files->selected >= files->scroll + FILES_VISIBLE_ROWS)
+		files->scroll = files->selected - FILES_VISIBLE_ROWS + 1;
+	return 1;
+}
+
 static void fill_rect(struct test_buffer *buffer, int x, int y,
 		      int width, int height, uint16_t color)
 {
@@ -672,23 +835,47 @@ static void draw_terminal(struct test_buffer *buffer,
 }
 
 static void draw_files(struct test_buffer *buffer,
+		       const struct shell_state *shell,
 		       const struct shell_window *window)
 {
-	static const char *const names[] = {
-		"Applications", "Documents", "System", "Network",
-	};
+	const struct shell_files *files = &shell->files;
+	char status[47];
+	char path[47];
+	size_t path_length = strlen(files->path);
 	unsigned int i;
 
-	for (i = 0; i < ARRAY_SIZE(names); i++) {
-		int x = window->x + 24;
-		int y = window->y + 48 + i * 48;
+	if (path_length < sizeof(path))
+		strcpy(path, files->path);
+	else
+		snprintf(path, sizeof(path), "...%s",
+			 files->path + path_length - sizeof(path) + 4);
+	draw_text(buffer, window->x + 16, window->y + 38, path,
+		  rgb565(COLOR_TEXT));
+	fill_rect(buffer, window->x + 16, window->y + 58,
+		  window->width - 32, 1, rgb565(COLOR_BORDER));
 
-		fill_rect(buffer, x, y, 30, 24,
-			  rgb565(i & 1 ? COLOR_GOLD : COLOR_TEAL));
-		draw_text(buffer, x + 46, y + 4, names[i], rgb565(COLOR_TEXT));
-		fill_rect(buffer, x, y + 34, window->width - 48, 1,
-			  rgb565(COLOR_BORDER));
+	for (i = 0; i < FILES_VISIBLE_ROWS; i++) {
+		unsigned int index = files->scroll + i;
+		const struct shell_file_entry *entry;
+		char label[39];
+		int x = window->x + 16;
+		int y = window->y + 64 + i * 20;
+
+		if (index >= files->count)
+			break;
+		entry = &files->entries[index];
+		if (index == files->selected)
+			fill_rect(buffer, x, y, window->width - 32, 19,
+				  rgb565(COLOR_BORDER));
+		fill_rect(buffer, x + 4, y + 5, 10, 10,
+			  rgb565(entry->directory ? COLOR_GOLD : COLOR_MUTED));
+		snprintf(label, sizeof(label), entry->directory ? "%.35s/" :
+			 "%.36s", entry->name);
+		draw_text(buffer, x + 22, y + 2, label, rgb565(COLOR_TEXT));
 	}
+	snprintf(status, sizeof(status), "%.46s", files->status);
+	draw_text(buffer, window->x + 16, window->y + window->height - 22,
+		  status, rgb565(COLOR_MUTED));
 }
 
 static void draw_status_row(struct test_buffer *buffer, int x, int y,
@@ -745,7 +932,7 @@ static void draw_window(struct test_buffer *buffer,
 		draw_terminal(buffer, shell, window);
 		break;
 	case SHELL_APP_FILES:
-		draw_files(buffer, window);
+		draw_files(buffer, shell, window);
 		break;
 	case SHELL_APP_SYSTEM:
 		draw_system(buffer, window);
@@ -939,6 +1126,8 @@ static void open_window(struct shell_state *shell, unsigned int app)
 		terminal_feed_text(&shell->terminal, "[launch failed]\r\n");
 		perror("restart terminal");
 	}
+	if (app == SHELL_APP_FILES && !shell->files.loaded)
+		(void)files_load(&shell->files, "/");
 	shell->windows[app].visible = 1;
 	raise_window(shell, app);
 }
@@ -1144,6 +1333,39 @@ static int terminal_send_key(struct shell_state *shell, unsigned int key)
 	return terminal_write(&shell->terminal, &character, 1);
 }
 
+static int handle_files_key(struct shell_files *files, unsigned int key)
+{
+	char parent[FILES_PATH_SIZE];
+
+	switch (key) {
+	case KEY_UP:
+		return files_move_selection(files, -1);
+	case KEY_DOWN:
+		return files_move_selection(files, 1);
+	case KEY_PAGEUP:
+		return files_move_selection(files, -FILES_VISIBLE_ROWS);
+	case KEY_PAGEDOWN:
+		return files_move_selection(files, FILES_VISIBLE_ROWS);
+	case KEY_HOME:
+		return files_move_selection(files, -FILES_ENTRY_COUNT);
+	case KEY_END:
+		return files_move_selection(files, FILES_ENTRY_COUNT);
+	case KEY_ENTER:
+	case KEY_KPENTER:
+	case KEY_RIGHT:
+		return files_open_selected(files);
+	case KEY_BACKSPACE:
+	case KEY_LEFT:
+		files_parent_path(files->path, parent, sizeof(parent));
+		if (!strcmp(parent, files->path))
+			return 0;
+		(void)files_load(files, parent);
+		return 1;
+	default:
+		return 0;
+	}
+}
+
 static int handle_key_event(struct shell_state *shell, unsigned int key,
 			    int value)
 {
@@ -1169,6 +1391,13 @@ static int handle_key_event(struct shell_state *shell, unsigned int key,
 		if (terminal_send_key(shell, key) < 0)
 			stop = 1;
 		return 0;
+	}
+	if (shell->focused == SHELL_APP_FILES &&
+	    shell->windows[SHELL_APP_FILES].visible) {
+		if (value == 2 && key != KEY_UP && key != KEY_DOWN &&
+		    key != KEY_PAGEUP && key != KEY_PAGEDOWN)
+			return 0;
+		return handle_files_key(&shell->files, key);
 	}
 	return value == 1 ? handle_key(shell, key) : 0;
 }
@@ -1213,6 +1442,24 @@ static int update_pointer(struct shell_state *shell, int delta_x, int delta_y)
 	return 1;
 }
 
+static int files_entry_at(const struct shell_state *shell,
+			  const struct shell_window *window)
+{
+	int row;
+	unsigned int index;
+
+	if (shell->pointer_x < window->x + 16 ||
+	    shell->pointer_x >= window->x + window->width - 16 ||
+	    shell->pointer_y < window->y + 64 ||
+	    shell->pointer_y >= window->y + 64 + FILES_VISIBLE_ROWS * 20)
+		return -1;
+	row = (shell->pointer_y - window->y - 64) / 20;
+	index = shell->files.scroll + row;
+	if (index >= shell->files.count)
+		return -1;
+	return index;
+}
+
 static int handle_pointer_button(struct shell_state *shell, int pressed)
 {
 	struct shell_window *window;
@@ -1248,6 +1495,21 @@ static int handle_pointer_button(struct shell_state *shell, int pressed)
 		shell->drag_offset_x = shell->pointer_x - window->x;
 		shell->drag_offset_y = shell->pointer_y - window->y;
 		return 1;
+	}
+	if (app == SHELL_APP_FILES) {
+		int index = files_entry_at(shell, window);
+		uint64_t now = shell_monotonic_ms();
+
+		if (index < 0)
+			return 1;
+		shell->files.selected = index;
+		if (shell->files.last_clicked == index &&
+		    now - shell->files.last_click_ms <= 500) {
+			shell->files.last_clicked = -1;
+			return files_open_selected(&shell->files);
+		}
+		shell->files.last_clicked = index;
+		shell->files.last_click_ms = now;
 	}
 	return 1;
 }
@@ -1336,10 +1598,12 @@ static int poll_inputs(struct shell_state *shell)
 			return -1;
 		changed |= update_pointer(shell, delta_x, delta_y);
 		if (wheel) {
-			if (wheel > 0)
-				changed |= handle_key(shell, KEY_UP);
+			unsigned int key = wheel > 0 ? KEY_UP : KEY_DOWN;
+
+			if (shell->focused == SHELL_APP_FILES)
+				changed |= handle_files_key(&shell->files, key);
 			else
-				changed |= handle_key(shell, KEY_DOWN);
+				changed |= handle_key(shell, key);
 		}
 		if (button_pressed)
 			changed |= handle_pointer_button(shell, 1);
