@@ -11304,3 +11304,45 @@ returned to CPU scanout. Wii uptime remained continuous, and the final kernel
 audit found no GX/DRM timeout, FIFO stall, fallback, oops, panic, or machine
 check. This accepts direct filesystem browsing as the shell's second functional
 application surface.
+
+### Stage live System telemetry
+
+- Test branch: `feature/wii-kolibri-shell`
+- Candidate commit: `ab983b5f1`
+
+Replace the System placeholder with a one-second live view sourced directly from
+standard Linux kernel interfaces. Calculate CPU load from deltas in the aggregate
+`/proc/stat` counters, read total and available memory from `/proc/meminfo`, and
+format `/proc/uptime`. Discover an active non-loopback interface through
+`/sys/class/net`, expose its link state and bounded RX/TX MiB counters, and report
+whether the GX module and DRM card are present through sysfs.
+
+Refresh once immediately when System opens and once per second only while it is
+visible. Keep every parser and displayed field bounded and run all collection in
+the existing event loop, without a daemon, helper process, background thread, or
+new runtime dependency.
+
+The checksum-pinned artifacts are:
+
+- unchanged `zImage` / `dtbImage.wii` SHA-256:
+  `85137fa760fef6e840d5ef6cc0a74b8f1cf187a7f0a59a4e8b73fb3165b03463`
+- unchanged `gcn-gx.ko` SHA-256:
+  `bebd391507cc57104aa11a96f80783e56e13ed7cb26860f56027cdd1c8a4950c`
+- static PowerPC `wii-kolibri-shell` SHA-256:
+  `89114da5fcc7da9d3fa66e7e54eeb7fe3830df3298284d63a9b424364f11617c`
+
+Host validation passed warning-clean static PowerPC compilation against the
+installed target UAPI, `git diff --check`, and strict checkpatch with zero
+errors, warnings, or checks.
+
+Hardware acceptance requires System to show plausible CPU, used/total memory,
+continuously advancing uptime, active Wii wireless interface and link state,
+RX/TX traffic, and `GX / DRM` while the accepted accelerator is loaded. Compare
+memory, uptime, interface, traffic, and module/card presence against simultaneous
+remote reads of the same procfs and sysfs sources. Generate and remove a bounded
+CPU workload and require the displayed load to rise and fall. Transfer network
+data and require its MiB counter to advance. Confirm that refreshes remain crisp
+and do not interfere with Terminal or Files interaction. Finish with F12 and
+require child reap, PTY count zero, fbcon restoration, clean GX unload,
+continuous uptime, and no GX/DRM timeout, FIFO stall, fallback, oops, panic, or
+machine check.
