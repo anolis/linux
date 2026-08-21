@@ -38,6 +38,9 @@ struct font_data {
 #define SHELL_POLL_MS 100
 #define SHELL_FONT_WIDTH 8
 #define SHELL_FONT_HEIGHT 16
+#define SHELL_WORKSPACE_LEFT 112
+#define SHELL_WORKSPACE_TOP 32
+#define SHELL_WORKSPACE_BOTTOM (TEST_HEIGHT - 24)
 
 enum shell_app {
 	SHELL_APP_TERMINAL,
@@ -51,17 +54,35 @@ struct shell_input {
 	char path[32];
 };
 
+struct shell_window {
+	enum shell_app app;
+	int x;
+	int y;
+	int width;
+	int height;
+	int visible;
+};
+
 struct shell_state {
 	struct test_buffer buffers[SHELL_BUFFER_COUNT];
 	struct shell_input inputs[SHELL_INPUT_COUNT];
+	struct shell_window windows[SHELL_APP_COUNT];
+	unsigned int z_order[SHELL_APP_COUNT];
 	unsigned int input_count;
 	unsigned int visible;
 	unsigned int selected;
-	enum shell_app active;
 	__u64 serial;
+	int focused;
+	int dragging;
+	int drag_offset_x;
+	int drag_offset_y;
 	int cursor_visible;
 	int pointer_x;
 	int pointer_y;
+};
+
+static const char *const app_titles[SHELL_APP_COUNT] = {
+	"Terminal", "Files", "System",
 };
 
 static const uint32_t shell_colors[] = {
@@ -88,6 +109,10 @@ enum shell_color {
 	COLOR_GOLD,
 	COLOR_VIOLET,
 	COLOR_TERMINAL,
+};
+
+static const enum shell_color app_accents[SHELL_APP_COUNT] = {
+	COLOR_TEAL, COLOR_GOLD, COLOR_VIOLET,
 };
 
 static uint16_t rgb565(enum shell_color color)
@@ -180,12 +205,6 @@ static void draw_text(struct test_buffer *buffer, int x, int y,
 static void draw_launcher(struct test_buffer *buffer,
 			  const struct shell_state *shell)
 {
-	static const char *const labels[SHELL_APP_COUNT] = {
-		"Terminal", "Files", "System",
-	};
-	static const enum shell_color accents[SHELL_APP_COUNT] = {
-		COLOR_TEAL, COLOR_GOLD, COLOR_VIOLET,
-	};
 	unsigned int i;
 
 	fill_rect(buffer, 0, 32, 112, TEST_HEIGHT - 56, rgb565(COLOR_PANEL));
@@ -197,23 +216,33 @@ static void draw_launcher(struct test_buffer *buffer,
 			fill_rect(buffer, 8, y - 8, 96, 40,
 				  rgb565(COLOR_BORDER));
 			fill_rect(buffer, 8, y - 8, 3, 40,
-				  rgb565(accents[i]));
+				  rgb565(app_accents[i]));
 		}
-		fill_rect(buffer, 18, y, 16, 16, rgb565(accents[i]));
-		draw_text(buffer, 42, y, labels[i], rgb565(COLOR_TEXT));
+		fill_rect(buffer, 18, y, 16, 16, rgb565(app_accents[i]));
+		draw_text(buffer, 42, y, app_titles[i], rgb565(COLOR_TEXT));
+		if (shell->windows[i].visible)
+			fill_rect(buffer, 96, y + 5, 5, 5,
+				  rgb565(app_accents[i]));
 	}
 }
 
-static void draw_terminal(struct test_buffer *buffer)
+static void draw_terminal(struct test_buffer *buffer,
+			  const struct shell_window *window)
 {
-	fill_rect(buffer, 132, 84, 488, 326, rgb565(COLOR_TERMINAL));
-	draw_text(buffer, 152, 110, "Wii Linux NGX", rgb565(COLOR_TEAL));
-	draw_text(buffer, 152, 142, "Native KMS shell online", rgb565(COLOR_TEXT));
-	draw_text(buffer, 152, 174, "root@wii:~#", rgb565(COLOR_GOLD));
-	draw_text(buffer, 248, 174, "_", rgb565(COLOR_TEXT));
+	int x = window->x + 8;
+	int y = window->y + 36;
+
+	fill_rect(buffer, x, y, window->width - 16, window->height - 44,
+		  rgb565(COLOR_TERMINAL));
+	draw_text(buffer, x + 16, y + 18, "Wii Linux NGX", rgb565(COLOR_TEAL));
+	draw_text(buffer, x + 16, y + 50, "Native KMS shell online",
+		  rgb565(COLOR_TEXT));
+	draw_text(buffer, x + 16, y + 82, "root@wii:~#", rgb565(COLOR_GOLD));
+	draw_text(buffer, x + 112, y + 82, "_", rgb565(COLOR_TEXT));
 }
 
-static void draw_files(struct test_buffer *buffer)
+static void draw_files(struct test_buffer *buffer,
+		       const struct shell_window *window)
 {
 	static const char *const names[] = {
 		"Applications", "Documents", "System", "Network",
@@ -221,31 +250,74 @@ static void draw_files(struct test_buffer *buffer)
 	unsigned int i;
 
 	for (i = 0; i < ARRAY_SIZE(names); i++) {
-		int y = 108 + i * 54;
+		int x = window->x + 24;
+		int y = window->y + 48 + i * 48;
 
-		fill_rect(buffer, 152, y, 30, 24,
+		fill_rect(buffer, x, y, 30, 24,
 			  rgb565(i & 1 ? COLOR_GOLD : COLOR_TEAL));
-		draw_text(buffer, 198, y + 4, names[i], rgb565(COLOR_TEXT));
-		fill_rect(buffer, 152, y + 34, 422, 1, rgb565(COLOR_BORDER));
+		draw_text(buffer, x + 46, y + 4, names[i], rgb565(COLOR_TEXT));
+		fill_rect(buffer, x, y + 34, window->width - 48, 1,
+			  rgb565(COLOR_BORDER));
 	}
 }
 
-static void draw_status_row(struct test_buffer *buffer, int y,
+static void draw_status_row(struct test_buffer *buffer, int x, int y,
 			    const char *label, const char *value,
 			    enum shell_color indicator)
 {
-	fill_rect(buffer, 154, y + 4, 8, 8, rgb565(indicator));
-	draw_text(buffer, 176, y, label, rgb565(COLOR_MUTED));
-	draw_text(buffer, 328, y, value, rgb565(COLOR_TEXT));
+	fill_rect(buffer, x, y + 4, 8, 8, rgb565(indicator));
+	draw_text(buffer, x + 22, y, label, rgb565(COLOR_MUTED));
+	draw_text(buffer, x + 166, y, value, rgb565(COLOR_TEXT));
 }
 
-static void draw_system(struct test_buffer *buffer)
+static void draw_system(struct test_buffer *buffer,
+			const struct shell_window *window)
 {
-	draw_status_row(buffer, 110, "Processor", "Broadway PowerPC", COLOR_TEAL);
-	draw_status_row(buffer, 150, "Graphics", "GX DRM/KMS", COLOR_RED);
-	draw_status_row(buffer, 190, "Display", "640 x 480 RGB565", COLOR_GOLD);
-	draw_status_row(buffer, 230, "Network", "Online", COLOR_TEAL);
-	draw_status_row(buffer, 270, "Session", "Ready", COLOR_VIOLET);
+	int x = window->x + 26;
+	int y = window->y + 52;
+
+	draw_status_row(buffer, x, y, "Processor", "Broadway PowerPC", COLOR_TEAL);
+	draw_status_row(buffer, x, y + 38, "Graphics", "GX DRM/KMS", COLOR_RED);
+	draw_status_row(buffer, x, y + 76, "Display", "640 x 480 RGB565",
+			COLOR_GOLD);
+	draw_status_row(buffer, x, y + 114, "Network", "Online", COLOR_TEAL);
+	draw_status_row(buffer, x, y + 152, "Session", "Ready", COLOR_VIOLET);
+}
+
+static void draw_window(struct test_buffer *buffer,
+			const struct shell_state *shell,
+			const struct shell_window *window)
+{
+	uint16_t frame = shell->focused == (int)window->app ?
+		rgb565(app_accents[window->app]) : rgb565(COLOR_BORDER);
+
+	fill_rect(buffer, window->x + 4, window->y + 4, window->width,
+		  window->height, rgb565(COLOR_TERMINAL));
+	fill_rect(buffer, window->x, window->y, window->width, window->height,
+		  rgb565(COLOR_PANEL));
+	stroke_rect(buffer, window->x, window->y, window->width, window->height,
+		    frame);
+	fill_rect(buffer, window->x, window->y, window->width, 28,
+		  rgb565(COLOR_BORDER));
+	fill_rect(buffer, window->x, window->y, 3, 28, frame);
+	draw_text(buffer, window->x + 14, window->y + 6,
+		  app_titles[window->app], rgb565(COLOR_TEXT));
+	fill_rect(buffer, window->x + window->width - 24, window->y + 8,
+		  12, 12, rgb565(COLOR_RED));
+
+	switch (window->app) {
+	case SHELL_APP_TERMINAL:
+		draw_terminal(buffer, window);
+		break;
+	case SHELL_APP_FILES:
+		draw_files(buffer, window);
+		break;
+	case SHELL_APP_SYSTEM:
+		draw_system(buffer, window);
+		break;
+	default:
+		break;
+	}
 }
 
 static void draw_pointer(struct test_buffer *buffer, int x, int y)
@@ -267,12 +339,10 @@ static void draw_pointer(struct test_buffer *buffer, int x, int y)
 static void draw_shell(struct test_buffer *buffer,
 		       const struct shell_state *shell)
 {
-	static const char *const titles[SHELL_APP_COUNT] = {
-		"Terminal", "Files", "System",
-	};
 	time_t now = time(NULL);
 	struct tm local;
 	char clock_text[16] = "--:--";
+	unsigned int i;
 
 	fill_rect(buffer, 0, 0, TEST_WIDTH, TEST_HEIGHT, rgb565(COLOR_DESKTOP));
 	fill_rect(buffer, 0, 0, TEST_WIDTH, 32, rgb565(COLOR_PANEL));
@@ -284,24 +354,12 @@ static void draw_shell(struct test_buffer *buffer,
 	draw_text(buffer, 580, 8, clock_text, rgb565(COLOR_MUTED));
 
 	draw_launcher(buffer, shell);
-	fill_rect(buffer, 128, 56, 500, 370, rgb565(COLOR_PANEL));
-	stroke_rect(buffer, 128, 56, 500, 370, rgb565(COLOR_BORDER));
-	fill_rect(buffer, 128, 56, 500, 28, rgb565(COLOR_BORDER));
-	draw_text(buffer, 142, 62, titles[shell->active], rgb565(COLOR_TEXT));
-	fill_rect(buffer, 596, 64, 12, 12, rgb565(COLOR_RED));
+	for (i = 0; i < SHELL_APP_COUNT; i++) {
+		const struct shell_window *window =
+			&shell->windows[shell->z_order[i]];
 
-	switch (shell->active) {
-	case SHELL_APP_TERMINAL:
-		draw_terminal(buffer);
-		break;
-	case SHELL_APP_FILES:
-		draw_files(buffer);
-		break;
-	case SHELL_APP_SYSTEM:
-		draw_system(buffer);
-		break;
-	default:
-		break;
+		if (window->visible)
+			draw_window(buffer, shell, window);
 	}
 
 	fill_rect(buffer, 0, TEST_HEIGHT - 24, TEST_WIDTH, 24,
@@ -309,6 +367,9 @@ static void draw_shell(struct test_buffer *buffer,
 	fill_rect(buffer, 0, TEST_HEIGHT - 24, TEST_WIDTH, 1,
 		  rgb565(COLOR_BORDER));
 	draw_text(buffer, 14, TEST_HEIGHT - 20, "Ready", rgb565(COLOR_MUTED));
+	if (shell->focused >= 0)
+		draw_text(buffer, 88, TEST_HEIGHT - 20,
+			  app_titles[shell->focused], rgb565(COLOR_TEXT));
 	fill_rect(buffer, 602, TEST_HEIGHT - 16, 8, 8,
 		  rgb565(shell->cursor_visible ? COLOR_TEAL : COLOR_BORDER));
 	draw_pointer(buffer, shell->pointer_x, shell->pointer_y);
@@ -372,6 +433,131 @@ static void open_inputs(struct shell_state *shell)
 	}
 }
 
+static void init_windows(struct shell_state *shell)
+{
+	shell->windows[SHELL_APP_TERMINAL] = (struct shell_window) {
+		.app = SHELL_APP_TERMINAL,
+		.x = 150,
+		.y = 70,
+		.width = 430,
+		.height = 270,
+		.visible = 1,
+	};
+	shell->windows[SHELL_APP_FILES] = (struct shell_window) {
+		.app = SHELL_APP_FILES,
+		.x = 170,
+		.y = 90,
+		.width = 400,
+		.height = 300,
+	};
+	shell->windows[SHELL_APP_SYSTEM] = (struct shell_window) {
+		.app = SHELL_APP_SYSTEM,
+		.x = 190,
+		.y = 110,
+		.width = 410,
+		.height = 280,
+	};
+	shell->z_order[0] = SHELL_APP_SYSTEM;
+	shell->z_order[1] = SHELL_APP_FILES;
+	shell->z_order[2] = SHELL_APP_TERMINAL;
+	shell->focused = SHELL_APP_TERMINAL;
+	shell->dragging = -1;
+}
+
+static void focus_top_window(struct shell_state *shell)
+{
+	int i;
+
+	shell->focused = -1;
+	for (i = SHELL_APP_COUNT - 1; i >= 0; i--)
+		if (shell->windows[shell->z_order[i]].visible) {
+			shell->focused = shell->z_order[i];
+			break;
+		}
+}
+
+static void raise_window(struct shell_state *shell, unsigned int app)
+{
+	unsigned int i;
+
+	for (i = 0; i < SHELL_APP_COUNT; i++)
+		if (shell->z_order[i] == app)
+			break;
+	if (i == SHELL_APP_COUNT)
+		return;
+	for (; i + 1 < SHELL_APP_COUNT; i++)
+		shell->z_order[i] = shell->z_order[i + 1];
+	shell->z_order[SHELL_APP_COUNT - 1] = app;
+	shell->focused = app;
+}
+
+static void open_window(struct shell_state *shell, unsigned int app)
+{
+	shell->windows[app].visible = 1;
+	raise_window(shell, app);
+}
+
+static void close_window(struct shell_state *shell, unsigned int app)
+{
+	shell->windows[app].visible = 0;
+	if (shell->dragging == (int)app)
+		shell->dragging = -1;
+	focus_top_window(shell);
+}
+
+static int launcher_at(int x, int y)
+{
+	unsigned int i;
+
+	if (x < 8 || x >= 104)
+		return -1;
+	for (i = 0; i < SHELL_APP_COUNT; i++) {
+		int top = 54 + i * 56;
+
+		if (y >= top && y < top + 40)
+			return i;
+	}
+	return -1;
+}
+
+static int window_at(const struct shell_state *shell, int x, int y)
+{
+	int i;
+
+	for (i = SHELL_APP_COUNT - 1; i >= 0; i--) {
+		const struct shell_window *window =
+			&shell->windows[shell->z_order[i]];
+
+		if (window->visible && x >= window->x &&
+		    x < window->x + window->width && y >= window->y &&
+		    y < window->y + window->height)
+			return window->app;
+	}
+	return -1;
+}
+
+static void focus_next_window(struct shell_state *shell)
+{
+	int focused_index = -1;
+	int step;
+	int i;
+
+	for (i = 0; i < SHELL_APP_COUNT; i++)
+		if (shell->z_order[i] == (unsigned int)shell->focused)
+			focused_index = i;
+	if (focused_index < 0) {
+		focus_top_window(shell);
+		return;
+	}
+	for (step = 1; step <= SHELL_APP_COUNT; step++) {
+		i = (focused_index - step + SHELL_APP_COUNT) % SHELL_APP_COUNT;
+		if (shell->windows[shell->z_order[i]].visible) {
+			raise_window(shell, shell->z_order[i]);
+			return;
+		}
+	}
+}
+
 static int handle_key(struct shell_state *shell, unsigned int key)
 {
 	switch (key) {
@@ -389,19 +575,26 @@ static int handle_key(struct shell_state *shell, unsigned int key)
 		return 1;
 	case KEY_ENTER:
 	case KEY_SPACE:
-		shell->active = shell->selected;
+		open_window(shell, shell->selected);
 		return 1;
 	case KEY_F1:
 		shell->selected = SHELL_APP_TERMINAL;
-		shell->active = SHELL_APP_TERMINAL;
+		open_window(shell, SHELL_APP_TERMINAL);
 		return 1;
 	case KEY_F2:
 		shell->selected = SHELL_APP_FILES;
-		shell->active = SHELL_APP_FILES;
+		open_window(shell, SHELL_APP_FILES);
 		return 1;
 	case KEY_F3:
 		shell->selected = SHELL_APP_SYSTEM;
-		shell->active = SHELL_APP_SYSTEM;
+		open_window(shell, SHELL_APP_SYSTEM);
+		return 1;
+	case KEY_F4:
+		if (shell->focused >= 0)
+			close_window(shell, shell->focused);
+		return 1;
+	case KEY_F6:
+		focus_next_window(shell);
 		return 1;
 	case KEY_ESC:
 	case KEY_F12:
@@ -414,7 +607,7 @@ static int handle_key(struct shell_state *shell, unsigned int key)
 
 static int update_pointer(struct shell_state *shell, int delta_x, int delta_y)
 {
-	unsigned int i;
+	int launcher;
 
 	if (!delta_x && !delta_y)
 		return 0;
@@ -429,33 +622,93 @@ static int update_pointer(struct shell_state *shell, int delta_x, int delta_y)
 	if (shell->pointer_y >= TEST_HEIGHT)
 		shell->pointer_y = TEST_HEIGHT - 1;
 
-	if (shell->pointer_x >= 8 && shell->pointer_x < 104) {
-		for (i = 0; i < SHELL_APP_COUNT; i++) {
-			int top = 54 + i * 56;
+	launcher = launcher_at(shell->pointer_x, shell->pointer_y);
+	if (launcher >= 0)
+		shell->selected = launcher;
 
-			if (shell->pointer_y >= top &&
-			    shell->pointer_y < top + 40) {
-				shell->selected = i;
-				break;
-			}
-		}
+	if (shell->dragging >= 0) {
+		struct shell_window *window = &shell->windows[shell->dragging];
+		int maximum_x = TEST_WIDTH - window->width;
+		int maximum_y = SHELL_WORKSPACE_BOTTOM - window->height;
+
+		window->x = shell->pointer_x - shell->drag_offset_x;
+		window->y = shell->pointer_y - shell->drag_offset_y;
+		if (window->x < SHELL_WORKSPACE_LEFT)
+			window->x = SHELL_WORKSPACE_LEFT;
+		if (window->x > maximum_x)
+			window->x = maximum_x;
+		if (window->y < SHELL_WORKSPACE_TOP)
+			window->y = SHELL_WORKSPACE_TOP;
+		if (window->y > maximum_y)
+			window->y = maximum_y;
 	}
 	return 1;
 }
 
-static int handle_pointer_click(struct shell_state *shell)
+static int handle_pointer_button(struct shell_state *shell, int pressed)
 {
-	if (shell->pointer_x >= 8 && shell->pointer_x < 104 &&
-	    shell->pointer_y >= 54 && shell->pointer_y < 206) {
-		shell->active = shell->selected;
+	struct shell_window *window;
+	int launcher;
+	int app;
+
+	if (!pressed) {
+		shell->dragging = -1;
 		return 1;
 	}
-	if (shell->pointer_x >= 588 && shell->pointer_x < 616 &&
-	    shell->pointer_y >= 56 && shell->pointer_y < 84) {
-		stop = 1;
-		return 0;
+	launcher = launcher_at(shell->pointer_x, shell->pointer_y);
+	if (launcher >= 0) {
+		shell->selected = launcher;
+		open_window(shell, launcher);
+		return 1;
 	}
-	return 0;
+	app = window_at(shell, shell->pointer_x, shell->pointer_y);
+	if (app < 0) {
+		shell->focused = -1;
+		return 1;
+	}
+	raise_window(shell, app);
+	window = &shell->windows[app];
+	if (shell->pointer_x >= window->x + window->width - 32 &&
+	    shell->pointer_x < window->x + window->width &&
+	    shell->pointer_y >= window->y &&
+	    shell->pointer_y < window->y + 28) {
+		close_window(shell, app);
+		return 1;
+	}
+	if (shell->pointer_y < window->y + 28) {
+		shell->dragging = app;
+		shell->drag_offset_x = shell->pointer_x - window->x;
+		shell->drag_offset_y = shell->pointer_y - window->y;
+		return 1;
+	}
+	return 1;
+}
+
+static void collect_input_event(struct shell_state *shell,
+				const struct input_event *event, int *delta_x,
+				int *delta_y, int *wheel, int *button_pressed,
+				int *button_released, int *changed)
+{
+	if (event->type == EV_REL) {
+		if (event->code == REL_X)
+			*delta_x += event->value;
+		else if (event->code == REL_Y)
+			*delta_y += event->value;
+		else if (event->code == REL_WHEEL)
+			*wheel += event->value;
+		return;
+	}
+	if (event->type != EV_KEY)
+		return;
+	if (event->code == BTN_LEFT) {
+		if (event->value == 1)
+			*button_pressed = 1;
+		else if (event->value == 0)
+			*button_released = 1;
+		return;
+	}
+	if (event->value == 1)
+		*changed |= handle_key(shell, event->code);
 }
 
 static int poll_inputs(struct shell_state *shell)
@@ -485,28 +738,17 @@ static int poll_inputs(struct shell_state *shell)
 		int delta_x = 0;
 		int delta_y = 0;
 		int wheel = 0;
-		int clicked = 0;
+		int button_pressed = 0;
+		int button_released = 0;
 
 		if (!(poll_fds[i].revents & POLLIN))
 			continue;
 		while ((bytes = read(poll_fds[i].fd, events, sizeof(events))) > 0) {
-			for (j = 0; j < (unsigned int)bytes / sizeof(events[0]); j++) {
-				if (events[j].type == EV_REL) {
-					if (events[j].code == REL_X)
-						delta_x += events[j].value;
-					else if (events[j].code == REL_Y)
-						delta_y += events[j].value;
-					else if (events[j].code == REL_WHEEL)
-						wheel += events[j].value;
-				} else if (events[j].type == EV_KEY &&
-					   events[j].value == 1) {
-					if (events[j].code == BTN_LEFT)
-						clicked = 1;
-					else
-						changed |= handle_key(shell,
-								      events[j].code);
-				}
-			}
+			for (j = 0; j < (unsigned int)bytes / sizeof(events[0]); j++)
+				collect_input_event(shell, &events[j], &delta_x,
+						    &delta_y, &wheel,
+						    &button_pressed,
+						    &button_released, &changed);
 		}
 		if (bytes < 0 && errno != EAGAIN && errno != EWOULDBLOCK)
 			return -1;
@@ -517,8 +759,10 @@ static int poll_inputs(struct shell_state *shell)
 			else
 				changed |= handle_key(shell, KEY_DOWN);
 		}
-		if (clicked)
-			changed |= handle_pointer_click(shell);
+		if (button_pressed)
+			changed |= handle_pointer_button(shell, 1);
+		if (button_released)
+			changed |= handle_pointer_button(shell, 0);
 	}
 	return changed;
 }
@@ -582,6 +826,7 @@ int main(int argc, char **argv)
 		shell.buffers[i].map = MAP_FAILED;
 	for (i = 0; i < ARRAY_SIZE(shell.inputs); i++)
 		shell.inputs[i].fd = -1;
+	init_windows(&shell);
 
 	drm_fd = open(card, O_RDWR | O_CLOEXEC);
 	if (drm_fd < 0) {
