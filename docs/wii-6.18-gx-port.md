@@ -10610,3 +10610,35 @@ quadrants and magenta/gold checkerboard, coherent marker motion, and no seam,
 tearing, blanking, stale region, or corruption. Finally restore the console,
 unload GX, verify the write-only restore path, and require no AVE/GX/DRM
 timeout, stall, fallback, oops, panic, or machine check.
+
+Hardware result: accepted. The checksum-verified candidate booted on the
+second Wii as `6.18.40-wii+` with boot ID
+`8481f9b9-0019-4a87-aff2-ac21c1d27bfa`. Probe logged write-only AVE chroma
+readback with control `0x22`, then enabled `0x62=0x02`, selected CPU scanout,
+initialized mode objects and vblank, installed the VI IRQ, registered DRM minor
+zero, and exposed `/dev/dri/card0` plus the 640 by 480 fbdev console.
+
+The unchanged strict render client passed every retained operation. The first
+optimized native presentation verified all 121 frames, or 37171200 pixels,
+reached vblank 10152, averaged 22599 microseconds, and peaked at 31075
+microseconds. A second visible replay independently verified another 121
+frames and 37171200 pixels, reached vblank 11891, averaged 23093 microseconds,
+and peaked at 33328 microseconds. The user observed the replay and accepted the
+displayed native presentation. This closes the visual acceptance item left
+open by the original-console headless run and accepts the 4.05-times faster
+single-operation full-frame path.
+
+Wii-side SHA-256 verification matched the unchanged GX module, strict client,
+and page-flip client candidate hashes. GX registration selected AVE
+`0x62=0x00`; unload selected CPU `0x62=0x02`. Both write-only transactions
+completed, registration and unregistration paired, the previous console
+framebuffer returned, no GX module remained loaded, and the final log search
+found no AVE/GX/DRM timeout, stall, fallback, oops, panic, or machine check.
+
+The new console's broken eject button also made the card-local Gumboot
+countdown operationally expensive. `gumboot/gumboot.lst` was changed from
+`timeout 30` to `timeout 5`, producing SHA-256
+`c61118c128ab60054b032c74c86e18928307c34b2b9b4ccf7281772e7b5494dc`.
+The original menu remains on the boot partition as
+`gumboot.lst.backup.97141c35`, and the partition was unmounted after verified
+installation. This is deployment configuration, not a tracked kernel change.
