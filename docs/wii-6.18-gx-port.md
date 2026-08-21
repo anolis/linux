@@ -11106,7 +11106,7 @@ window rather than hard-coded shell content.
 ### Stage a PTY-backed interactive Terminal
 
 - Test branch: `feature/wii-kolibri-shell`
-- Candidate commit: `93828c21f`
+- Candidate commits: `93828c21f`, `1a548c454`
 
 Replace the accepted Terminal placeholder with a real application process owned
 by its window. Open and unlock `/dev/ptmx`, create a 50 by 14 devpts slave, fork
@@ -11131,7 +11131,7 @@ The checksum-pinned artifacts are:
 - unchanged `gcn-gx.ko` SHA-256:
   `bebd391507cc57104aa11a96f80783e56e13ed7cb26860f56027cdd1c8a4950c`
 - static PowerPC `wii-kolibri-shell` SHA-256:
-  `2751f27c2a4754f6cde9ef7f8ef24d12b6edba083af573c3c83d528c2f104032`
+  `128b0f5c07eadda99f528f19bdc081b227f7ebe70be6765f0dcd309b5ebf17d7`
 
 Host validation passed warning-clean static PowerPC compilation against the
 installed target UAPI, `git diff --check`, and strict checkpatch with zero
@@ -11147,3 +11147,19 @@ and require output accumulated without blocking or corrupting the desktop. Run
 then terminate the desktop with code zero, restore the prior DRM fbcon CRTC, and
 allow GX to unload and return AVE to CPU scanout. Require no leaked child, PTY,
 GX/DRM timeout, FIFO stall, fallback, oops, panic, or machine check.
+
+The initial PTY candidate passed interactive command and terminal-rendering
+tests, but its evdev descriptors did not request exclusive ownership. Every
+keystroke therefore reached both the PTY and the Linux virtual console behind
+the KMS shell. The diagnostic root filesystem currently boots `/bin/sh` as PID
+1; entering `exit` in the visible Terminal also terminated that underlying PID
+1 shell, causing the expected kernel panic and the configured 180-second panic
+reboot. This was not a PTY, GX, or DRM teardown failure.
+
+Commit `1a548c454` closes that input-ownership bug. Every accepted keyboard or
+pointer must now be acquired with `EVIOCGRAB`; a device whose grab fails is not
+used. Normal teardown explicitly releases each grab before closing the device,
+while abnormal process exit is covered by the kernel's automatic descriptor
+cleanup. Repeat the complete PTY acceptance test with the checksum above and
+confirm that commands no longer echo to the host console before accepting this
+milestone.
