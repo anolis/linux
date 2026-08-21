@@ -11219,3 +11219,22 @@ At every point require at most one shell child and one allocated PTY. Finish by
 pressing F12 while a child is running; require child reap, PTY count zero,
 restored fbcon, clean GX unload, continuous uptime, and no GX/DRM timeout, FIFO
 stall, fallback, oops, panic, or machine check.
+
+Hardware result: accepted. The checksum-verified candidate began with a visible
+`Running` Terminal and created child PID 449 on `/dev/pts/0`. The user exited and
+relaunched the shell repeatedly; the runtime log recorded successive child PIDs
+449, 454, 492, and 494, each reusing the sole available PTY only after its
+predecessor had been reaped. Every restart changed the title through `Exited`
+back to `Running` and produced a fresh interactive prompt.
+
+The independent preservation control also passed. A shell variable retained
+its value after F4 hid the live Terminal and F1 reopened it, demonstrating that
+window visibility changes raise the existing application rather than spawning a
+duplicate. The user reported that all lifecycle interactions worked correctly.
+
+F12 was pressed while the final child remained active. The desktop exited with
+code zero, no shell child remained, the system PTY count returned to zero, and
+`gcn-vidrmfb` was restored. GX then unloaded cleanly and the kernel recorded AVE
+chroma exchange returning to CPU scanout followed by accelerator unregistration.
+Wii uptime remained continuous and the final kernel audit found no GX/DRM
+timeout, FIFO stall, fallback, oops, panic, or machine check.
