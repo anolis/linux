@@ -11400,3 +11400,23 @@ remote input. Finish by disconnecting, terminating with SIGTERM or F12, and
 require child reap, PTY count zero, fbcon restoration, clean GX unload,
 continuous uptime, and no GX/DRM timeout, FIFO stall, fallback, oops, panic, or
 machine check.
+
+Hardware result: the remote-frame positive control passed. The checksum-verified
+candidate listened only on `127.0.0.1:5900`; a direct host connection to
+`10.3.10.59:5900` was refused, while an SSH local forward completed the RFB 3.8
+handshake and delivered framebuffer updates. The captured 640 by 480 frame was
+visually inspected and showed the correctly colored, crisp shell with its live
+Terminal prompt, sidebar, status bar, clock, and pointer. The durable capture is
+SHA-256 `573f9880cddbdb5d3f4e2cc1ba90d8f6757c89f20c2f5b9e9c3239aab2198040`
+after lossless PNG conversion.
+
+The test also exposed an init prerequisite: this root filesystem did not bring
+up `lo` or assign `127.0.0.1`, so the first loopback-only bind failed with
+`EADDRNOTAVAIL`. Bringing up `lo` and assigning `127.0.0.1/8` allowed an
+unchanged candidate to start. Keep that fix in the target's boot networking
+configuration rather than weakening the VNC listener to a wildcard bind.
+
+This establishes correct remote display export and the intended SSH security
+boundary. Full milestone acceptance remains pending the sustained-update and
+clean-teardown audit; interactive remote input is a separate follow-on
+candidate.
