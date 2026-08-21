@@ -10824,3 +10824,33 @@ stale region, blanking, or corruption. Reaching approximately 29.97 Hz will
 confirm that software drawing and GX scanout conversion overlap within one
 display interval; remaining near 15 Hz will identify another serialization or
 deadline constraint requiring investigation before desktop userspace work.
+
+Hardware result: accepted with a qualified performance result. The
+checksum-verified client completed all 300 triple-buffered XRGB8888 flips at
+vblank 102622 in 12142789 microseconds, averaging 40475 microseconds per frame
+and 24.706 Hz. This is 1.65 times the accepted serialized rate of 14.986 Hz,
+confirming that rendering into the third buffer while a flip is pending
+successfully overlaps useful work. It does not yet sustain every 29.97 Hz
+display deadline.
+
+The module advanced from 0 to 301 XRGB8888 frames and from 56 to 664 PE
+finishes. The 608 new finish interrupts account for 304 completed generated
+frames: the 301 test conversions plus three surrounding native-console
+updates. All 300 page-flip events arrived and no fallback occurred.
+
+Direct observation passed. The user reported that the complete animation
+looked great, with correct coherent output and no reported tearing, stale
+region, blanking, or corruption. The client released DRM master, GX unloaded,
+CPU AVE scanout returned, and the native console was restored. The final log
+audit found no AVE/GX/DRM timeout, FIFO stall, fallback, oops, panic, or
+machine check.
+
+Concurrent software drawing exposed memory/cache contention that the static
+benchmark could not show. GX XRGB conversion and tiling increased from the
+previous 11468-microsecond average to 21291 microseconds, with a
+30334-microsecond maximum. Cache flush increased from 247 to 554 microseconds
+average. This accounts for the remaining missed deadlines without implicating
+KMS event handling or visual correctness. Next run the exact triple-buffered
+client in standard RGB565 mode. A full-rate RGB565 result would isolate the
+remaining cost to packed-XRGB8888 conversion and bandwidth; a similar result
+would instead point to general concurrent framebuffer traffic or scheduling.
