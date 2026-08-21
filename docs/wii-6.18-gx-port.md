@@ -10854,3 +10854,32 @@ KMS event handling or visual correctness. Next run the exact triple-buffered
 client in standard RGB565 mode. A full-rate RGB565 result would isolate the
 remaining cost to packed-XRGB8888 conversion and bandwidth; a similar result
 would instead point to general concurrent framebuffer traffic or scheduling.
+
+### Stage triple-buffered RGB565 bandwidth control
+
+- Test branch: `test/wii-kms-triple-buffer`
+- Control baseline commit: `c9434d769`
+
+Reuse the exact accepted triple-buffer client, kernel, and GX module while
+changing only the standard KMS dumb-buffer format from XRGB8888 to RGB565.
+Userspace still redraws the complete hidden framebuffer while the preceding
+flip is pending, and KMS still converts the submitted shadow framebuffer into
+the inactive XFB before vblank publication. RGB565 halves userspace source
+traffic and removes packed-XRGB8888-to-RGB565 conversion from GX texture
+preparation.
+
+The unchanged checksum-pinned artifacts are:
+
+- `zImage` / `dtbImage.wii` SHA-256:
+  `85137fa760fef6e840d5ef6cc0a74b8f1cf187a7f0a59a4e8b73fb3165b03463`
+- `gcn-gx.ko` SHA-256:
+  `bebd391507cc57104aa11a96f80783e56e13ed7cb26860f56027cdd1c8a4950c`
+- triple-buffered static PowerPC `wii-drm-test` SHA-256:
+  `3d536c209ebb250e1efc9da3abff4052fa7d11426711bf04718682b9b506febc`
+
+Run 300 zero-delay `--format rgb565 --animate --pipeline` flips. Require every
+event, advancing vblank, GX frame and PE-finish agreement, coherent visible
+animation, normal DRM-master release and console restoration, clean GX unload,
+and no graphics fault. Compare its effective rate directly with the accepted
+24.706 Hz XRGB8888 run. Approximately 29.97 Hz isolates the residual desktop
+cost to XRGB8888 source conversion and bandwidth.
