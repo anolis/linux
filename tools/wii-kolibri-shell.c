@@ -12,6 +12,11 @@
 #include <sys/wait.h>
 #include <termios.h>
 
+#ifdef WII_HAVE_VNC
+#include <arpa/inet.h>
+#include <rfb/rfb.h>
+#endif
+
 #define ARRAY_SIZE(array) (sizeof(array) / sizeof((array)[0]))
 #define BIT(bit) (1U << (bit))
 
@@ -134,6 +139,12 @@ struct shell_system {
 	int valid;
 };
 
+#ifdef WII_HAVE_VNC
+struct shell_vnc {
+	rfbScreenInfoPtr screen;
+};
+#endif
+
 struct shell_state {
 	struct test_buffer buffers[SHELL_BUFFER_COUNT];
 	struct shell_input inputs[SHELL_INPUT_COUNT];
@@ -141,6 +152,9 @@ struct shell_state {
 	struct shell_terminal terminal;
 	struct shell_files files;
 	struct shell_system system;
+#ifdef WII_HAVE_VNC
+	struct shell_vnc vnc;
+#endif
 	unsigned int z_order[SHELL_APP_COUNT];
 	unsigned int input_count;
 	unsigned int visible;
@@ -882,6 +896,111 @@ static void refresh_system(struct shell_system *system)
 	system->drm_present = !access("/sys/class/drm/card0", F_OK);
 	system->valid = 1;
 }
+
+#ifdef WII_HAVE_VNC
+static void vnc_key_event(rfbBool down, rfbKeySym key, rfbClientPtr client)
+{
+	(void)down;
+	(void)key;
+	(void)client;
+}
+
+static void vnc_pointer_event(int buttons, int x, int y,
+			      rfbClientPtr client)
+{
+	(void)buttons;
+	(void)x;
+	(void)y;
+	(void)client;
+}
+
+static int start_vnc(struct shell_state *shell, struct test_buffer *buffer)
+{
+	char program[] = "wii-kolibri-shell";
+	char *arguments[2];
+	int argument_count = 1;
+	rfbScreenInfoPtr screen;
+
+	arguments[0] = program;
+	arguments[1] = NULL;
+	screen = rfbGetScreen(&argument_count, arguments, TEST_WIDTH,
+			      TEST_HEIGHT, 5, 3, 2);
+	if (!screen)
+		return -1;
+	screen->desktopName = "Wii Linux NGX";
+	screen->frameBuffer = buffer->map;
+	screen->screenData = shell;
+	screen->listenInterface = htonl(INADDR_LOOPBACK);
+	screen->port = 5900;
+	screen->alwaysShared = TRUE;
+	screen->kbdAddEvent = vnc_key_event;
+	screen->ptrAddEvent = vnc_pointer_event;
+	screen->serverFormat.bitsPerPixel = 16;
+	screen->serverFormat.depth = 16;
+	screen->serverFormat.bigEndian = TRUE;
+	screen->serverFormat.trueColour = TRUE;
+	screen->serverFormat.redMax = 31;
+	screen->serverFormat.greenMax = 63;
+	screen->serverFormat.blueMax = 31;
+	screen->serverFormat.redShift = 11;
+	screen->serverFormat.greenShift = 5;
+	screen->serverFormat.blueShift = 0;
+	rfbInitServer(screen);
+	if (screen->listenSock == RFB_INVALID_SOCKET) {
+		rfbScreenCleanup(screen);
+		return -1;
+	}
+	shell->vnc.screen = screen;
+	printf("wii-kolibri-shell: read-only VNC on 127.0.0.1:5900\n");
+	return 0;
+}
+
+static void process_vnc(struct shell_state *shell)
+{
+	if (shell->vnc.screen)
+		(void)rfbProcessEvents(shell->vnc.screen, 0);
+}
+
+static void update_vnc(struct shell_state *shell, struct test_buffer *buffer)
+{
+	if (!shell->vnc.screen)
+		return;
+	shell->vnc.screen->frameBuffer = buffer->map;
+	rfbMarkRectAsModified(shell->vnc.screen, 0, 0, TEST_WIDTH, TEST_HEIGHT);
+}
+
+static void stop_vnc(struct shell_state *shell)
+{
+	if (!shell->vnc.screen)
+		return;
+	rfbShutdownServer(shell->vnc.screen, TRUE);
+	rfbScreenCleanup(shell->vnc.screen);
+	shell->vnc.screen = NULL;
+}
+#else
+static int start_vnc(struct shell_state *shell, struct test_buffer *buffer)
+{
+	(void)shell;
+	(void)buffer;
+	return 0;
+}
+
+static void process_vnc(struct shell_state *shell)
+{
+	(void)shell;
+}
+
+static void update_vnc(struct shell_state *shell, struct test_buffer *buffer)
+{
+	(void)shell;
+	(void)buffer;
+}
+
+static void stop_vnc(struct shell_state *shell)
+{
+	(void)shell;
+}
+#endif
 
 static void fill_rect(struct test_buffer *buffer, int x, int y,
 		      int width, int height, uint16_t color)
@@ -1856,6 +1975,7 @@ static int present_shell(int drm_fd, __u32 crtc_id,
 	    wait_flip_event(drm_fd, flip.user_data, &sequence) < 0)
 		return -1;
 	shell->visible = next;
+	update_vnc(shell, &shell->buffers[next]);
 	return 0;
 }
 
@@ -1948,6 +2068,10 @@ int main(int argc, char **argv)
 		created = i + 1;
 	}
 	draw_shell(&shell.buffers[0], &shell);
+	if (start_vnc(&shell, &shell.buffers[0]) < 0) {
+		fprintf(stderr, "unable to start VNC server\n");
+		goto out;
+	}
 
 	crtc.set_connectors_ptr = user_ptr(&connector_id);
 	crtc.count_connectors = 1;
@@ -1989,10 +2113,12 @@ int main(int argc, char **argv)
 			perror("page flip");
 			goto out;
 		}
+		process_vnc(&shell);
 	}
 	status = EXIT_SUCCESS;
 
 out:
+	stop_vnc(&shell);
 	stop_terminal(&shell.terminal);
 	for (i = 0; i < shell.input_count; i++) {
 		if (shell.inputs[i].fd >= 0) {
