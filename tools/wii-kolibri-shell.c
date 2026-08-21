@@ -7,6 +7,8 @@
 
 #include <dirent.h>
 #include <linux/input.h>
+#include <sys/wait.h>
+#include <termios.h>
 
 #define ARRAY_SIZE(array) (sizeof(array) / sizeof((array)[0]))
 #define BIT(bit) (1U << (bit))
@@ -41,6 +43,9 @@ struct font_data {
 #define SHELL_WORKSPACE_LEFT 112
 #define SHELL_WORKSPACE_TOP 32
 #define SHELL_WORKSPACE_BOTTOM (TEST_HEIGHT - 24)
+#define TERMINAL_COLUMNS 50
+#define TERMINAL_ROWS 14
+#define TERMINAL_CSI_PARAMS 4
 
 enum shell_app {
 	SHELL_APP_TERMINAL,
@@ -63,10 +68,38 @@ struct shell_window {
 	int visible;
 };
 
+struct terminal_cell {
+	uint8_t character;
+	uint8_t color;
+};
+
+enum terminal_parser_state {
+	TERMINAL_NORMAL,
+	TERMINAL_ESCAPE,
+	TERMINAL_CSI,
+};
+
+struct shell_terminal {
+	struct terminal_cell cells[TERMINAL_ROWS][TERMINAL_COLUMNS];
+	pid_t child_pid;
+	int master_fd;
+	unsigned int cursor_x;
+	unsigned int cursor_y;
+	unsigned int saved_x;
+	unsigned int saved_y;
+	unsigned int csi_params[TERMINAL_CSI_PARAMS];
+	unsigned int csi_count;
+	enum terminal_parser_state parser_state;
+	uint8_t color;
+	int csi_private;
+	int child_exited;
+};
+
 struct shell_state {
 	struct test_buffer buffers[SHELL_BUFFER_COUNT];
 	struct shell_input inputs[SHELL_INPUT_COUNT];
 	struct shell_window windows[SHELL_APP_COUNT];
+	struct shell_terminal terminal;
 	unsigned int z_order[SHELL_APP_COUNT];
 	unsigned int input_count;
 	unsigned int visible;
@@ -76,6 +109,9 @@ struct shell_state {
 	int dragging;
 	int drag_offset_x;
 	int drag_offset_y;
+	int shift_down;
+	int control_down;
+	int caps_lock;
 	int cursor_visible;
 	int pointer_x;
 	int pointer_y;
@@ -96,6 +132,7 @@ static const uint32_t shell_colors[] = {
 	0x00d9a441, /* gold */
 	0x008e71c7, /* violet */
 	0x000d1113, /* terminal */
+	0x004b7bec, /* blue */
 };
 
 enum shell_color {
@@ -109,6 +146,7 @@ enum shell_color {
 	COLOR_GOLD,
 	COLOR_VIOLET,
 	COLOR_TERMINAL,
+	COLOR_BLUE,
 };
 
 static const enum shell_color app_accents[SHELL_APP_COUNT] = {
@@ -127,6 +165,369 @@ static uint64_t shell_monotonic_ms(void)
 	if (clock_gettime(CLOCK_MONOTONIC, &now) < 0)
 		return 0;
 	return (uint64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000;
+}
+
+static void terminal_clear_row(struct shell_terminal *terminal,
+			       unsigned int row, unsigned int first)
+{
+	unsigned int column;
+
+	if (row >= TERMINAL_ROWS)
+		return;
+	for (column = first; column < TERMINAL_COLUMNS; column++) {
+		terminal->cells[row][column].character = ' ';
+		terminal->cells[row][column].color = COLOR_TEXT;
+	}
+}
+
+static void terminal_clear(struct shell_terminal *terminal)
+{
+	unsigned int row;
+
+	for (row = 0; row < TERMINAL_ROWS; row++)
+		terminal_clear_row(terminal, row, 0);
+	terminal->cursor_x = 0;
+	terminal->cursor_y = 0;
+}
+
+static void terminal_scroll(struct shell_terminal *terminal)
+{
+	size_t move_size = sizeof(terminal->cells) -
+		sizeof(terminal->cells[0]);
+
+	memmove(terminal->cells[0], terminal->cells[1], move_size);
+	terminal_clear_row(terminal, TERMINAL_ROWS - 1, 0);
+}
+
+static void terminal_newline(struct shell_terminal *terminal)
+{
+	terminal->cursor_y++;
+	if (terminal->cursor_y >= TERMINAL_ROWS) {
+		terminal_scroll(terminal);
+		terminal->cursor_y = TERMINAL_ROWS - 1;
+	}
+}
+
+static void terminal_put_character(struct shell_terminal *terminal,
+				   unsigned char character)
+{
+	terminal->cells[terminal->cursor_y][terminal->cursor_x].character =
+		character;
+	terminal->cells[terminal->cursor_y][terminal->cursor_x].color =
+		terminal->color;
+	terminal->cursor_x++;
+	if (terminal->cursor_x >= TERMINAL_COLUMNS) {
+		terminal->cursor_x = 0;
+		terminal_newline(terminal);
+	}
+}
+
+static void terminal_set_color(struct shell_terminal *terminal,
+			       unsigned int parameter)
+{
+	static const enum shell_color ansi_colors[8] = {
+		COLOR_TEXT, COLOR_RED, COLOR_TEAL, COLOR_GOLD,
+		COLOR_BLUE, COLOR_VIOLET, COLOR_TEAL, COLOR_TEXT,
+	};
+
+	if (!parameter || parameter == 39)
+		terminal->color = COLOR_TEXT;
+	else if (parameter >= 30 && parameter <= 37)
+		terminal->color = ansi_colors[parameter - 30];
+	else if (parameter >= 90 && parameter <= 97)
+		terminal->color = ansi_colors[parameter - 90];
+}
+
+static void terminal_handle_csi(struct shell_terminal *terminal,
+				unsigned char command)
+{
+	unsigned int first = terminal->csi_params[0];
+	unsigned int second = terminal->csi_count > 1 ?
+		terminal->csi_params[1] : 0;
+	unsigned int amount = first ? first : 1;
+	unsigned int i;
+
+	switch (command) {
+	case 'A':
+		terminal->cursor_y = amount > terminal->cursor_y ?
+			0 : terminal->cursor_y - amount;
+		break;
+	case 'B':
+		terminal->cursor_y += amount;
+		if (terminal->cursor_y >= TERMINAL_ROWS)
+			terminal->cursor_y = TERMINAL_ROWS - 1;
+		break;
+	case 'C':
+		terminal->cursor_x += amount;
+		if (terminal->cursor_x >= TERMINAL_COLUMNS)
+			terminal->cursor_x = TERMINAL_COLUMNS - 1;
+		break;
+	case 'D':
+		terminal->cursor_x = amount > terminal->cursor_x ?
+			0 : terminal->cursor_x - amount;
+		break;
+	case 'H':
+	case 'f':
+		terminal->cursor_y = first ? first - 1 : 0;
+		terminal->cursor_x = second ? second - 1 : 0;
+		if (terminal->cursor_y >= TERMINAL_ROWS)
+			terminal->cursor_y = TERMINAL_ROWS - 1;
+		if (terminal->cursor_x >= TERMINAL_COLUMNS)
+			terminal->cursor_x = TERMINAL_COLUMNS - 1;
+		break;
+	case 'J':
+		if (first == 2) {
+			terminal_clear(terminal);
+		} else {
+			terminal_clear_row(terminal, terminal->cursor_y,
+					   terminal->cursor_x);
+			for (i = terminal->cursor_y + 1; i < TERMINAL_ROWS; i++)
+				terminal_clear_row(terminal, i, 0);
+		}
+		break;
+	case 'K':
+		terminal_clear_row(terminal, terminal->cursor_y,
+				   first == 2 ? 0 : terminal->cursor_x);
+		break;
+	case 'm':
+		for (i = 0; i < terminal->csi_count; i++)
+			terminal_set_color(terminal, terminal->csi_params[i]);
+		break;
+	case 's':
+		terminal->saved_x = terminal->cursor_x;
+		terminal->saved_y = terminal->cursor_y;
+		break;
+	case 'u':
+		terminal->cursor_x = terminal->saved_x;
+		terminal->cursor_y = terminal->saved_y;
+		break;
+	default:
+		break;
+	}
+}
+
+static void terminal_feed_byte(struct shell_terminal *terminal,
+			       unsigned char byte)
+{
+	if (terminal->parser_state == TERMINAL_ESCAPE) {
+		terminal->parser_state = TERMINAL_NORMAL;
+		if (byte == '[') {
+			memset(terminal->csi_params, 0,
+			       sizeof(terminal->csi_params));
+			terminal->csi_count = 1;
+			terminal->csi_private = 0;
+			terminal->parser_state = TERMINAL_CSI;
+		} else if (byte == '7') {
+			terminal->saved_x = terminal->cursor_x;
+			terminal->saved_y = terminal->cursor_y;
+		} else if (byte == '8') {
+			terminal->cursor_x = terminal->saved_x;
+			terminal->cursor_y = terminal->saved_y;
+		} else if (byte == 'c') {
+			terminal_clear(terminal);
+		}
+		return;
+	}
+	if (terminal->parser_state == TERMINAL_CSI) {
+		unsigned int *parameter =
+			&terminal->csi_params[terminal->csi_count - 1];
+
+		if (byte >= '0' && byte <= '9') {
+			*parameter = *parameter * 10 + byte - '0';
+			return;
+		}
+		if ((byte == '?' || byte == '>') &&
+		    terminal->csi_count == 1 && !*parameter) {
+			terminal->csi_private = 1;
+			return;
+		}
+		if (byte == ';' && terminal->csi_count < TERMINAL_CSI_PARAMS) {
+			terminal->csi_count++;
+			return;
+		}
+		if (!terminal->csi_private)
+			terminal_handle_csi(terminal, byte);
+		terminal->parser_state = TERMINAL_NORMAL;
+		return;
+	}
+
+	switch (byte) {
+	case '\033':
+		terminal->parser_state = TERMINAL_ESCAPE;
+		break;
+	case '\r':
+		terminal->cursor_x = 0;
+		break;
+	case '\n':
+		terminal_newline(terminal);
+		break;
+	case '\b':
+		if (terminal->cursor_x)
+			terminal->cursor_x--;
+		break;
+	case '\t':
+		do {
+			terminal_put_character(terminal, ' ');
+		} while (terminal->cursor_x % 8);
+		break;
+	default:
+		if (byte >= 32)
+			terminal_put_character(terminal,
+					       byte < 127 ? byte : '?');
+		break;
+	}
+}
+
+static int terminal_write(struct shell_terminal *terminal,
+			  const void *data, size_t length)
+{
+	const uint8_t *bytes = data;
+
+	while (length) {
+		ssize_t written = write(terminal->master_fd, bytes, length);
+
+		if (written > 0) {
+			bytes += written;
+			length -= written;
+			continue;
+		}
+		if (written < 0 && errno == EINTR)
+			continue;
+		if (written < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+			return 0;
+		return -1;
+	}
+	return 0;
+}
+
+static int start_terminal(struct shell_terminal *terminal)
+{
+	struct winsize size = {
+		.ws_row = TERMINAL_ROWS,
+		.ws_col = TERMINAL_COLUMNS,
+	};
+	char slave_path[32];
+	unsigned int number;
+	int unlock = 0;
+	int flags;
+	pid_t child;
+	int master;
+
+	terminal_clear(terminal);
+	terminal->color = COLOR_TEXT;
+	terminal->master_fd = -1;
+	master = open("/dev/ptmx", O_RDWR | O_NOCTTY | O_CLOEXEC);
+	if (master < 0 || ioctl(master, TIOCSPTLCK, &unlock) < 0 ||
+	    ioctl(master, TIOCGPTN, &number) < 0) {
+		if (master >= 0)
+			close(master);
+		return -1;
+	}
+	snprintf(slave_path, sizeof(slave_path), "/dev/pts/%u", number);
+	(void)ioctl(master, TIOCSWINSZ, &size);
+	child = fork();
+	if (child < 0) {
+		close(master);
+		return -1;
+	}
+	if (!child) {
+		int slave;
+
+		if (setsid() < 0)
+			_exit(126);
+		slave = open(slave_path, O_RDWR);
+		if (slave < 0 || ioctl(slave, TIOCSCTTY, 0) < 0)
+			_exit(126);
+		if (dup2(slave, STDIN_FILENO) < 0 ||
+		    dup2(slave, STDOUT_FILENO) < 0 ||
+		    dup2(slave, STDERR_FILENO) < 0)
+			_exit(126);
+		if (slave > STDERR_FILENO)
+			close(slave);
+		close(master);
+		setenv("TERM", "vt100", 1);
+		setenv("HOME", "/root", 1);
+		setenv("PS1", "root@wii:\\w# ", 1);
+		execl("/bin/sh", "sh", "-i", (char *)NULL);
+		_exit(127);
+	}
+	flags = fcntl(master, F_GETFL);
+	if (flags < 0 || fcntl(master, F_SETFL, flags | O_NONBLOCK) < 0) {
+		kill(child, SIGHUP);
+		close(master);
+		(void)waitpid(child, NULL, 0);
+		return -1;
+	}
+	terminal->master_fd = master;
+	terminal->child_pid = child;
+	printf("wii-kolibri-shell: terminal child pid=%d pty=%s\n",
+	       child, slave_path);
+	return 0;
+}
+
+static void stop_terminal(struct shell_terminal *terminal)
+{
+	int status;
+	int i;
+
+	if (terminal->master_fd >= 0) {
+		close(terminal->master_fd);
+		terminal->master_fd = -1;
+	}
+	if (terminal->child_pid <= 0)
+		return;
+	(void)kill(-terminal->child_pid, SIGHUP);
+	for (i = 0; i < 50; i++) {
+		pid_t result = waitpid(terminal->child_pid, &status, WNOHANG);
+
+		if (result == terminal->child_pid ||
+		    (result < 0 && errno == ECHILD)) {
+			terminal->child_pid = 0;
+			return;
+		}
+		(void)poll(NULL, 0, 10);
+	}
+	(void)kill(-terminal->child_pid, SIGKILL);
+	(void)waitpid(terminal->child_pid, &status, 0);
+	terminal->child_pid = 0;
+}
+
+static int drain_terminal(struct shell_terminal *terminal)
+{
+	uint8_t bytes[512];
+	int changed = 0;
+	ssize_t length;
+
+	while ((length = read(terminal->master_fd, bytes, sizeof(bytes))) > 0) {
+		ssize_t i;
+
+		for (i = 0; i < length; i++)
+			terminal_feed_byte(terminal, bytes[i]);
+		changed = 1;
+	}
+	if (length < 0 && errno != EAGAIN && errno != EWOULDBLOCK &&
+	    errno != EIO)
+		return -1;
+	if (terminal->child_pid > 0) {
+		int status;
+		pid_t result = waitpid(terminal->child_pid, &status, WNOHANG);
+
+		if (result == terminal->child_pid) {
+			static const char message[] = "\r\n[process exited]\r\n";
+			size_t i;
+
+			terminal->child_pid = 0;
+			terminal->child_exited = 1;
+			for (i = 0; i < sizeof(message) - 1; i++)
+				terminal_feed_byte(terminal, message[i]);
+			changed = 1;
+		}
+	}
+	if (terminal->child_exited && terminal->master_fd >= 0) {
+		close(terminal->master_fd);
+		terminal->master_fd = -1;
+	}
+	return changed;
 }
 
 static void fill_rect(struct test_buffer *buffer, int x, int y,
@@ -227,18 +628,40 @@ static void draw_launcher(struct test_buffer *buffer,
 }
 
 static void draw_terminal(struct test_buffer *buffer,
+			  const struct shell_state *shell,
 			  const struct shell_window *window)
 {
 	int x = window->x + 8;
 	int y = window->y + 36;
+	unsigned int row;
+	unsigned int column;
 
 	fill_rect(buffer, x, y, window->width - 16, window->height - 44,
 		  rgb565(COLOR_TERMINAL));
-	draw_text(buffer, x + 16, y + 18, "Wii Linux NGX", rgb565(COLOR_TEAL));
-	draw_text(buffer, x + 16, y + 50, "Native KMS shell online",
-		  rgb565(COLOR_TEXT));
-	draw_text(buffer, x + 16, y + 82, "root@wii:~#", rgb565(COLOR_GOLD));
-	draw_text(buffer, x + 112, y + 82, "_", rgb565(COLOR_TEXT));
+	x += 7;
+	for (row = 0; row < TERMINAL_ROWS; row++)
+		for (column = 0; column < TERMINAL_COLUMNS; column++) {
+			const struct terminal_cell *cell =
+				&shell->terminal.cells[row][column];
+			int cell_x = x + column * SHELL_FONT_WIDTH;
+			int cell_y = y + row * SHELL_FONT_HEIGHT;
+
+			if (shell->focused == SHELL_APP_TERMINAL &&
+			    shell->cursor_visible &&
+			    row == shell->terminal.cursor_y &&
+			    column == shell->terminal.cursor_x) {
+				fill_rect(buffer, cell_x, cell_y, SHELL_FONT_WIDTH,
+					  SHELL_FONT_HEIGHT, rgb565(COLOR_TEXT));
+				if (cell->character != ' ')
+					draw_character(buffer, cell_x, cell_y,
+						       cell->character,
+						       rgb565(COLOR_TERMINAL));
+			} else if (cell->character != ' ') {
+				draw_character(buffer, cell_x, cell_y,
+					       cell->character,
+					       rgb565(cell->color));
+			}
+		}
 }
 
 static void draw_files(struct test_buffer *buffer,
@@ -307,7 +730,7 @@ static void draw_window(struct test_buffer *buffer,
 
 	switch (window->app) {
 	case SHELL_APP_TERMINAL:
-		draw_terminal(buffer, window);
+		draw_terminal(buffer, shell, window);
 		break;
 	case SHELL_APP_FILES:
 		draw_files(buffer, window);
@@ -605,6 +1028,128 @@ static int handle_key(struct shell_state *shell, unsigned int key)
 	}
 }
 
+static unsigned char key_character(unsigned int key)
+{
+	static const unsigned char characters[KEY_MAX + 1] = {
+		[KEY_A] = 'a', [KEY_B] = 'b', [KEY_C] = 'c', [KEY_D] = 'd',
+		[KEY_E] = 'e', [KEY_F] = 'f', [KEY_G] = 'g', [KEY_H] = 'h',
+		[KEY_I] = 'i', [KEY_J] = 'j', [KEY_K] = 'k', [KEY_L] = 'l',
+		[KEY_M] = 'm', [KEY_N] = 'n', [KEY_O] = 'o', [KEY_P] = 'p',
+		[KEY_Q] = 'q', [KEY_R] = 'r', [KEY_S] = 's', [KEY_T] = 't',
+		[KEY_U] = 'u', [KEY_V] = 'v', [KEY_W] = 'w', [KEY_X] = 'x',
+		[KEY_Y] = 'y', [KEY_Z] = 'z',
+		[KEY_1] = '1', [KEY_2] = '2', [KEY_3] = '3', [KEY_4] = '4',
+		[KEY_5] = '5', [KEY_6] = '6', [KEY_7] = '7', [KEY_8] = '8',
+		[KEY_9] = '9', [KEY_0] = '0',
+		[KEY_MINUS] = '-', [KEY_EQUAL] = '=', [KEY_LEFTBRACE] = '[',
+		[KEY_RIGHTBRACE] = ']', [KEY_BACKSLASH] = '\\',
+		[KEY_SEMICOLON] = ';', [KEY_APOSTROPHE] = '\'',
+		[KEY_GRAVE] = '`', [KEY_COMMA] = ',', [KEY_DOT] = '.',
+		[KEY_SLASH] = '/', [KEY_SPACE] = ' ',
+	};
+
+	return key <= KEY_MAX ? characters[key] : 0;
+}
+
+static unsigned char shifted_character(unsigned char character)
+{
+	switch (character) {
+	case '1': return '!';
+	case '2': return '@';
+	case '3': return '#';
+	case '4': return '$';
+	case '5': return '%';
+	case '6': return '^';
+	case '7': return '&';
+	case '8': return '*';
+	case '9': return '(';
+	case '0': return ')';
+	case '-': return '_';
+	case '=': return '+';
+	case '[': return '{';
+	case ']': return '}';
+	case '\\': return '|';
+	case ';': return ':';
+	case '\'': return '"';
+	case '`': return '~';
+	case ',': return '<';
+	case '.': return '>';
+	case '/': return '?';
+	default: return character;
+	}
+}
+
+static int terminal_send_key(struct shell_state *shell, unsigned int key)
+{
+	static const struct {
+		unsigned int key;
+		const char *sequence;
+	} sequences[] = {
+		{ KEY_UP, "\033[A" }, { KEY_DOWN, "\033[B" },
+		{ KEY_RIGHT, "\033[C" }, { KEY_LEFT, "\033[D" },
+		{ KEY_HOME, "\033[H" }, { KEY_END, "\033[F" },
+		{ KEY_DELETE, "\033[3~" }, { KEY_PAGEUP, "\033[5~" },
+		{ KEY_PAGEDOWN, "\033[6~" },
+	};
+	unsigned char character = key_character(key);
+	unsigned int i;
+
+	if (shell->terminal.master_fd < 0)
+		return 0;
+	for (i = 0; i < ARRAY_SIZE(sequences); i++)
+		if (sequences[i].key == key)
+			return terminal_write(&shell->terminal, sequences[i].sequence,
+					      strlen(sequences[i].sequence));
+	if (key == KEY_ENTER || key == KEY_KPENTER)
+		return terminal_write(&shell->terminal, "\r", 1);
+	if (key == KEY_BACKSPACE)
+		return terminal_write(&shell->terminal, "\177", 1);
+	if (key == KEY_TAB)
+		return terminal_write(&shell->terminal, "\t", 1);
+	if (key == KEY_ESC)
+		return terminal_write(&shell->terminal, "\033", 1);
+	if (!character)
+		return 0;
+	if (character >= 'a' && character <= 'z') {
+		if (shell->shift_down ^ shell->caps_lock)
+			character -= 'a' - 'A';
+		if (shell->control_down)
+			character &= 0x1f;
+	} else if (shell->shift_down) {
+		character = shifted_character(character);
+	}
+	return terminal_write(&shell->terminal, &character, 1);
+}
+
+static int handle_key_event(struct shell_state *shell, unsigned int key,
+			    int value)
+{
+	if (key == KEY_LEFTSHIFT || key == KEY_RIGHTSHIFT) {
+		shell->shift_down = value != 0;
+		return 0;
+	}
+	if (key == KEY_LEFTCTRL || key == KEY_RIGHTCTRL) {
+		shell->control_down = value != 0;
+		return 0;
+	}
+	if (key == KEY_CAPSLOCK && value == 1) {
+		shell->caps_lock = !shell->caps_lock;
+		return 0;
+	}
+	if (value != 1 && value != 2)
+		return 0;
+	if (key == KEY_F12 || (key >= KEY_F1 && key <= KEY_F6))
+		return handle_key(shell, key);
+	if (shell->focused == SHELL_APP_TERMINAL &&
+	    shell->windows[SHELL_APP_TERMINAL].visible &&
+	    shell->terminal.master_fd >= 0) {
+		if (terminal_send_key(shell, key) < 0)
+			stop = 1;
+		return 0;
+	}
+	return value == 1 ? handle_key(shell, key) : 0;
+}
+
 static int update_pointer(struct shell_state *shell, int delta_x, int delta_y)
 {
 	int launcher;
@@ -707,14 +1252,15 @@ static void collect_input_event(struct shell_state *shell,
 			*button_released = 1;
 		return;
 	}
-	if (event->value == 1)
-		*changed |= handle_key(shell, event->code);
+	*changed |= handle_key_event(shell, event->code, event->value);
 }
 
 static int poll_inputs(struct shell_state *shell)
 {
-	struct pollfd poll_fds[SHELL_INPUT_COUNT];
+	struct pollfd poll_fds[SHELL_INPUT_COUNT + 1];
 	unsigned int i;
+	unsigned int poll_count = shell->input_count;
+	int terminal_index = -1;
 	int changed = 0;
 	int ret;
 
@@ -723,13 +1269,26 @@ static int poll_inputs(struct shell_state *shell)
 		poll_fds[i].events = POLLIN;
 		poll_fds[i].revents = 0;
 	}
+	if (shell->terminal.master_fd >= 0) {
+		terminal_index = poll_count++;
+		poll_fds[terminal_index].fd = shell->terminal.master_fd;
+		poll_fds[terminal_index].events = POLLIN;
+		poll_fds[terminal_index].revents = 0;
+	}
 	do {
-		ret = poll(poll_fds, shell->input_count, SHELL_POLL_MS);
+		ret = poll(poll_fds, poll_count, SHELL_POLL_MS);
 	} while (ret < 0 && errno == EINTR && !stop);
 	if (stop)
 		return 0;
 	if (ret < 0)
 		return -1;
+	if (terminal_index >= 0 &&
+	    (poll_fds[terminal_index].revents & (POLLIN | POLLHUP | POLLERR))) {
+		ret = drain_terminal(&shell->terminal);
+		if (ret < 0)
+			return -1;
+		changed |= ret;
+	}
 
 	for (i = 0; i < shell->input_count; i++) {
 		struct input_event events[16];
@@ -796,6 +1355,9 @@ int main(int argc, char **argv)
 {
 	const char *card = "/dev/dri/card0";
 	struct shell_state shell = {
+		.terminal = {
+			.master_fd = -1,
+		},
 		.serial = 1,
 		.cursor_visible = 1,
 		.pointer_x = TEST_WIDTH / 2,
@@ -827,6 +1389,10 @@ int main(int argc, char **argv)
 	for (i = 0; i < ARRAY_SIZE(shell.inputs); i++)
 		shell.inputs[i].fd = -1;
 	init_windows(&shell);
+	if (start_terminal(&shell.terminal) < 0) {
+		perror("start terminal");
+		goto out;
+	}
 
 	drm_fd = open(card, O_RDWR | O_CLOEXEC);
 	if (drm_fd < 0) {
@@ -884,7 +1450,7 @@ int main(int argc, char **argv)
 	open_inputs(&shell);
 	printf("wii-kolibri-shell: active %ux%u rgb565 with %u input device(s)\n",
 	       mode.hdisplay, mode.vdisplay, shell.input_count);
-	printf("wii-kolibri-shell: Esc or F12 exits\n");
+	printf("wii-kolibri-shell: terminal owns /bin/sh; F12 exits\n");
 	fflush(stdout);
 	signal(SIGINT, handle_signal);
 	signal(SIGTERM, handle_signal);
@@ -911,6 +1477,7 @@ int main(int argc, char **argv)
 	status = EXIT_SUCCESS;
 
 out:
+	stop_terminal(&shell.terminal);
 	for (i = 0; i < shell.input_count; i++)
 		if (shell.inputs[i].fd >= 0)
 			close(shell.inputs[i].fd);
