@@ -390,6 +390,8 @@ static int poll_inputs(struct shell_state *shell)
 	do {
 		ret = poll(poll_fds, shell->input_count, SHELL_POLL_MS);
 	} while (ret < 0 && errno == EINTR && !stop);
+	if (stop)
+		return 0;
 	if (ret < 0)
 		return -1;
 
