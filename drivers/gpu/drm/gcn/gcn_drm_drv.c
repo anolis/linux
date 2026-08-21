@@ -132,6 +132,7 @@ struct gcn_drm {
 	unsigned int pending_page;
 	bool flip_pending;
 	bool ave_restore_needed;
+	bool ave_chroma_write_only;
 	u64 gx_rgb565_frames;
 	u64 gx_xrgb8888_frames;
 };
@@ -471,11 +472,33 @@ static inline struct gcn_drm *to_gcn_drm(struct drm_device *drm)
 	return container_of(drm, struct gcn_drm, drm);
 }
 
-static int gcn_drm_ave_write_verify(struct gcn_drm *gcn, u8 value)
+static int gcn_drm_ave_read(struct gcn_drm *gcn, u8 reg, u8 *value)
 {
 	struct i2c_msg messages[2];
+	int ret;
+
+	messages[0].addr = gcn->ave->addr;
+	messages[0].flags = gcn->ave->flags;
+	messages[0].len = sizeof(reg);
+	messages[0].buf = &reg;
+	messages[1].addr = gcn->ave->addr;
+	messages[1].flags = gcn->ave->flags | I2C_M_RD;
+	messages[1].len = sizeof(*value);
+	messages[1].buf = value;
+
+	ret = i2c_transfer(gcn->ave->adapter, messages, ARRAY_SIZE(messages));
+	if (ret < 0)
+		return ret;
+	if (ret != ARRAY_SIZE(messages))
+		return -EIO;
+
+	return 0;
+}
+
+static int gcn_drm_ave_write_verify(struct gcn_drm *gcn, u8 value)
+{
 	u8 command[] = { AVE_CHROMA_EXCHANGE_REG, value };
-	u8 reg = AVE_CHROMA_EXCHANGE_REG;
+	u8 control;
 	u8 readback;
 	int ret;
 
@@ -485,22 +508,25 @@ static int gcn_drm_ave_write_verify(struct gcn_drm *gcn, u8 value)
 	if (ret != sizeof(command))
 		return -EIO;
 
-	messages[0].addr = gcn->ave->addr;
-	messages[0].flags = gcn->ave->flags;
-	messages[0].len = sizeof(reg);
-	messages[0].buf = &reg;
-	messages[1].addr = gcn->ave->addr;
-	messages[1].flags = gcn->ave->flags | I2C_M_RD;
-	messages[1].len = sizeof(readback);
-	messages[1].buf = &readback;
-
-	ret = i2c_transfer(gcn->ave->adapter, messages, ARRAY_SIZE(messages));
-	if (ret < 0)
+	ret = gcn_drm_ave_read(gcn, AVE_CHROMA_EXCHANGE_REG, &readback);
+	if (ret)
 		return ret;
-	if (ret != ARRAY_SIZE(messages))
+	if (readback == value)
+		return 0;
+	if (readback != 0xff)
 		return -EIO;
-	if (readback != value)
+
+	/* Some AVE revisions return 0xff for command-style registers. */
+	ret = gcn_drm_ave_read(gcn, 0x01, &control);
+	if (ret)
+		return ret;
+	if (control == 0xff)
 		return -EIO;
+	if (!gcn->ave_chroma_write_only)
+		drm_info(&gcn->drm,
+			 "AVE chroma register has write-only readback; control=%02x\n",
+			 control);
+	gcn->ave_chroma_write_only = true;
 
 	return 0;
 }
