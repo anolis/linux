@@ -11040,3 +11040,46 @@ oops, panic, or machine check.
 Direct keyboard and pointer input are now sufficient for the next shell phase:
 multiple independently positioned windows with focus, dragging, stacking, and
 application process ownership.
+
+### Stage focused movable windows and stacking
+
+- Test branch: `feature/wii-kolibri-shell`
+- Candidate commit: `3774d59b3`
+
+Replace the accepted shell's single active application view with a minimal
+window-manager state model. Terminal, Files, and System retain stable identities,
+geometry, and visibility independently of their stacking positions. A separate
+z-order array defines bottom-to-top drawing and pointer hit testing, establishing
+the ownership boundary needed for later child application processes.
+
+Start with Terminal visible. Launcher activation opens a hidden window or raises
+an existing one. Clicking any visible portion of an overlapped window focuses and
+raises it. Pressing a title bar captures a drag until left-button release, with
+the complete window clamped inside the workspace between the launcher, top panel,
+and status bar. Each close control hides only its own window; reopening preserves
+that window's last position. Focus is displayed with each application's accent,
+and launcher indicators show which windows remain open. Keyboard behavior keeps
+the accepted launcher controls and adds F4 to close the focused window and F6 to
+cycle focus among visible windows.
+
+The checksum-pinned artifacts are:
+
+- unchanged `zImage` / `dtbImage.wii` SHA-256:
+  `85137fa760fef6e840d5ef6cc0a74b8f1cf187a7f0a59a4e8b73fb3165b03463`
+- unchanged `gcn-gx.ko` SHA-256:
+  `bebd391507cc57104aa11a96f80783e56e13ed7cb26860f56027cdd1c8a4950c`
+- static PowerPC `wii-kolibri-shell` SHA-256:
+  `673a4f7fe34c73e78b0c8fc233497fc750d19791df14b80bbe76a1281f5d843b`
+
+Host validation passed warning-clean static PowerPC compilation against the
+installed target UAPI, `git diff --check`, and strict checkpatch with zero
+errors, warnings, or checks.
+
+Hardware acceptance requires opening all three windows, verifying correct
+overlap and topmost hit testing, repeatedly changing focus and z-order, dragging
+each title bar to every workspace boundary, and confirming clean frames without
+trails, stale regions, tearing, or corruption. Close and reopen every window and
+require its prior position to persist. Validate F4 and F6 from the USB keyboard.
+Esc or F12 must exit with code zero and restore the prior DRM fbcon CRTC. GX must
+then unload cleanly and return AVE to CPU scanout with no GX/DRM timeout, FIFO
+stall, fallback, oops, panic, or machine check.
