@@ -11163,3 +11163,23 @@ while abnormal process exit is covered by the kernel's automatic descriptor
 cleanup. Repeat the complete PTY acceptance test with the checksum above and
 confirm that commands no longer echo to the host console before accepting this
 milestone.
+
+Hardware result: accepted. The checksum-verified input-grab candidate acquired
+the Dell keyboard and Microsoft pointer exclusively, presented the PTY-backed
+Terminal, and completed the interactive test without forwarding typed commands
+to the host console. The user reported that the corrected run worked well.
+Entering `exit` produced the expected process-exited marker without terminating
+PID 1 or resetting the Wii, and F12 then returned cleanly to `gcn-vidrmfb`.
+
+The post-test audit found desktop exit code zero, the terminal child reaped,
+`/proc/sys/kernel/pty/nr` returned to zero, and no input ownership remained after
+descriptor closure. GX unloaded successfully; the kernel recorded AVE chroma
+exchange returning to CPU scanout followed by accelerator unregistration. Wii
+uptime remained continuous, and the final kernel log contained no GX/DRM
+timeout, FIFO stall, fallback, oops, panic, or machine check.
+
+This accepts the shell's first real application-process boundary: a child shell
+owns a controlling PTY, the Terminal window owns its output and input, the
+desktop exclusively owns physical input while active, and all resources unwind
+cleanly back to fbcon. The next userspace milestone can build process launching
+and application lifecycle management on this validated ownership model.
