@@ -847,6 +847,11 @@ static void open_inputs(struct shell_state *shell)
 			close(fd);
 			continue;
 		}
+		if (ioctl(fd, EVIOCGRAB, 1) < 0) {
+			perror("EVIOCGRAB");
+			close(fd);
+			continue;
+		}
 		(void)ioctl(fd, EVIOCGNAME(sizeof(name)), name);
 		input->fd = fd;
 		shell->input_count++;
@@ -1478,9 +1483,12 @@ int main(int argc, char **argv)
 
 out:
 	stop_terminal(&shell.terminal);
-	for (i = 0; i < shell.input_count; i++)
-		if (shell.inputs[i].fd >= 0)
+	for (i = 0; i < shell.input_count; i++) {
+		if (shell.inputs[i].fd >= 0) {
+			(void)ioctl(shell.inputs[i].fd, EVIOCGRAB, 0);
 			close(shell.inputs[i].fd);
+		}
+	}
 	if (crtc_active && saved_crtc.fb_id) {
 		saved_crtc.set_connectors_ptr = user_ptr(&connector_id);
 		saved_crtc.count_connectors = 1;
