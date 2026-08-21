@@ -11238,3 +11238,47 @@ code zero, no shell child remained, the system PTY count returned to zero, and
 chroma exchange returning to CPU scanout followed by accelerator unregistration.
 Wii uptime remained continuous and the final kernel audit found no GX/DRM
 timeout, FIFO stall, fallback, oops, panic, or machine check.
+
+### Stage a native filesystem browser
+
+- Test branch: `feature/wii-kolibri-shell`
+- Candidate commit: `ca26908d6`
+
+Replace the Files placeholder with a real, bounded browser that uses direct
+POSIX filesystem interfaces and no helper process or dynamic dependency. The
+browser lazily opens `/` on first activation, reads at most 64 entries, resolves
+unknown and symbolic-link types with `stat`, sorts `..` first and directories
+before regular files, and retains a 512-byte current path. Directory load
+failures and truncation remain visible in the status line.
+
+Render the current path, ten scrolling rows, distinct directory and regular-file
+indicators, selection, and item status in the existing movable Files window.
+Focused keyboard controls provide arrows, Page Up/Down, Home/End, Enter or Right
+to open, and Backspace or Left to visit the parent. The mouse wheel changes the
+selection, a single click selects, and a second click within 500 milliseconds
+opens the selected directory. Hiding or closing the view retains its path,
+selection, and scroll position.
+
+The checksum-pinned artifacts are:
+
+- unchanged `zImage` / `dtbImage.wii` SHA-256:
+  `85137fa760fef6e840d5ef6cc0a74b8f1cf187a7f0a59a4e8b73fb3165b03463`
+- unchanged `gcn-gx.ko` SHA-256:
+  `bebd391507cc57104aa11a96f80783e56e13ed7cb26860f56027cdd1c8a4950c`
+- static PowerPC `wii-kolibri-shell` SHA-256:
+  `7ee780d6eb917c143d7cba74c4bbf7dca6cdefc90f47be257c9ba44a14622329`
+
+Host validation passed warning-clean static PowerPC compilation against the
+installed target UAPI, `git diff --check`, and strict checkpatch with zero
+errors, warnings, or checks.
+
+Hardware acceptance requires opening Files and seeing a sorted root directory
+with path `/`. Exercise row selection, wheel and keyboard scrolling, Home/End,
+Page Up/Down, Enter navigation, parent traversal, and mouse double-click on at
+least two nested directories. Select a regular file and require a non-destructive
+file status rather than accidental execution. Visit a directory exceeding the
+fixed entry cap and require the `64+ entries` status. Hide and reopen Files and
+confirm path and selection persist, while Terminal remains interactive and
+owns its original PTY. Finish with F12 and require child reap, PTY count zero,
+fbcon restoration, clean GX unload, continuous uptime, and no GX/DRM timeout,
+FIFO stall, fallback, oops, panic, or machine check.
