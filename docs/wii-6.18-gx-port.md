@@ -10914,7 +10914,7 @@ for beginning desktop-userspace integration.
 ### Stage the first native RGB565 desktop shell
 
 - Test branch: `feature/wii-kolibri-shell`
-- Candidate commit: `f1385d8fe`
+- Candidate commit: `448f0b82b`
 
 Begin desktop-userspace integration without replacing the known-working Jessie
 root filesystem or introducing Xorg. Add a dependency-free, statically linked
@@ -10939,7 +10939,7 @@ The checksum-pinned artifacts are:
 - unchanged `gcn-gx.ko` SHA-256:
   `bebd391507cc57104aa11a96f80783e56e13ed7cb26860f56027cdd1c8a4950c`
 - static PowerPC `wii-kolibri-shell` SHA-256:
-  `3027906bb089b597d53f081f99955539bfb115cb4731e5e85f752565d2774b7a`
+  `339c620096a941071c1a17f8d445d669cd7c26e326e8e63515132b954c33d23f`
 
 Host validation passed warning-clean static PowerPC compilation against the
 installed target UAPI, ELF verification as a 32-bit big-endian PowerPC static
@@ -10954,3 +10954,12 @@ DRM master release and no GX/DRM timeout, FIFO stall, fallback, oops, panic, or
 machine check. This test validates the minimum native desktop architecture; it
 does not yet provide processes, movable windows, pointer input, or a terminal
 pseudoterminal.
+
+The first pre-acceptance run of implementation commit `f1385d8fe` and binary
+SHA-256 `3027906bb089b597d53f081f99955539bfb115cb4731e5e85f752565d2774b7a`
+passed direct visual and keyboard interaction testing. The user reported that
+it appeared to work perfectly. The subsequent termination audit found that a
+signal interrupting the evdev `poll()` was logged as `Interrupted system call`
+and returned failure, even though CRTC cleanup still executed. Commit
+`448f0b82b` treats an interrupted poll as a normal exit when the signal handler
+has set the stop flag. The corrected candidate must be rerun before acceptance.
