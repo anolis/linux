@@ -10716,3 +10716,40 @@ standard KMS presentation performance as the immediate desktop bottleneck.
 The next milestone should exercise a real userspace software-rendering stack
 against ordinary XRGB8888 dumb buffers; custom render-UAPI optimization is no
 longer a prerequisite for that work.
+
+### Stage dynamic software rendering through standard KMS
+
+- Test branch: `test/wii-kms-software-animation`
+- Candidate commit: `6033412bb`
+
+Extend the accepted standard XRGB8888 benchmark into an end-to-end
+software-compositor analogue. Before each page flip, userspace redraws the
+complete hidden 640 by 480 XRGB8888 dumb buffer with the deterministic
+quadrant, grid, checkerboard, and moving-marker scene. It then submits that
+ordinary framebuffer through a serialized vblank-event page flip. No custom
+GCN render object or render ioctl participates; the measured interval includes
+userspace software drawing, DRM shadow-plane conversion, and display pacing.
+
+The checksum-pinned artifacts are:
+
+- unchanged `zImage` / `dtbImage.wii` SHA-256:
+  `85137fa760fef6e840d5ef6cc0a74b8f1cf187a7f0a59a4e8b73fb3165b03463`
+- unchanged `gcn-gx.ko` SHA-256:
+  `bebd391507cc57104aa11a96f80783e56e13ed7cb26860f56027cdd1c8a4950c`
+- animated static PowerPC `wii-drm-test` SHA-256:
+  `164fa997737cb4d0d8bc29b037a2614350a808bdeb5be1952f884219a0f278ba`
+
+Host validation passed warning-clean native and static PowerPC builds,
+`git diff --check`, and strict full-patch checkpatch with zero errors,
+warnings, or checks. The client is a statically linked 32-bit big-endian
+PowerPC executable built against installed target UAPI headers.
+
+Hardware acceptance requires 300 zero-delay animated XRGB8888 flips first
+through CPU fallback and then through the unchanged accepted GX module. Both
+runs must complete every event with advancing vblank, report their end-to-end
+average latency and effective rate, release DRM master, and restore the native
+console. The GX run must advance the XRGB8888 and PE-finish counters and show a
+crisp, correctly colored, coherent scene with smooth marker motion and no
+seam, stale region, tearing, blanking, or corruption. Finally unload GX and
+require no AVE/GX/DRM timeout, FIFO stall, fallback, oops, panic, or machine
+check.
