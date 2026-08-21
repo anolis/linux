@@ -10686,3 +10686,33 @@ positive control and frame counters, clean DRM-master release and console
 restoration after each run, and no AVE/GX/DRM timeout, FIFO stall, fallback,
 oops, panic, or machine check. The comparison determines whether standard KMS
 scanout or custom render staging is the next desktop-performance bottleneck.
+
+Hardware result: accepted. The checksum-pinned client ran on the second Wii
+under accepted boot ID `8481f9b9-0019-4a87-aff2-ac21c1d27bfa`. Wii-side
+SHA-256 verification matched both the client and the unchanged GX module.
+
+With GX absent, CPU fallback completed all 300 requested XRGB8888 flips at
+vblank 42184 in 10107523 microseconds: 33691 microseconds per flip and
+29.680 Hz. The exact same client and command then ran with the accepted GX
+module. It completed all 300 flips at vblank 43308 in 10007419 microseconds:
+33358 microseconds per flip and 29.977 Hz. The module advanced from 2 to 306
+total frames, 0 to 301 XRGB8888 frames, and 4 to 612 PE finishes. The exact
+two-finish invariant therefore held for every new generated frame, including
+the console updates surrounding the 301 test conversions.
+
+The driver's independent timing positive control reported 11344 microseconds
+average and 16215 microseconds maximum for packed-XRGB8888 conversion and
+tiling. Its cache flush averaged 251 microseconds and reached 2402
+microseconds maximum. Standard XRGB8888 scanout therefore remains comfortably
+inside the approximately 33367-microsecond 480i full-frame cadence. GX is not
+slower than CPU fallback at the KMS boundary; both paths are paced by display
+vblank at approximately 29.97 complete frames per second.
+
+Both clients released DRM master normally. The module unregistered, selected
+CPU AVE scanout through the accepted write-only-register path, unloaded, and
+left the native DRM console active. The final log audit found no AVE/GX/DRM
+timeout, FIFO stall, fallback, oops, panic, or machine check. This closes
+standard KMS presentation performance as the immediate desktop bottleneck.
+The next milestone should exercise a real userspace software-rendering stack
+against ordinary XRGB8888 dumb buffers; custom render-UAPI optimization is no
+longer a prerequisite for that work.
