@@ -11083,3 +11083,22 @@ require its prior position to persist. Validate F4 and F6 from the USB keyboard.
 Esc or F12 must exit with code zero and restore the prior DRM fbcon CRTC. GX must
 then unload cleanly and return AVE to CPU scanout with no GX/DRM timeout, FIFO
 stall, fallback, oops, panic, or machine check.
+
+Hardware result: accepted. The checksum-verified candidate detected both input
+devices and rendered the initial Terminal window. The user opened all views,
+tested overlap and topmost hit selection, repeatedly raised and focused windows,
+dragged title bars across the bounded workspace, closed and reopened windows,
+and exercised the F4 and F6 keyboard paths. The user reported that everything
+worked perfectly. No trails, stale region, tearing, corruption, missed hit, or
+focus/stacking error was reported.
+
+Esc or F12 terminated the process with kernel-retained exit code zero and a
+clean shell log. The shell restored `gcn-vidrmfb`; GX unloaded successfully, and
+the kernel recorded AVE returning to CPU scanout followed by accelerator
+unregistration. The final audit found no GX/DRM timeout, FIFO stall, fallback,
+oops, panic, or machine check.
+
+The shell now has a validated input, composition, and window-management core.
+The next milestone can bind a child process to a window, beginning with a
+PTY-backed terminal whose output and keyboard input are owned by the Terminal
+window rather than hard-coded shell content.
