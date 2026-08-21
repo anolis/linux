@@ -10883,3 +10883,30 @@ animation, normal DRM-master release and console restoration, clean GX unload,
 and no graphics fault. Compare its effective rate directly with the accepted
 24.706 Hz XRGB8888 run. Approximately 29.97 Hz isolates the residual desktop
 cost to XRGB8888 source conversion and bandwidth.
+
+Hardware result: accepted. The unchanged checksum-verified client completed
+all 300 triple-buffered RGB565 flips at vblank 112800 in 10075163
+microseconds, averaging 33583 microseconds per frame and 29.776 Hz. This is
+1.21 times the accepted 24.706 Hz XRGB8888 rate and effectively saturates the
+Wii's approximately 29.97 Hz complete-frame display cadence.
+
+The module advanced from 27 to 332 total frames and from 56 to 664 PE finish
+interrupts while XRGB8888 frames remained zero. As in the XRGB control, the
+608 new finishes account for 304 completed generated frames: 301 KMS RGB565
+conversions and three surrounding native-console updates. Every requested
+page-flip event arrived and no fallback occurred.
+
+Direct observation passed. The user reported that the complete RGB565
+animation looked great. No seam, stale region, tearing, blanking, corruption,
+or visual-quality defect was reported. DRM master released normally, GX
+unloaded, CPU AVE scanout returned, and the native console was restored. The
+final log audit found no AVE/GX/DRM timeout, FIFO stall, fallback, oops, panic,
+or machine check.
+
+This positive control isolates the XRGB8888 pipeline result. Standard KMS,
+triple-buffer ownership, vblank events, software redraw, GX rasterization, and
+XFB publication can sustain the full display cadence. A practical lightweight
+desktop can proceed now using standard RGB565 dumb buffers. Separately,
+improving full-frame XRGB8888 requires reducing its packed-to-tiled RGB565
+conversion and memory/cache traffic; that optimization is no longer a blocker
+for beginning desktop-userspace integration.
