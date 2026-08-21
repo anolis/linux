@@ -60,6 +60,8 @@ struct shell_state {
 	enum shell_app active;
 	__u64 serial;
 	int cursor_visible;
+	int pointer_x;
+	int pointer_y;
 };
 
 static const uint32_t shell_colors[] = {
@@ -246,6 +248,22 @@ static void draw_system(struct test_buffer *buffer)
 	draw_status_row(buffer, 270, "Session", "Ready", COLOR_VIOLET);
 }
 
+static void draw_pointer(struct test_buffer *buffer, int x, int y)
+{
+	int row;
+
+	for (row = 0; row < 16; row++) {
+		int width = row / 2 + 2;
+
+		fill_rect(buffer, x, y + row, width, 1, rgb565(COLOR_TERMINAL));
+		if (width > 2)
+			fill_rect(buffer, x + 1, y + row, width - 2, 1,
+				  rgb565(COLOR_TEXT));
+	}
+	fill_rect(buffer, x + 3, y + 12, 3, 8, rgb565(COLOR_TERMINAL));
+	fill_rect(buffer, x + 4, y + 12, 1, 6, rgb565(COLOR_TEXT));
+}
+
 static void draw_shell(struct test_buffer *buffer,
 		       const struct shell_state *shell)
 {
@@ -293,6 +311,7 @@ static void draw_shell(struct test_buffer *buffer,
 	draw_text(buffer, 14, TEST_HEIGHT - 20, "Ready", rgb565(COLOR_MUTED));
 	fill_rect(buffer, 602, TEST_HEIGHT - 16, 8, 8,
 		  rgb565(shell->cursor_visible ? COLOR_TEAL : COLOR_BORDER));
+	draw_pointer(buffer, shell->pointer_x, shell->pointer_y);
 }
 
 static int event_bit(const unsigned long *bits, unsigned int bit)
@@ -311,8 +330,12 @@ static void open_inputs(struct shell_state *shell)
 			(8 * sizeof(unsigned long))] = { };
 		unsigned long key_bits[(KEY_MAX + 8 * sizeof(unsigned long)) /
 			(8 * sizeof(unsigned long))] = { };
+		unsigned long relative_bits[(REL_MAX + 8 * sizeof(unsigned long)) /
+			(8 * sizeof(unsigned long))] = { };
 		struct shell_input *input = &shell->inputs[shell->input_count];
 		char name[128] = "unknown";
+		int keyboard;
+		int pointer;
 		int fd;
 
 		snprintf(input->path, sizeof(input->path), "/dev/input/event%u",
@@ -320,18 +343,32 @@ static void open_inputs(struct shell_state *shell)
 		fd = open(input->path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
 		if (fd < 0)
 			continue;
-		if (ioctl(fd, EVIOCGBIT(0, sizeof(event_bits)), event_bits) < 0 ||
-		    !event_bit(event_bits, EV_KEY) ||
-		    ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(key_bits)), key_bits) < 0 ||
-		    (!event_bit(key_bits, KEY_ENTER) &&
-		     !event_bit(key_bits, KEY_SPACE))) {
+		if (ioctl(fd, EVIOCGBIT(0, sizeof(event_bits)), event_bits) < 0) {
+			close(fd);
+			continue;
+		}
+		if (event_bit(event_bits, EV_KEY))
+			(void)ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(key_bits)), key_bits);
+		if (event_bit(event_bits, EV_REL))
+			(void)ioctl(fd, EVIOCGBIT(EV_REL, sizeof(relative_bits)),
+				    relative_bits);
+		keyboard = event_bit(event_bits, EV_KEY) &&
+			(event_bit(key_bits, KEY_ENTER) ||
+			 event_bit(key_bits, KEY_SPACE));
+		pointer = event_bit(event_bits, EV_REL) &&
+			event_bit(relative_bits, REL_X) &&
+			event_bit(relative_bits, REL_Y) &&
+			event_bit(key_bits, BTN_LEFT);
+		if (!keyboard && !pointer) {
 			close(fd);
 			continue;
 		}
 		(void)ioctl(fd, EVIOCGNAME(sizeof(name)), name);
 		input->fd = fd;
 		shell->input_count++;
-		printf("wii-kolibri-shell: input %s (%s)\n", input->path, name);
+		printf("wii-kolibri-shell: input %s (%s, %s%s)\n", input->path,
+		       name, keyboard ? "keyboard" : "",
+		       pointer ? (keyboard ? "+pointer" : "pointer") : "");
 	}
 }
 
@@ -375,6 +412,52 @@ static int handle_key(struct shell_state *shell, unsigned int key)
 	}
 }
 
+static int update_pointer(struct shell_state *shell, int delta_x, int delta_y)
+{
+	unsigned int i;
+
+	if (!delta_x && !delta_y)
+		return 0;
+	shell->pointer_x += delta_x;
+	shell->pointer_y += delta_y;
+	if (shell->pointer_x < 0)
+		shell->pointer_x = 0;
+	if (shell->pointer_x >= TEST_WIDTH)
+		shell->pointer_x = TEST_WIDTH - 1;
+	if (shell->pointer_y < 0)
+		shell->pointer_y = 0;
+	if (shell->pointer_y >= TEST_HEIGHT)
+		shell->pointer_y = TEST_HEIGHT - 1;
+
+	if (shell->pointer_x >= 8 && shell->pointer_x < 104) {
+		for (i = 0; i < SHELL_APP_COUNT; i++) {
+			int top = 54 + i * 56;
+
+			if (shell->pointer_y >= top &&
+			    shell->pointer_y < top + 40) {
+				shell->selected = i;
+				break;
+			}
+		}
+	}
+	return 1;
+}
+
+static int handle_pointer_click(struct shell_state *shell)
+{
+	if (shell->pointer_x >= 8 && shell->pointer_x < 104 &&
+	    shell->pointer_y >= 54 && shell->pointer_y < 206) {
+		shell->active = shell->selected;
+		return 1;
+	}
+	if (shell->pointer_x >= 588 && shell->pointer_x < 616 &&
+	    shell->pointer_y >= 56 && shell->pointer_y < 84) {
+		stop = 1;
+		return 0;
+	}
+	return 0;
+}
+
 static int poll_inputs(struct shell_state *shell)
 {
 	struct pollfd poll_fds[SHELL_INPUT_COUNT];
@@ -399,16 +482,43 @@ static int poll_inputs(struct shell_state *shell)
 		struct input_event events[16];
 		ssize_t bytes;
 		unsigned int j;
+		int delta_x = 0;
+		int delta_y = 0;
+		int wheel = 0;
+		int clicked = 0;
 
 		if (!(poll_fds[i].revents & POLLIN))
 			continue;
 		while ((bytes = read(poll_fds[i].fd, events, sizeof(events))) > 0) {
-			for (j = 0; j < (unsigned int)bytes / sizeof(events[0]); j++)
-				if (events[j].type == EV_KEY && events[j].value == 1)
-					changed |= handle_key(shell, events[j].code);
+			for (j = 0; j < (unsigned int)bytes / sizeof(events[0]); j++) {
+				if (events[j].type == EV_REL) {
+					if (events[j].code == REL_X)
+						delta_x += events[j].value;
+					else if (events[j].code == REL_Y)
+						delta_y += events[j].value;
+					else if (events[j].code == REL_WHEEL)
+						wheel += events[j].value;
+				} else if (events[j].type == EV_KEY &&
+					   events[j].value == 1) {
+					if (events[j].code == BTN_LEFT)
+						clicked = 1;
+					else
+						changed |= handle_key(shell,
+								      events[j].code);
+				}
+			}
 		}
 		if (bytes < 0 && errno != EAGAIN && errno != EWOULDBLOCK)
 			return -1;
+		changed |= update_pointer(shell, delta_x, delta_y);
+		if (wheel) {
+			if (wheel > 0)
+				changed |= handle_key(shell, KEY_UP);
+			else
+				changed |= handle_key(shell, KEY_DOWN);
+		}
+		if (clicked)
+			changed |= handle_pointer_click(shell);
 	}
 	return changed;
 }
@@ -444,6 +554,8 @@ int main(int argc, char **argv)
 	struct shell_state shell = {
 		.serial = 1,
 		.cursor_visible = 1,
+		.pointer_x = TEST_WIDTH / 2,
+		.pointer_y = TEST_HEIGHT / 2,
 	};
 	struct drm_mode_card_res resources;
 	struct drm_mode_modeinfo mode;
