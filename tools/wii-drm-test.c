@@ -348,7 +348,8 @@ static int wait_flip_event(int fd, __u64 expected, __u32 *sequence)
 }
 
 static int run_flips(int fd, __u32 crtc_id, struct test_buffer *buffers,
-		     unsigned int count, unsigned int delay_ms)
+		     unsigned int count, unsigned int delay_ms,
+		     enum test_pixel_format format, int animate)
 {
 	__u64 start_ns = monotonic_ns();
 	__u64 elapsed_ns;
@@ -357,12 +358,18 @@ static int run_flips(int fd, __u32 crtc_id, struct test_buffer *buffers,
 	__u32 last_sequence = 0;
 
 	for (i = 0; i < count && !stop; i++) {
+		struct test_buffer *next = &buffers[(i + 1) & 1];
 		struct drm_mode_crtc_page_flip flip = {
 			.crtc_id = crtc_id,
-			.fb_id = buffers[(i + 1) & 1].fb.fb_id,
+			.fb_id = next->fb.fb_id,
 			.flags = DRM_MODE_PAGE_FLIP_EVENT,
 			.user_data = i + 1,
 		};
+		int marker_x = 8 + i * 7 % (TEST_WIDTH - 32);
+
+		if (animate)
+			draw_pattern(next->map, next->create.pitch, marker_x,
+				     format);
 
 		if (xioctl(fd, DRM_IOCTL_MODE_PAGE_FLIP, &flip) < 0)
 			return -1;
@@ -388,7 +395,7 @@ static void usage(const char *program)
 {
 	fprintf(stderr, "Usage: %s [--format xrgb8888|rgb565] ", program);
 	fprintf(stderr, "[--flips COUNT] [--delay-ms MSEC] ");
-	fprintf(stderr, "[--exit-after-flips] [CARD]\n");
+	fprintf(stderr, "[--animate] [--exit-after-flips] [CARD]\n");
 }
 
 int main(int argc, char **argv)
@@ -406,6 +413,7 @@ int main(int argc, char **argv)
 	__u32 connector_id;
 	unsigned int flip_count = 0;
 	unsigned int delay_ms = 250;
+	int animate = 0;
 	int exit_after_flips = 0;
 	unsigned int buffer_count;
 	unsigned int created = 0;
@@ -451,6 +459,10 @@ int main(int argc, char **argv)
 			exit_after_flips = 1;
 			continue;
 		}
+		if (!strcmp(argv[i], "--animate")) {
+			animate = 1;
+			continue;
+		}
 		if (!strcmp(argv[i], "--help")) {
 			usage(argv[0]);
 			return EXIT_SUCCESS;
@@ -462,8 +474,8 @@ int main(int argc, char **argv)
 		card = argv[i];
 		card_set = 1;
 	}
-	if (exit_after_flips && !flip_count) {
-		fprintf(stderr, "--exit-after-flips requires --flips\n");
+	if ((animate || exit_after_flips) && !flip_count) {
+		fprintf(stderr, "--animate and --exit-after-flips require --flips\n");
 		return EXIT_FAILURE;
 	}
 	buffer_count = flip_count ? 2 : 1;
@@ -533,7 +545,8 @@ int main(int argc, char **argv)
 	signal(SIGINT, handle_signal);
 	signal(SIGTERM, handle_signal);
 	if (flip_count &&
-	    run_flips(fd, crtc.crtc_id, buffers, flip_count, delay_ms) < 0) {
+	    run_flips(fd, crtc.crtc_id, buffers, flip_count, delay_ms,
+		      format, animate) < 0) {
 		perror("page-flip test");
 		goto out;
 	}
