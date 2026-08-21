@@ -10753,3 +10753,31 @@ crisp, correctly colored, coherent scene with smooth marker motion and no
 seam, stale region, tearing, blanking, or corruption. Finally unload GX and
 require no AVE/GX/DRM timeout, FIFO stall, fallback, oops, panic, or machine
 check.
+
+Hardware result: accepted. The checksum-verified animated client completed all
+300 CPU-fallback frames at vblank 60111 in 20084206 microseconds, averaging
+66947 microseconds per frame and 14.937 Hz. The exact same binary and command
+then completed all 300 GX frames at vblank 63367 in 20017525 microseconds,
+averaging 66725 microseconds per frame and 14.986 Hz.
+
+GX advanced from 2 to 305 total frames, 0 to 301 XRGB8888 frames, and 4 to 612
+PE finishes. Its independent timing report measured 11468 microseconds average
+XRGB conversion and tiling plus 247 microseconds average cache flush. The
+accepted exact two-finish invariant held, every requested vblank event
+arrived, and no accelerator fallback occurred.
+
+The user observed the complete GX run. The dynamically redrawn scene looked
+correct and coherent, with good visual quality and no reported seam, stale
+region, tearing, blanking, or corruption. Both clients released DRM master,
+the module unloaded and selected CPU AVE scanout, and the native console
+returned. The final log audit found no AVE/GX/DRM timeout, FIFO stall,
+fallback, oops, panic, or machine check.
+
+The nearly identical 15 Hz results do not identify GX as a bottleneck. This
+client deliberately waits for a flip event before redrawing the next complete
+back buffer, so drawing begins too late for the immediately following 29.97 Hz
+presentation slot and every update consumes two full-frame intervals. A real
+compositor renders ahead while the current buffer is visible. The next
+desktop-oriented milestone should use three buffers and keep one page flip
+pending while software prepares the next buffer, testing whether pipelined
+standard KMS presentation reaches the full display cadence.
