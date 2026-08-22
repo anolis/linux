@@ -72,12 +72,46 @@ struct font_data {
 #define FILES_VISIBLE_ROWS 10
 #define FILES_PATH_SIZE 512
 #define SYSTEM_NETWORK_NAME 16
+#define LOGIN_USERNAME_SIZE 32
+#define LOGIN_PASSWORD_SIZE 64
+#define LOGIN_STATUS_SIZE 64
+#define LOGIN_SPLASH_MS 1500
+#define LOGIN_TIMEOUT_MS 10000
+#define LOGIN_PANEL_X 160
+#define LOGIN_PANEL_Y 78
+#define LOGIN_PANEL_WIDTH 320
+#define LOGIN_PANEL_HEIGHT 316
+#define LOGIN_FIELD_X 196
+#define LOGIN_FIELD_WIDTH 248
+#define LOGIN_USERNAME_Y 180
+#define LOGIN_PASSWORD_Y 246
+#define LOGIN_BUTTON_X 250
+#define LOGIN_BUTTON_Y 308
+#define LOGIN_BUTTON_WIDTH 140
+#define LOGIN_BUTTON_HEIGHT 36
 
 enum shell_app {
 	SHELL_APP_TERMINAL,
 	SHELL_APP_FILES,
 	SHELL_APP_SYSTEM,
 	SHELL_APP_COUNT,
+};
+
+enum shell_view {
+	SHELL_VIEW_SPLASH,
+	SHELL_VIEW_LOGIN,
+	SHELL_VIEW_DESKTOP,
+};
+
+enum login_field {
+	LOGIN_FIELD_USERNAME,
+	LOGIN_FIELD_PASSWORD,
+};
+
+enum login_auth_state {
+	LOGIN_AUTH_IDLE,
+	LOGIN_AUTH_QUEUED,
+	LOGIN_AUTH_RUNNING,
 };
 
 struct shell_input {
@@ -160,6 +194,17 @@ struct shell_system {
 	int valid;
 };
 
+struct shell_login {
+	char username[LOGIN_USERNAME_SIZE];
+	char password[LOGIN_PASSWORD_SIZE];
+	char status[LOGIN_STATUS_SIZE];
+	size_t username_length;
+	size_t password_length;
+	uint64_t splash_until_ms;
+	enum login_field field;
+	enum login_auth_state auth_state;
+};
+
 #ifdef WII_HAVE_VNC
 struct shell_vnc {
 	rfbScreenInfoPtr screen;
@@ -177,6 +222,7 @@ struct shell_state {
 	struct shell_terminal terminal;
 	struct shell_files files;
 	struct shell_system system;
+	struct shell_login login;
 #ifdef WII_HAVE_VNC
 	struct shell_vnc vnc;
 #endif
@@ -185,6 +231,7 @@ struct shell_state {
 	unsigned int visible;
 	unsigned int selected;
 	__u64 serial;
+	enum shell_view view;
 	int focused;
 	int dragging;
 	int drag_offset_x;
@@ -214,6 +261,8 @@ static const uint32_t shell_colors[] = {
 	0x008e71c7, /* violet */
 	0x000d1113, /* terminal */
 	0x004b7bec, /* blue */
+	0x0078bfe5, /* sky */
+	0x004aaa5b, /* green */
 };
 
 enum shell_color {
@@ -228,6 +277,8 @@ enum shell_color {
 	COLOR_VIOLET,
 	COLOR_TERMINAL,
 	COLOR_BLUE,
+	COLOR_SKY,
+	COLOR_GREEN,
 };
 
 static const enum shell_color app_accents[SHELL_APP_COUNT] = {
@@ -488,30 +539,83 @@ static int terminal_write(struct shell_terminal *terminal,
 	return 0;
 }
 
-static int start_terminal(struct shell_terminal *terminal)
+static void wipe_secret(char *secret, size_t length)
+{
+	memset(secret, 0, length);
+	__asm__("" : : "r"(secret) : "memory");
+}
+
+static int write_login_password(int master, const char *password)
+{
+	size_t length = strlen(password);
+	size_t offset = 0;
+
+	while (offset <= length) {
+		char byte = offset == length ? '\n' : password[offset];
+		ssize_t written = write(master, &byte, 1);
+
+		if (written == 1) {
+			offset++;
+			continue;
+		}
+		if (written < 0 && errno == EINTR)
+			continue;
+		if (written < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+			(void)poll(NULL, 0, 10);
+			continue;
+		}
+		return -1;
+	}
+	return 0;
+}
+
+static int process_name(pid_t pid, char *name, size_t size)
+{
+	char path[32];
+	ssize_t length;
+	int fd;
+
+	snprintf(path, sizeof(path), "/proc/%d/comm", pid);
+	fd = open(path, O_RDONLY | O_CLOEXEC);
+	if (fd < 0)
+		return -1;
+	length = read(fd, name, size - 1);
+	close(fd);
+	if (length <= 0)
+		return -1;
+	while (length && (name[length - 1] == '\n' || name[length - 1] == '\r'))
+		length--;
+	name[length] = '\0';
+	return 0;
+}
+
+static int authenticate_login(const char *username, char *password,
+			      struct shell_terminal *terminal)
 {
 	struct winsize size = {
-		.ws_row = TERMINAL_ROWS,
-		.ws_col = TERMINAL_COLUMNS,
+		.ws_row = 24,
+		.ws_col = 80,
 	};
+	char output[256] = { };
 	char slave_path[32];
+	char name[32];
+	uint64_t deadline = shell_monotonic_ms() + LOGIN_TIMEOUT_MS;
+	size_t output_length = 0;
 	unsigned int number;
+	int password_sent = 0;
+	int authenticated = 0;
 	int unlock = 0;
+	int status;
 	int flags;
 	pid_t child;
 	int master;
 
-	if (terminal->master_fd >= 0 || terminal->child_pid > 0)
-		return 0;
-	memset(terminal, 0, sizeof(*terminal));
-	terminal->master_fd = -1;
-	terminal_clear(terminal);
-	terminal->color = COLOR_TEXT;
 	master = open("/dev/ptmx", O_RDWR | O_NOCTTY | O_CLOEXEC);
 	if (master < 0 || ioctl(master, TIOCSPTLCK, &unlock) < 0 ||
 	    ioctl(master, TIOCGPTN, &number) < 0) {
 		if (master >= 0)
 			close(master);
+		wipe_secret(password, LOGIN_PASSWORD_SIZE);
 		return -1;
 	}
 	snprintf(slave_path, sizeof(slave_path), "/dev/pts/%u", number);
@@ -519,6 +623,7 @@ static int start_terminal(struct shell_terminal *terminal)
 	child = fork();
 	if (child < 0) {
 		close(master);
+		wipe_secret(password, LOGIN_PASSWORD_SIZE);
 		return -1;
 	}
 	if (!child) {
@@ -536,23 +641,86 @@ static int start_terminal(struct shell_terminal *terminal)
 		if (slave > STDERR_FILENO)
 			close(slave);
 		close(master);
+		setenv("LC_ALL", "C", 1);
 		setenv("TERM", "vt100", 1);
-		setenv("HOME", "/root", 1);
-		setenv("PS1", "root@wii:\\w# ", 1);
-		execl("/bin/sh", "sh", "-i", (char *)NULL);
+		execl("/bin/login", "login", username, (char *)NULL);
 		_exit(127);
 	}
 	flags = fcntl(master, F_GETFL);
-	if (flags < 0 || fcntl(master, F_SETFL, flags | O_NONBLOCK) < 0) {
-		kill(child, SIGHUP);
-		close(master);
-		(void)waitpid(child, NULL, 0);
-		return -1;
+	if (flags >= 0)
+		(void)fcntl(master, F_SETFL, flags | O_NONBLOCK);
+
+	while (shell_monotonic_ms() < deadline) {
+		char bytes[128];
+		ssize_t length;
+		pid_t result;
+
+		while ((length = read(master, bytes, sizeof(bytes))) > 0) {
+			size_t copy = (size_t)length;
+
+			if (copy > sizeof(bytes))
+				copy = sizeof(bytes);
+			if (output_length + copy >= sizeof(output)) {
+				size_t discard = output_length + copy -
+					sizeof(output) + 1;
+
+				memmove(output, output + discard,
+					output_length - discard);
+				output_length -= discard;
+			}
+			memcpy(output + output_length, bytes, copy);
+			output_length += copy;
+			output[output_length] = '\0';
+		}
+		if (!password_sent && strstr(output, "Password:")) {
+			if (write_login_password(master, password) < 0)
+				break;
+			wipe_secret(password, LOGIN_PASSWORD_SIZE);
+			password_sent = 1;
+		}
+		if (password_sent && process_name(child, name, sizeof(name)) == 0 &&
+		    strcmp(name, "login")) {
+			authenticated = 1;
+			break;
+		}
+		result = waitpid(child, &status, WNOHANG);
+		if (result == child || (result < 0 && errno == ECHILD)) {
+			child = 0;
+			break;
+		}
+		(void)poll(NULL, 0, 20);
 	}
-	terminal->master_fd = master;
-	terminal->child_pid = child;
-	printf("wii-kolibri-shell: terminal child pid=%d pty=%s\n",
-	       child, slave_path);
+	wipe_secret(password, LOGIN_PASSWORD_SIZE);
+	if (authenticated) {
+		memset(terminal, 0, sizeof(*terminal));
+		terminal->master_fd = master;
+		terminal->child_pid = child;
+		terminal_clear(terminal);
+		terminal->color = COLOR_TEXT;
+		(void)terminal_write(terminal, "\n", 1);
+		printf("wii-kolibri-shell: authenticated login pid=%d pty=%s\n",
+		       child, slave_path);
+		return 1;
+	}
+	close(master);
+	if (child > 0) {
+		int i;
+
+		(void)kill(-child, SIGHUP);
+		for (i = 0; i < 50; i++) {
+			pid_t result = waitpid(child, &status, WNOHANG);
+
+			if (result == child || (result < 0 && errno == ECHILD)) {
+				child = 0;
+				break;
+			}
+			(void)poll(NULL, 0, 10);
+		}
+		if (child > 0) {
+			(void)kill(-child, SIGKILL);
+			(void)waitpid(child, &status, 0);
+		}
+	}
 	return 0;
 }
 
@@ -1269,6 +1437,101 @@ static void draw_text(struct test_buffer *buffer, int x, int y,
 	}
 }
 
+static void draw_character_scaled(struct test_buffer *buffer, int x, int y,
+				  unsigned char character, int scale,
+				  uint16_t color)
+{
+	const uint8_t *glyph = font_vga_8x16.data +
+		character * SHELL_FONT_HEIGHT;
+	unsigned int glyph_y;
+
+	for (glyph_y = 0; glyph_y < SHELL_FONT_HEIGHT; glyph_y++) {
+		unsigned int glyph_x;
+
+		for (glyph_x = 0; glyph_x < SHELL_FONT_WIDTH; glyph_x++)
+			if (glyph[glyph_y] & BIT(7 - glyph_x))
+				fill_rect(buffer, x + glyph_x * scale,
+					  y + glyph_y * scale, scale, scale, color);
+	}
+}
+
+static void draw_text_scaled(struct test_buffer *buffer, int x, int y,
+			     const char *text, int scale, uint16_t color)
+{
+	while (*text) {
+		draw_character_scaled(buffer, x, y, (unsigned char)*text++, scale,
+				      color);
+		x += SHELL_FONT_WIDTH * scale;
+	}
+}
+
+static void draw_splash(struct test_buffer *buffer)
+{
+	fill_rect(buffer, 0, 0, TEST_WIDTH, TEST_HEIGHT, rgb565(COLOR_SKY));
+	fill_rect(buffer, 0, TEST_HEIGHT - 72, TEST_WIDTH, 72,
+		  rgb565(COLOR_GREEN));
+	fill_rect(buffer, 0, TEST_HEIGHT - 72, TEST_WIDTH, 4,
+		  rgb565(COLOR_TERMINAL));
+	draw_text_scaled(buffer, 239, 176, "WiiDesk", 3,
+			 rgb565(COLOR_TERMINAL));
+	draw_text_scaled(buffer, 235, 172, "WiiDesk", 3,
+			 rgb565(COLOR_TEXT));
+	draw_text(buffer, 260, 232, "Wii Linux NGX", rgb565(COLOR_TERMINAL));
+	draw_text(buffer, 280, 360, "Starting...", rgb565(COLOR_TEXT));
+}
+
+static void draw_login_field(struct test_buffer *buffer,
+			     const struct shell_login *login,
+			     enum login_field field, int y, const char *text)
+{
+	uint16_t border = login->field == field ? rgb565(COLOR_TEAL) :
+		rgb565(COLOR_BORDER);
+
+	fill_rect(buffer, LOGIN_FIELD_X, y, LOGIN_FIELD_WIDTH, 34,
+		  rgb565(COLOR_TERMINAL));
+	stroke_rect(buffer, LOGIN_FIELD_X, y, LOGIN_FIELD_WIDTH, 34, border);
+	draw_text(buffer, LOGIN_FIELD_X + 10, y + 9, text, rgb565(COLOR_TEXT));
+}
+
+static void draw_login(struct test_buffer *buffer,
+		       const struct shell_state *shell)
+{
+	char password[LOGIN_PASSWORD_SIZE];
+	char status[35];
+	size_t i;
+
+	fill_rect(buffer, 0, 0, TEST_WIDTH, TEST_HEIGHT, rgb565(COLOR_SKY));
+	fill_rect(buffer, 0, TEST_HEIGHT - 56, TEST_WIDTH, 56,
+		  rgb565(COLOR_GREEN));
+	fill_rect(buffer, LOGIN_PANEL_X + 6, LOGIN_PANEL_Y + 6,
+		  LOGIN_PANEL_WIDTH, LOGIN_PANEL_HEIGHT, rgb565(COLOR_TERMINAL));
+	fill_rect(buffer, LOGIN_PANEL_X, LOGIN_PANEL_Y, LOGIN_PANEL_WIDTH,
+		  LOGIN_PANEL_HEIGHT, rgb565(COLOR_PANEL));
+	stroke_rect(buffer, LOGIN_PANEL_X, LOGIN_PANEL_Y, LOGIN_PANEL_WIDTH,
+		    LOGIN_PANEL_HEIGHT, rgb565(COLOR_BORDER));
+	draw_text_scaled(buffer, 264, 100, "WiiDesk", 2, rgb565(COLOR_TEXT));
+	draw_text(buffer, LOGIN_FIELD_X, 156, "User", rgb565(COLOR_MUTED));
+	draw_login_field(buffer, &shell->login, LOGIN_FIELD_USERNAME,
+			 LOGIN_USERNAME_Y, shell->login.username);
+	draw_text(buffer, LOGIN_FIELD_X, 222, "Password", rgb565(COLOR_MUTED));
+	for (i = 0; i < shell->login.password_length &&
+	     i + 1 < sizeof(password); i++)
+		password[i] = '*';
+	password[i] = '\0';
+	draw_login_field(buffer, &shell->login, LOGIN_FIELD_PASSWORD,
+			 LOGIN_PASSWORD_Y, password);
+	fill_rect(buffer, LOGIN_BUTTON_X, LOGIN_BUTTON_Y, LOGIN_BUTTON_WIDTH,
+		  LOGIN_BUTTON_HEIGHT, rgb565(COLOR_TEAL));
+	stroke_rect(buffer, LOGIN_BUTTON_X, LOGIN_BUTTON_Y, LOGIN_BUTTON_WIDTH,
+		    LOGIN_BUTTON_HEIGHT, rgb565(COLOR_TERMINAL));
+	draw_text(buffer, LOGIN_BUTTON_X + 42, LOGIN_BUTTON_Y + 10, "Sign in",
+		  rgb565(COLOR_TERMINAL));
+	snprintf(status, sizeof(status), "%.34s", shell->login.status);
+	draw_text(buffer, LOGIN_FIELD_X, 360, status,
+		  rgb565(shell->login.auth_state == LOGIN_AUTH_RUNNING ?
+			 COLOR_GOLD : COLOR_MUTED));
+}
+
 static int menu_height(void)
 {
 	return SHELL_MENU_HEADER_HEIGHT +
@@ -1600,6 +1863,16 @@ static void draw_shell(struct test_buffer *buffer,
 	char clock_text[16] = "--:--";
 	unsigned int i;
 
+	if (shell->view == SHELL_VIEW_SPLASH) {
+		draw_splash(buffer);
+		return;
+	}
+	if (shell->view == SHELL_VIEW_LOGIN) {
+		draw_login(buffer, shell);
+		draw_pointer(buffer, shell->pointer_x, shell->pointer_y);
+		return;
+	}
+
 	fill_rect(buffer, 0, 0, TEST_WIDTH, TEST_HEIGHT, rgb565(COLOR_DESKTOP));
 	fill_rect(buffer, 0, 0, TEST_WIDTH, 32, rgb565(COLOR_PANEL));
 	fill_rect(buffer, 0, 31, TEST_WIDTH, 1, rgb565(COLOR_BORDER));
@@ -1730,6 +2003,23 @@ static void init_windows(struct shell_state *shell)
 	shell->dragging = -1;
 }
 
+static void end_desktop_session(struct shell_state *shell)
+{
+	stop_terminal(&shell->terminal);
+	memset(&shell->files, 0, sizeof(shell->files));
+	memset(&shell->system, 0, sizeof(shell->system));
+	init_windows(shell);
+	shell->menu_open = 0;
+	shell->selected = 0;
+	shell->view = SHELL_VIEW_LOGIN;
+	shell->login.field = shell->login.username_length ?
+		LOGIN_FIELD_PASSWORD : LOGIN_FIELD_USERNAME;
+	shell->login.auth_state = LOGIN_AUTH_IDLE;
+	wipe_secret(shell->login.password, sizeof(shell->login.password));
+	shell->login.password_length = 0;
+	snprintf(shell->login.status, sizeof(shell->login.status), "Signed out");
+}
+
 static void focus_top_window(struct shell_state *shell)
 {
 	int i;
@@ -1761,10 +2051,9 @@ static void raise_window(struct shell_state *shell, unsigned int app)
 static void open_window(struct shell_state *shell, unsigned int app)
 {
 	if (app == SHELL_APP_TERMINAL && shell->terminal.child_pid <= 0 &&
-	    shell->terminal.master_fd < 0 && start_terminal(&shell->terminal) < 0) {
-		shell->terminal.child_exited = 1;
-		terminal_feed_text(&shell->terminal, "[launch failed]\r\n");
-		perror("restart terminal");
+	    shell->terminal.master_fd < 0) {
+		end_desktop_session(shell);
+		return;
 	}
 	if (app == SHELL_APP_FILES && !shell->files.loaded)
 		(void)files_load(&shell->files, "/");
@@ -1948,8 +2237,7 @@ static int handle_key(struct shell_state *shell, unsigned int key)
 		if (!shell->menu_open)
 			return 0;
 		if (shell->selected == SHELL_MENU_LOGOUT) {
-			shell->menu_open = 0;
-			stop = 1;
+			end_desktop_session(shell);
 			return 1;
 		}
 		open_window(shell, shell->selected);
@@ -2046,6 +2334,113 @@ static unsigned char shifted_character(unsigned char character)
 	}
 }
 
+static void queue_login(struct shell_state *shell)
+{
+	if (shell->login.auth_state != LOGIN_AUTH_IDLE)
+		return;
+	if (!shell->login.username_length || shell->login.username[0] == '-' ||
+	    shell->login.username[0] == '.') {
+		snprintf(shell->login.status, sizeof(shell->login.status),
+			 "Enter a valid user name");
+		shell->login.field = LOGIN_FIELD_USERNAME;
+		return;
+	}
+	snprintf(shell->login.status, sizeof(shell->login.status), "Signing in...");
+	shell->login.auth_state = LOGIN_AUTH_QUEUED;
+}
+
+static int login_username_character(unsigned char character)
+{
+	return (character >= 'a' && character <= 'z') ||
+		(character >= 'A' && character <= 'Z') ||
+		(character >= '0' && character <= '9') ||
+		character == '_' || character == '-' || character == '.';
+}
+
+static int handle_login_key(struct shell_state *shell, unsigned int key)
+{
+	struct shell_login *login = &shell->login;
+	unsigned char character;
+	char *field;
+	size_t *length;
+	size_t capacity;
+
+	if (shell->view == SHELL_VIEW_SPLASH)
+		return 0;
+	if (login->auth_state != LOGIN_AUTH_IDLE)
+		return 0;
+	if (key == KEY_TAB || key == KEY_UP || key == KEY_DOWN) {
+		login->field = login->field == LOGIN_FIELD_USERNAME ?
+			LOGIN_FIELD_PASSWORD : LOGIN_FIELD_USERNAME;
+		return 1;
+	}
+	if (key == KEY_ENTER || key == KEY_KPENTER) {
+		if (login->field == LOGIN_FIELD_USERNAME) {
+			login->field = LOGIN_FIELD_PASSWORD;
+			return 1;
+		}
+		queue_login(shell);
+		return 1;
+	}
+	if (login->field == LOGIN_FIELD_USERNAME) {
+		field = login->username;
+		length = &login->username_length;
+		capacity = sizeof(login->username);
+	} else {
+		field = login->password;
+		length = &login->password_length;
+		capacity = sizeof(login->password);
+	}
+	if (key == KEY_BACKSPACE) {
+		if (*length) {
+			field[--*length] = '\0';
+			login->status[0] = '\0';
+			return 1;
+		}
+		return 0;
+	}
+	character = key_character(key);
+	if (!character)
+		return 0;
+	if (character >= 'a' && character <= 'z') {
+		if (shell->shift_down ^ shell->caps_lock)
+			character -= 'a' - 'A';
+	} else if (shell->shift_down) {
+		character = shifted_character(character);
+	}
+	if (login->field == LOGIN_FIELD_USERNAME &&
+	    !login_username_character(character))
+		return 0;
+	if (*length + 1 >= capacity)
+		return 0;
+	field[(*length)++] = character;
+	field[*length] = '\0';
+	login->status[0] = '\0';
+	return 1;
+}
+
+static int start_desktop_session(struct shell_state *shell)
+{
+	int authenticated = authenticate_login(shell->login.username,
+					       shell->login.password,
+					       &shell->terminal);
+
+	shell->login.password_length = 0;
+	shell->login.auth_state = LOGIN_AUTH_IDLE;
+	if (authenticated <= 0) {
+		snprintf(shell->login.status, sizeof(shell->login.status), "%s",
+			 authenticated < 0 ? "Login service unavailable" :
+			 "Login failed");
+		shell->login.field = LOGIN_FIELD_PASSWORD;
+		return 0;
+	}
+	init_windows(shell);
+	refresh_system(&shell->system);
+	shell->login.status[0] = '\0';
+	shell->view = SHELL_VIEW_DESKTOP;
+	return 1;
+}
+
 static int terminal_send_key(struct shell_state *shell, unsigned int key)
 {
 	static const struct {
@@ -2138,6 +2533,8 @@ static int handle_key_event(struct shell_state *shell, unsigned int key,
 	}
 	if (value != 1 && value != 2)
 		return 0;
+	if (shell->view != SHELL_VIEW_DESKTOP)
+		return handle_login_key(shell, key);
 	if (shell->menu_open && value == 1 &&
 	    (key == KEY_UP || key == KEY_DOWN || key == KEY_LEFT ||
 	     key == KEY_RIGHT || key == KEY_TAB || key == KEY_ENTER ||
@@ -2178,6 +2575,8 @@ static int update_pointer(struct shell_state *shell, int delta_x, int delta_y)
 		shell->pointer_y = 0;
 	if (shell->pointer_y >= TEST_HEIGHT)
 		shell->pointer_y = TEST_HEIGHT - 1;
+	if (shell->view != SHELL_VIEW_DESKTOP)
+		return 1;
 
 	launcher = launcher_at(shell, shell->pointer_x, shell->pointer_y);
 	if (launcher >= 0)
@@ -2231,6 +2630,26 @@ static int handle_pointer_button(struct shell_state *shell, int pressed)
 		shell->dragging = -1;
 		return 1;
 	}
+	if (shell->view == SHELL_VIEW_SPLASH)
+		return 1;
+	if (shell->view == SHELL_VIEW_LOGIN) {
+		if (shell->pointer_x >= LOGIN_FIELD_X &&
+		    shell->pointer_x < LOGIN_FIELD_X + LOGIN_FIELD_WIDTH &&
+		    shell->pointer_y >= LOGIN_USERNAME_Y &&
+		    shell->pointer_y < LOGIN_USERNAME_Y + 34)
+			shell->login.field = LOGIN_FIELD_USERNAME;
+		else if (shell->pointer_x >= LOGIN_FIELD_X &&
+			 shell->pointer_x < LOGIN_FIELD_X + LOGIN_FIELD_WIDTH &&
+			 shell->pointer_y >= LOGIN_PASSWORD_Y &&
+			 shell->pointer_y < LOGIN_PASSWORD_Y + 34)
+			shell->login.field = LOGIN_FIELD_PASSWORD;
+		else if (shell->pointer_x >= LOGIN_BUTTON_X &&
+			 shell->pointer_x < LOGIN_BUTTON_X + LOGIN_BUTTON_WIDTH &&
+			 shell->pointer_y >= LOGIN_BUTTON_Y &&
+			 shell->pointer_y < LOGIN_BUTTON_Y + LOGIN_BUTTON_HEIGHT)
+			queue_login(shell);
+		return 1;
+	}
 	if (start_button_at(shell->pointer_x, shell->pointer_y)) {
 		shell->menu_open = !shell->menu_open;
 		return 1;
@@ -2238,12 +2657,10 @@ static int handle_pointer_button(struct shell_state *shell, int pressed)
 	launcher = launcher_at(shell, shell->pointer_x, shell->pointer_y);
 	if (launcher >= 0) {
 		shell->selected = launcher;
-		if (launcher == SHELL_MENU_LOGOUT) {
-			shell->menu_open = 0;
-			stop = 1;
-		} else {
+		if (launcher == SHELL_MENU_LOGOUT)
+			end_desktop_session(shell);
+		else
 			open_window(shell, launcher);
-		}
 		return 1;
 	}
 	if (shell->menu_open &&
@@ -2388,7 +2805,11 @@ static int poll_inputs(struct shell_state *shell)
 		if (bytes < 0 && errno != EAGAIN && errno != EWOULDBLOCK)
 			return -1;
 		changed |= update_pointer(shell, delta_x, delta_y);
-		if (wheel) {
+		if (wheel && shell->view == SHELL_VIEW_LOGIN) {
+			unsigned int key = wheel > 0 ? KEY_UP : KEY_DOWN;
+
+			changed |= handle_login_key(shell, key);
+		} else if (wheel && shell->view == SHELL_VIEW_DESKTOP) {
 			unsigned int key = wheel > 0 ? KEY_UP : KEY_DOWN;
 
 			if (shell->focused == SHELL_APP_FILES)
@@ -2438,6 +2859,11 @@ int main(int argc, char **argv)
 			.master_fd = -1,
 		},
 		.serial = 1,
+		.view = SHELL_VIEW_SPLASH,
+		.login = {
+			.field = LOGIN_FIELD_USERNAME,
+			.auth_state = LOGIN_AUTH_IDLE,
+		},
 		.cursor_visible = 1,
 		.pointer_x = TEST_WIDTH / 2,
 		.pointer_y = TEST_HEIGHT / 2,
@@ -2468,11 +2894,7 @@ int main(int argc, char **argv)
 	for (i = 0; i < ARRAY_SIZE(shell.inputs); i++)
 		shell.inputs[i].fd = -1;
 	init_windows(&shell);
-	if (start_terminal(&shell.terminal) < 0) {
-		perror("start terminal");
-		goto out;
-	}
-	refresh_system(&shell.system);
+	shell.login.splash_until_ms = shell_monotonic_ms() + LOGIN_SPLASH_MS;
 
 	drm_fd = open(card, O_RDWR | O_CLOEXEC);
 	if (drm_fd < 0) {
@@ -2534,12 +2956,13 @@ int main(int argc, char **argv)
 	open_inputs(&shell);
 	printf("wii-kolibri-shell: active %ux%u rgb565 with %u input device(s)\n",
 	       mode.hdisplay, mode.vdisplay, shell.input_count);
-	printf("wii-kolibri-shell: terminal owns /bin/sh; menu Logout exits\n");
+	printf("wii-kolibri-shell: greeter ready; /bin/login provides PAM authentication\n");
 	fflush(stdout);
 	signal(SIGINT, handle_signal);
 	signal(SIGTERM, handle_signal);
 
 	while (!stop) {
+		uint64_t now;
 		uint64_t second;
 		int changed = poll_inputs(&shell);
 
@@ -2548,11 +2971,27 @@ int main(int argc, char **argv)
 			goto out;
 		}
 		changed |= process_vnc(&shell);
-		second = shell_monotonic_ms() / 1000;
+		now = shell_monotonic_ms();
+		if (shell.view == SHELL_VIEW_SPLASH &&
+		    now >= shell.login.splash_until_ms) {
+			shell.view = SHELL_VIEW_LOGIN;
+			changed = 1;
+		}
+		if (shell.login.auth_state == LOGIN_AUTH_QUEUED) {
+			shell.login.auth_state = LOGIN_AUTH_RUNNING;
+			if (present_shell(drm_fd, crtc.crtc_id, &shell) < 0) {
+				perror("page flip");
+				goto out;
+			}
+			(void)start_desktop_session(&shell);
+			changed = 1;
+		}
+		second = now / 1000;
 		if (second != last_second) {
 			last_second = second;
 			shell.cursor_visible = !shell.cursor_visible;
-			if (shell.windows[SHELL_APP_SYSTEM].visible)
+			if (shell.view == SHELL_VIEW_DESKTOP &&
+			    shell.windows[SHELL_APP_SYSTEM].visible)
 				refresh_system(&shell.system);
 			changed = 1;
 		}
