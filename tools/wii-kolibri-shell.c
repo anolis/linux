@@ -1134,6 +1134,16 @@ static unsigned int vnc_keysym_key(rfbKeySym keysym)
 		return KEY_F12;
 
 	switch (keysym) {
+	case XK_exclam: return KEY_1;
+	case XK_at: return KEY_2;
+	case XK_numbersign: return KEY_3;
+	case XK_dollar: return KEY_4;
+	case XK_percent: return KEY_5;
+	case XK_asciicircum: return KEY_6;
+	case XK_ampersand: return KEY_7;
+	case XK_asterisk: return KEY_8;
+	case XK_parenleft: return KEY_9;
+	case XK_parenright: return KEY_0;
 	case XK_BackSpace: return KEY_BACKSPACE;
 	case XK_Tab: return KEY_TAB;
 	case XK_Return: return KEY_ENTER;
@@ -1155,32 +1165,64 @@ static unsigned int vnc_keysym_key(rfbKeySym keysym)
 	case XK_Caps_Lock: return KEY_CAPSLOCK;
 	case XK_space: return KEY_SPACE;
 	case XK_minus: return KEY_MINUS;
+	case XK_underscore: return KEY_MINUS;
 	case XK_equal: return KEY_EQUAL;
+	case XK_plus: return KEY_EQUAL;
 	case XK_bracketleft: return KEY_LEFTBRACE;
+	case XK_braceleft: return KEY_LEFTBRACE;
 	case XK_bracketright: return KEY_RIGHTBRACE;
+	case XK_braceright: return KEY_RIGHTBRACE;
 	case XK_backslash: return KEY_BACKSLASH;
+	case XK_bar: return KEY_BACKSLASH;
 	case XK_semicolon: return KEY_SEMICOLON;
+	case XK_colon: return KEY_SEMICOLON;
 	case XK_apostrophe: return KEY_APOSTROPHE;
+	case XK_quotedbl: return KEY_APOSTROPHE;
 	case XK_grave: return KEY_GRAVE;
+	case XK_asciitilde: return KEY_GRAVE;
 	case XK_comma: return KEY_COMMA;
+	case XK_less: return KEY_COMMA;
 	case XK_period: return KEY_DOT;
+	case XK_greater: return KEY_DOT;
 	case XK_slash: return KEY_SLASH;
+	case XK_question: return KEY_SLASH;
 	default: return KEY_RESERVED;
 	}
+}
+
+static int vnc_keysym_needs_shift(rfbKeySym keysym)
+{
+	return (keysym >= XK_A && keysym <= XK_Z) || keysym == XK_exclam ||
+		keysym == XK_at || keysym == XK_numbersign || keysym == XK_dollar ||
+		keysym == XK_percent || keysym == XK_asciicircum ||
+		keysym == XK_ampersand || keysym == XK_asterisk ||
+		keysym == XK_parenleft || keysym == XK_parenright ||
+		keysym == XK_underscore || keysym == XK_plus ||
+		keysym == XK_braceleft || keysym == XK_braceright ||
+		keysym == XK_bar || keysym == XK_colon ||
+		keysym == XK_quotedbl || keysym == XK_asciitilde ||
+		keysym == XK_less || keysym == XK_greater ||
+		keysym == XK_question;
 }
 
 static void vnc_key_event(rfbBool down, rfbKeySym key, rfbClientPtr client)
 {
 	struct shell_state *shell = client->screen->screenData;
 	unsigned int input_key = vnc_keysym_key(key);
+	int force_shift = down && vnc_keysym_needs_shift(key) &&
+		!shell->shift_down;
 
 	if (input_key == KEY_RESERVED)
 		return;
+	if (force_shift)
+		(void)handle_key_event(shell, KEY_LEFTSHIFT, 1);
 	if (input_key == KEY_LEFTSHIFT || input_key == KEY_RIGHTSHIFT)
 		shell->vnc.shift_down = down;
 	if (input_key == KEY_LEFTCTRL || input_key == KEY_RIGHTCTRL)
 		shell->vnc.control_down = down;
 	shell->vnc.changed |= handle_key_event(shell, input_key, down ? 1 : 0);
+	if (force_shift)
+		(void)handle_key_event(shell, KEY_LEFTSHIFT, 0);
 }
 
 static void vnc_pointer_event(int buttons, int x, int y,
