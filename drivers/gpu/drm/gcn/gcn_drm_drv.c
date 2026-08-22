@@ -101,6 +101,18 @@
 #define VI_NTSC_DI0		0x00010001
 #define VI_NTSC_DI1		0x00f101ae
 
+/* libogc TVNtsc480Prog with the standard centered 640x480 viewport. */
+#define VI_NTSC_480P_VTR	0x1e0c
+#define VI_NTSC_480P_HTR0	0x476901ad
+#define VI_NTSC_480P_HTR1	0x02ea5140
+#define VI_NTSC_480P_VTO	0x00060030
+#define VI_NTSC_480P_VTE	0x00060030
+#define VI_NTSC_480P_BBOI	0x81d881d8
+#define VI_NTSC_480P_BBEI	0x81d881d8
+#define VI_NTSC_480P_PCR	0x2828
+#define VI_NTSC_480P_DI0	0x00000000
+#define VI_NTSC_480P_DI1	0x020e0001
+
 #define RGB2YUV_SHIFT		16
 #define RGB2YUV_LUMA_565		16
 #define RGB2YUV_LUMA_888		32
@@ -141,6 +153,11 @@ static bool program_mode = true;
 module_param(program_mode, bool, 0444);
 MODULE_PARM_DESC(program_mode,
 		 "program fixed 640x480 NTSC interlaced VI timing (default: true)");
+
+static bool progressive;
+module_param(progressive, bool, 0444);
+MODULE_PARM_DESC(progressive,
+		 "program 640x480 NTSC progressive timing (requires program_mode=1)");
 
 static const u32 gcn_drm_vi_filter[] = {
 	0x1ae771f0, 0x0db4a574, 0x00c1188e, 0xc4c0cbe2,
@@ -817,24 +834,36 @@ static void gcn_drm_quiesce_irqs(struct gcn_drm *gcn)
 	}
 }
 
-static void gcn_drm_program_ntsc_480i(struct gcn_drm *gcn)
+static void gcn_drm_program_ntsc(struct gcn_drm *gcn, bool use_progressive)
 {
+	u16 dcr = use_progressive ? VI_DCR_NIN : 0;
+	u16 vtr = use_progressive ? VI_NTSC_480P_VTR : VI_NTSC_VTR;
+	u32 htr0 = use_progressive ? VI_NTSC_480P_HTR0 : VI_NTSC_HTR0;
+	u32 htr1 = use_progressive ? VI_NTSC_480P_HTR1 : VI_NTSC_HTR1;
+	u32 vto = use_progressive ? VI_NTSC_480P_VTO : VI_NTSC_VTO;
+	u32 vte = use_progressive ? VI_NTSC_480P_VTE : VI_NTSC_VTE;
+	u32 bboi = use_progressive ? VI_NTSC_480P_BBOI : VI_NTSC_BBOI;
+	u32 bbei = use_progressive ? VI_NTSC_480P_BBEI : VI_NTSC_BBEI;
+	u16 pcr = use_progressive ? VI_NTSC_480P_PCR : VI_NTSC_PCR;
+	u32 di0 = use_progressive ? VI_NTSC_480P_DI0 : VI_NTSC_DI0;
+	u32 di1 = use_progressive ? VI_NTSC_480P_DI1 : VI_NTSC_DI1;
+
 	gcn_drm_quiesce_irqs(gcn);
 	gcn_drm_vi_write16(gcn, VI_DCR, VI_DCR_RESET);
 	udelay(2);
-	gcn_drm_vi_write16(gcn, VI_DCR, 0);
+	gcn_drm_vi_write16(gcn, VI_DCR, dcr);
 	drm_info(&gcn->drm, "pulsed VI DCR reset\n");
 
-	gcn_drm_vi_write16(gcn, VI_VTR, VI_NTSC_VTR);
-	gcn_drm_vi_write32(gcn, VI_HTR0, VI_NTSC_HTR0);
-	gcn_drm_vi_write32(gcn, VI_HTR1, VI_NTSC_HTR1);
-	gcn_drm_vi_write32(gcn, VI_VTO, VI_NTSC_VTO);
-	gcn_drm_vi_write32(gcn, VI_VTE, VI_NTSC_VTE);
-	gcn_drm_vi_write32(gcn, VI_BBOI, VI_NTSC_BBOI);
-	gcn_drm_vi_write32(gcn, VI_BBEI, VI_NTSC_BBEI);
+	gcn_drm_vi_write16(gcn, VI_VTR, vtr);
+	gcn_drm_vi_write32(gcn, VI_HTR0, htr0);
+	gcn_drm_vi_write32(gcn, VI_HTR1, htr1);
+	gcn_drm_vi_write32(gcn, VI_VTO, vto);
+	gcn_drm_vi_write32(gcn, VI_VTE, vte);
+	gcn_drm_vi_write32(gcn, VI_BBOI, bboi);
+	gcn_drm_vi_write32(gcn, VI_BBEI, bbei);
 	gcn_drm_vi_write32(gcn, VI_TFBR, 0);
 	gcn_drm_vi_write32(gcn, VI_BFBR, 0);
-	gcn_drm_vi_write16(gcn, VI_PCR, VI_NTSC_PCR);
+	gcn_drm_vi_write16(gcn, VI_PCR, pcr);
 	gcn_drm_vi_write16(gcn, VI_HSR, VI_NTSC_HSR);
 	gcn_drm_vi_write32(gcn, VI_FCT0, gcn_drm_vi_filter[0]);
 	gcn_drm_vi_write32(gcn, VI_FCT1, gcn_drm_vi_filter[1]);
@@ -844,7 +873,7 @@ static void gcn_drm_program_ntsc_480i(struct gcn_drm *gcn)
 	gcn_drm_vi_write32(gcn, VI_FCT5, gcn_drm_vi_filter[5]);
 	gcn_drm_vi_write32(gcn, VI_FCT6, gcn_drm_vi_filter[6]);
 	gcn_drm_vi_write32(gcn, VI_AA, 0x00ff0000);
-	gcn_drm_vi_write16(gcn, VI_CLK, 0);
+	gcn_drm_vi_write16(gcn, VI_CLK, use_progressive ? 1 : 0);
 	gcn_drm_vi_write16(gcn, VI_HSW, GCN_DRM_WIDTH);
 	gcn_drm_vi_write16(gcn, VI_HBE, 0);
 	gcn_drm_vi_write16(gcn, VI_HBS, 0);
@@ -858,19 +887,21 @@ static void gcn_drm_program_ntsc_480i(struct gcn_drm *gcn)
 			   (unsigned long)gcn->xfb +
 			   2 * GCN_DRM_XFB_PAGE_SIZE);
 	gcn_drm_set_scanout(gcn, 0);
-	gcn_drm_vi_write32(gcn, VI_DI0, VI_NTSC_DI0);
-	gcn_drm_vi_write32(gcn, VI_DI1, VI_NTSC_DI1);
+	gcn_drm_vi_write32(gcn, VI_DI0, di0);
+	gcn_drm_vi_write32(gcn, VI_DI1, di1);
 	gcn_drm_vi_write32(gcn, VI_DI2, 0);
 	gcn_drm_vi_write32(gcn, VI_DI3, 0);
-	gcn_drm_vi_write16(gcn, VI_DCR, VI_DCR_ENABLE);
+	gcn_drm_vi_write16(gcn, VI_DCR, dcr | VI_DCR_ENABLE);
 
 	drm_info(&gcn->drm,
-		 "programmed NTSC 480i: DCR=%04x VTR=%04x HTR0=%08x HTR1=%08x PCR=%04x\n",
+		 "programmed NTSC %s: DCR=%04x VTR=%04x HTR0=%08x HTR1=%08x PCR=%04x CLK=%04x\n",
+		 use_progressive ? "480p" : "480i",
 		 in_be16(gcn->vi_base + VI_DCR),
 		 in_be16(gcn->vi_base + VI_VTR),
 		 in_be32(gcn->vi_base + VI_HTR0),
 		 in_be32(gcn->vi_base + VI_HTR1),
-		 in_be16(gcn->vi_base + VI_PCR));
+		 in_be16(gcn->vi_base + VI_PCR),
+		 in_be16(gcn->vi_base + VI_CLK));
 }
 
 static void gcn_drm_arm_event(struct gcn_drm *gcn)
@@ -1145,13 +1176,16 @@ static int gcn_drm_probe(struct platform_device *pdev)
 	gcn->xfb_size = xfb_size;
 	spin_lock_init(&gcn->scanout_lock);
 	dev_info(dev, "probe: VI and XFB mapped\n");
+	if (progressive && !program_mode)
+		return dev_err_probe(dev, -EINVAL,
+				     "progressive mode requires program_mode=1\n");
 
 	ret = gcn_drm_acquire_ave(gcn, dev);
 	if (ret)
 		return ret;
 
 	if (program_mode)
-		gcn_drm_program_ntsc_480i(gcn);
+		gcn_drm_program_ntsc(gcn, progressive);
 
 	if (!(in_be16(gcn->vi_base + VI_DCR) & VI_DCR_ENABLE))
 		return dev_err_probe(dev, -ENODEV,
@@ -1223,7 +1257,8 @@ static int gcn_drm_probe(struct platform_device *pdev)
 
 	drm_info(&gcn->drm,
 		 "bound fixed 640x480 %s mode, XFB %08x+%08x\n",
-		 program_mode ? "programmed NTSC 480i" : "handoff",
+		 program_mode ? (progressive ? "programmed NTSC 480p" :
+					     "programmed NTSC 480i") : "handoff",
 		 xfb_phys, xfb_size);
 	return 0;
 }

@@ -15,6 +15,7 @@ Options:
   --no-build       reuse the current zImage and DRM module artifacts
   --reuse-remote   verify and reuse checksum-matched modules in /tmp
   --program-mode   have gcn-drm program fixed NTSC 480i VI timing
+  --progressive    have gcn-drm program fixed NTSC 480p VI timing
   --ave-swap       set AVE chroma exchange after DRM bind; clear on restore
   --trace-output FILE
                    capture ordered VI and AVE transactions into local FILE
@@ -33,6 +34,7 @@ reuse_remote=0
 restore_only=0
 allow_dirty=0
 program_mode=0
+progressive=0
 ave_swap=0
 trace_output=
 
@@ -50,6 +52,10 @@ while (($#)); do
 		;;
 	--program-mode)
 		program_mode=1
+		;;
+	--progressive)
+		program_mode=1
+		progressive=1
 		;;
 	--ave-swap)
 		ave_swap=1
@@ -80,6 +86,13 @@ done
 if (( ave_swap && ! program_mode && ! restore_only )); then
 	echo "--ave-swap currently requires --program-mode" >&2
 	exit 2
+fi
+
+display_mode=handoff
+if (( progressive )); then
+	display_mode='NTSC 480p'
+elif (( program_mode )); then
+	display_mode='NTSC 480i'
 fi
 
 repo=$(git rev-parse --show-toplevel)
@@ -366,7 +379,7 @@ remote_exec "
 if [[ -n $trace_output ]]; then
 	remote_status "preloading gcn-drm transaction tracepoint $commit"
 	if (( program_mode )); then
-		remote_exec "insmod /tmp/gcn-drm.ko program_mode=1"
+		remote_exec "insmod /tmp/gcn-drm.ko program_mode=1 progressive=$progressive"
 	else
 		remote_exec "insmod /tmp/gcn-drm.ko program_mode=0"
 	fi
@@ -390,11 +403,11 @@ remote_status "unbinding legacy gcnfb"
 remote_exec "printf '%s' '$device' > $legacy_driver/unbind"
 mark_transaction_trace legacy-unbound
 
-remote_status "loading gcn-drm $commit"
+remote_status "loading gcn-drm $commit ($display_mode)"
 if [[ -n $trace_output ]]; then
 	remote_exec "printf '%s' '$device' > $drm_driver/bind"
 elif (( program_mode )); then
-	remote_exec "insmod /tmp/gcn-drm.ko program_mode=1"
+	remote_exec "insmod /tmp/gcn-drm.ko program_mode=1 progressive=$progressive"
 else
 	remote_exec "insmod /tmp/gcn-drm.ko program_mode=0"
 fi
@@ -420,7 +433,7 @@ if (( ave_swap )); then
 	mark_transaction_trace ave-set-complete
 fi
 
-remote_exec "printf '\\n=== GCN DRM/KMS ACTIVE: $commit ===\\n' > /dev/tty0"
+remote_exec "printf '\\n=== GCN DRM/KMS ACTIVE: $commit ($display_mode) ===\\n' > /dev/tty0"
 mark_transaction_trace cycle-active-native-fbcon
 
 if [[ -n $trace_output ]]; then
