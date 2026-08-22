@@ -11772,7 +11772,7 @@ checks for the next physical-input session.
 ### Stage the WiiDesk authenticated greeter
 
 - Test branch: `feature/wii-kolibri-shell`
-- Candidate commit: `d7a67e817`
+- Candidate commit: `82c32fad3`
 
 Add an immediate full-screen WiiDesk splash followed by a username/password
 greeter. The greeter supports shared USB and VNC keyboard input, pointer field
@@ -11808,7 +11808,7 @@ The checksum-pinned artifacts are:
 - dependency-free static PowerPC shell SHA-256:
   `00734c5191d12514a39aa34645cfc91bca32ff85cc907008016e82a46db90e8d`
 - VNC-enabled static PowerPC shell SHA-256:
-  `76911c01f0f9cc85bf88e81d64c4c38bac630daced58f1418e98170f5b51f614`
+  `8d1cf90dddf176cfc1a81ac02acccb9d766b1ad6e097903150842e92b475f58c`
 
 Host validation passed dependency-free and VNC-enabled static PowerPC builds
 with warnings treated as errors and `git diff --check`. Strict checkpatch has no
@@ -11838,3 +11838,10 @@ listed in `/etc/securetty`. The replacement candidate uses the verified setuid
 `/bin/su` plus `/etc/pam.d/su`, whose common authentication policy has no
 console-only restriction. Do not interpret that first rejection as a changed
 root password.
+
+Before redeployment, review found that the VNC keysym mapper silently rejected
+shifted punctuation and could also depend on a separate Shift event for capital
+letters. Candidate `82c32fad3` maps every shifted US-layout symbol back to its
+Linux input base key and synthesizes Shift when the VNC client omits a modifier
+event. This does not affect the dependency-free artifact. It is required before
+password acceptance can be evaluated through VNC.
