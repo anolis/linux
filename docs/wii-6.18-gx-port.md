@@ -11768,3 +11768,61 @@ through `gcn-vidrmfb`, and uptime remained continuous. The kernel log recorded
 GX/DRM timeout, FIFO stall, fallback, oops, panic, or machine check. The local
 F8/arrows/Enter logout path and explicit F12 non-exit control remain regression
 checks for the next physical-input session.
+
+### Stage the WiiDesk authenticated greeter
+
+- Test branch: `feature/wii-kolibri-shell`
+- Candidate commit: `2631b3703`
+
+Add an immediate full-screen WiiDesk splash followed by a username/password
+greeter. The greeter supports shared USB and VNC keyboard input, pointer field
+selection, masked password display, focused-field feedback, and visible pending
+or failure status. Password bytes are never printed or placed on a command line
+and are explicitly wiped after every attempt.
+
+Authentication runs the target rootfs `/bin/login` on a private PTY. This keeps
+the installed PAM login policy authoritative without linking this static
+development client against a newer cross-toolchain PAM or NSS implementation.
+On success, WiiDesk retains that same authenticated login PTY as its Terminal
+session. It does not discard the verified identity and launch an unrelated root
+shell. Desktop Terminal startup and system telemetry are delayed until login
+succeeds. Exiting the authenticated shell prevents an unauthenticated terminal
+restart, while menu Logout closes the login session, clears session state and
+password storage, and returns to the greeter without terminating WiiDesk or its
+loopback-only VNC server.
+
+This is a functional authentication gate, not yet the final display-manager
+privilege boundary. The Wii rootfs currently has only root as an interactive
+account, and WiiDesk itself must remain privileged to open the mode-0600 DRM,
+input, and GX devices. Before adding ordinary users, install explicit device
+permissions and split the privileged display owner from a UID/GID-dropped user
+session. Otherwise parent-owned applications such as Files would still execute
+with WiiDesk's privileges even though Terminal has the authenticated account's
+identity.
+
+The checksum-pinned artifacts are:
+
+- dependency-free static PowerPC shell SHA-256:
+  `7493bcd1c2521a3218848fad8fb1585fafaeaec455210f9ba1dad63472a08910`
+- VNC-enabled static PowerPC shell SHA-256:
+  `a18d1dbbb51e3ebd945d2610f7c8231eb6c488e029a7a4491fa7d4778f297ba1`
+
+Host validation passed dependency-free and VNC-enabled static PowerPC builds
+with warnings treated as errors and `git diff --check`. Strict checkpatch has no
+errors; its remaining notices are identifiers owned by LibVNCServer.
+
+Hardware acceptance begins through the SSH-forwarded VNC viewer. Confirm the
+1.5-second splash transitions to the greeter and that no Terminal or root shell
+exists before authentication. Enter an invalid password and require a visible
+`Login failed` result with no desktop transition, retained username, cleared
+password field, no password in process arguments or logs, and no leftover login
+child or PTY. Then enter valid rootfs credentials and require the desktop plus
+the authenticated shell prompt to appear.
+
+Exercise Terminal input, Files, System, window controls, task buttons, and the
+start menu. Select Log out and require return to the greeter while the VNC
+connection remains open, the login shell is reaped, and the password remains
+cleared. Repeat one valid login to prove session recreation. Finally send
+SIGTERM while leaving the deployment wrapper active and require exit zero,
+child reap, no PTY, fbcon restoration, clean GX unload, continuous uptime, and
+no GX/DRM timeout, FIFO stall, fallback, oops, panic, or machine check.
