@@ -11563,3 +11563,25 @@ in TigerVNC without a material idle CPU increase. Exercise continuous pointer
 motion, window dragging, terminal typing, Files scrolling, and System telemetry.
 Require correct dirty updates with no stale pixels, then repeat disconnect and
 full teardown controls from the preceding candidate.
+
+Hardware result: accepted. The checksum-verified candidate was exercised through
+TigerVNC over the loopback-only SSH tunnel. The user reported that pointer and
+keyboard behavior became "much much better" and usable, with no remaining input
+complaints. Continuous motion, clicks, keyboard events, and ordinary desktop
+updates remained visually correct.
+
+The disconnect statistics confirm that motion was coalesced rather than lost.
+During the 39-second acceptance session, the Wii received 244 pointer events and
+10 key events but produced only 65 framebuffer updates. Hextile transmitted
+44,619 total bytes for 17,410,943 raw-equivalent bytes. The preceding
+dirty-rectangle-only session received fewer pointer events (43) yet generated
+735 framebuffer updates and transmitted 569,009 bytes. The accepted candidate
+therefore handled substantially more input while sending about one tenth as many
+bytes and avoiding an update for every intermediate mouse position.
+
+SIGTERM ended WiiDesk with status zero, reaped its interactive shell child, and
+left no allocated PTY. `gcn-vidrmfb` resumed fbcon ownership. GX unloaded cleanly,
+the AVE chroma exchange returned to CPU scanout, and accelerator unregistration
+completed while Wii uptime remained continuous. The final kernel audit found no
+GX/DRM timeout, FIFO stall, fallback, oops, panic, or machine check. This accepts
+interactive SSH-tunneled VNC as WiiDesk's remote display and input path.
