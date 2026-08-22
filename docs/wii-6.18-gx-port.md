@@ -11537,19 +11537,22 @@ zero, fbcon restoration, clean GX unload, continuous uptime, and no GX/DRM
 timeout, FIFO stall, fallback, oops, panic, or machine check. Direct LAN access
 to port 5900 must remain refused.
 
-### Stage 10 ms WiiDesk input servicing
+### Stage 10 ms WiiDesk input servicing with pointer coalescing
 
 - Test branch: `feature/wii-kolibri-shell`
-- Candidate commit: `92a42f256`
+- Candidate commit: `3487e6e46`
 
 Retain dirty-rectangle VNC export and reduce the shell's blocking poll timeout
 from 100 ms to 10 ms. This services local input, PTY output, and the non-threaded
 VNC socket up to 100 times per second rather than 10 while leaving rendering
-event-driven.
+event-driven. Set LibVNCServer's pointer deferral to 16 ms so queued motion keeps
+only the newest absolute coordinates while button transitions remain immediate.
+This prevents intermediate TigerVNC motion packets from each causing a redraw,
+KMS flip, and VNC update.
 
 The checksum-pinned artifacts remain unchanged except for the static PowerPC
 VNC shell, SHA-256
-`dc03f40c34423410f857b8c3772d78a8eb9bc24f77822798ef299dd508a38362`.
+`67de991bab5e50a994b0469fcae304bdaf39dd5eaec1453cc2cfe30d81235523`.
 
 Host validation passed warning-clean dependency-free and VNC-enabled static
 PowerPC builds, `git diff --check`, and strict checkpatch with zero findings
