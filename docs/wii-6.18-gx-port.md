@@ -11707,3 +11707,50 @@ the user session, drop supplementary groups and UID/GID, and execute WiiDesk.
 Logout must destroy the session and return to the greeter; failed authentication
 must not start or retain a privileged desktop. Keep an emergency text-console
 path available throughout development.
+
+Start-menu hardware result: accepted through authenticated VNC. The first VNC
+launch correctly failed before modesetting because this boot had left `lo` down
+and no process could bind `127.0.0.1`. Restoring the loopback interface and
+`127.0.0.1/8` allowed the unchanged checksum-pinned binary to start while
+remaining inaccessible from the LAN. Boot networking must configure loopback;
+do not weaken WiiDesk to a non-loopback VNC bind.
+
+TigerVNC connected through the SSH forward and negotiated Hextile. WiiDesk
+retained its fixed 640 by 480 surface when the viewer requested 1680 by 967. The
+user exercised the bottom-left menu, task panel, and window controls remotely
+and reported that the result worked well. Closing TigerVNC disconnected the VNC
+client without ending the WiiDesk session or leaving remote input state latched.
+
+A direct SIGTERM then ended WiiDesk while the deployment wrapper remained
+active. The wrapper exited zero, the Terminal child was reaped, `/dev/pts`
+contained only `ptmx`, GX unloaded, `gcn-vidrmfb` resumed the console, uptime
+remained continuous, and the final audit found no GX/DRM timeout, FIFO stall,
+fallback, oops, panic, or machine check. PID 390 remains an unrelated zombie
+from the earlier deliberately interrupted wrapper and is not attributable to
+this accepted run.
+
+### Stage WiiDesk menu logout
+
+- Test branch: `feature/wii-kolibri-shell`
+- Candidate commit: `3160f5c87`
+
+Add `Log out` as the fourth start-menu item. Mouse and keyboard activation enter
+the existing orderly shell shutdown path, allowing Terminal reap, DRM release,
+fbcon restoration, and service-managed GX unload. Remove F12 and bare Escape as
+normal desktop exits. Escape now only dismisses an open menu; SIGTERM remains
+the external recovery and service-manager shutdown mechanism.
+
+The checksum-pinned artifacts are:
+
+- dependency-free static PowerPC shell SHA-256:
+  `5eb92c5e1369ae8e9c6795c730ef658a647c363c260730abb0074710947362c9`
+- VNC-enabled static PowerPC shell SHA-256:
+  `18a0626cb35fd84e2c688d5e0ed7168078cacfaa5a76a1cbe94ea22e3cb6ca58`
+
+Hardware acceptance requires opening the menu through the VNC viewer, selecting
+Log out by pointer, and observing the viewer disconnect because the server
+closed rather than because the tunnel failed. Repeat after selecting the entry
+with F8, arrows, and Enter on local input when the physical console is available.
+Both paths must exit zero, reap Terminal, leave no PTY, restore fbcon, unload GX,
+preserve uptime, and produce no graphics fault. Verify that Escape dismisses the
+menu without ending WiiDesk and F12 no longer ends the session.
