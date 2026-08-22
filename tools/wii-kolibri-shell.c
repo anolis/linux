@@ -546,13 +546,13 @@ static void wipe_secret(char *secret, size_t length)
 	__asm__("" : : "r"(secret) : "memory");
 }
 
-static int write_login_password(int master, const char *password)
+static int write_login_line(int master, const char *line)
 {
-	size_t length = strlen(password);
+	size_t length = strlen(line);
 	size_t offset = 0;
 
 	while (offset <= length) {
-		char byte = offset == length ? '\n' : password[offset];
+		char byte = offset == length ? '\n' : line[offset];
 		ssize_t written = write(master, &byte, 1);
 
 		if (written == 1) {
@@ -570,36 +570,18 @@ static int write_login_password(int master, const char *password)
 	return 0;
 }
 
-static int process_name(pid_t pid, char *name, size_t size)
-{
-	char path[32];
-	ssize_t length;
-	int fd;
-
-	snprintf(path, sizeof(path), "/proc/%d/comm", pid);
-	fd = open(path, O_RDONLY | O_CLOEXEC);
-	if (fd < 0)
-		return -1;
-	length = read(fd, name, size - 1);
-	close(fd);
-	if (length <= 0)
-		return -1;
-	while (length && (name[length - 1] == '\n' || name[length - 1] == '\r'))
-		length--;
-	name[length] = '\0';
-	return 0;
-}
-
 static int authenticate_login(const char *username, char *password,
 			      struct shell_terminal *terminal)
 {
+	static const char auth_command[] =
+		"printf '\\036WIIDESK_AUTH_OK\\037\\n'";
+	static const char auth_marker[] = "\036WIIDESK_AUTH_OK\037";
 	struct winsize size = {
 		.ws_row = 24,
 		.ws_col = 80,
 	};
 	char output[256] = { };
 	char slave_path[32];
-	char name[32];
 	uint64_t deadline = shell_monotonic_ms() + LOGIN_TIMEOUT_MS;
 	size_t output_length = 0;
 	unsigned int number;
@@ -677,13 +659,13 @@ static int authenticate_login(const char *username, char *password,
 			output[output_length] = '\0';
 		}
 		if (!password_sent && strstr(output, "Password:")) {
-			if (write_login_password(master, password) < 0)
+			if (write_login_line(master, password) < 0 ||
+			    write_login_line(master, auth_command) < 0)
 				break;
 			wipe_secret(password, LOGIN_PASSWORD_SIZE);
 			password_sent = 1;
 		}
-		if (password_sent && process_name(child, name, sizeof(name)) == 0 &&
-		    strcmp(name, "su")) {
+		if (password_sent && strstr(output, auth_marker)) {
 			authenticated = 1;
 			break;
 		}
