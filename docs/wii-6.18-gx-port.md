@@ -11772,7 +11772,7 @@ checks for the next physical-input session.
 ### Stage the WiiDesk authenticated greeter
 
 - Test branch: `feature/wii-kolibri-shell`
-- Candidate commit: `2631b3703`
+- Candidate commit: `d7a67e817`
 
 Add an immediate full-screen WiiDesk splash followed by a username/password
 greeter. The greeter supports shared USB and VNC keyboard input, pointer field
@@ -11780,10 +11780,13 @@ selection, masked password display, focused-field feedback, and visible pending
 or failure status. Password bytes are never printed or placed on a command line
 and are explicitly wiped after every attempt.
 
-Authentication runs the target rootfs `/bin/login` on a private PTY. This keeps
-the installed PAM login policy authoritative without linking this static
+Authentication runs the target rootfs setuid `/bin/su` on a private PTY after
+the helper child clears supplementary groups and drops to the unprivileged
+nobody UID/GID 65534. Dropping privilege before executing `su` prevents the
+root-owned WiiDesk parent from satisfying `pam_rootok` and bypassing a password.
+This keeps the installed PAM policy authoritative without linking this static
 development client against a newer cross-toolchain PAM or NSS implementation.
-On success, WiiDesk retains that same authenticated login PTY as its Terminal
+On success, WiiDesk retains that same authenticated `su` PTY as its Terminal
 session. It does not discard the verified identity and launch an unrelated root
 shell. Desktop Terminal startup and system telemetry are delayed until login
 succeeds. Exiting the authenticated shell prevents an unauthenticated terminal
@@ -11803,9 +11806,9 @@ identity.
 The checksum-pinned artifacts are:
 
 - dependency-free static PowerPC shell SHA-256:
-  `7493bcd1c2521a3218848fad8fb1585fafaeaec455210f9ba1dad63472a08910`
+  `00734c5191d12514a39aa34645cfc91bca32ff85cc907008016e82a46db90e8d`
 - VNC-enabled static PowerPC shell SHA-256:
-  `a18d1dbbb51e3ebd945d2610f7c8231eb6c488e029a7a4491fa7d4778f297ba1`
+  `76911c01f0f9cc85bf88e81d64c4c38bac630daced58f1418e98170f5b51f614`
 
 Host validation passed dependency-free and VNC-enabled static PowerPC builds
 with warnings treated as errors and `git diff --check`. Strict checkpatch has no
@@ -11826,3 +11829,12 @@ cleared. Repeat one valid login to prove session recreation. Finally send
 SIGTERM while leaving the deployment wrapper active and require exit zero,
 child reap, no PTY, fbcon restoration, clean GX unload, continuous uptime, and
 no GX/DRM timeout, FIFO stall, fallback, oops, panic, or machine check.
+
+The first hardware attempt used commit `2631b3703` and `/bin/login`. The greeter
+rendered and accepted VNC input, but valid root credentials could not pass.
+Inspection showed the account remained password-enabled; the failure came from
+the rootfs `login` PAM policy applying `pam_securetty` to a dynamic PTY not
+listed in `/etc/securetty`. The replacement candidate uses the verified setuid
+`/bin/su` plus `/etc/pam.d/su`, whose common authentication policy has no
+console-only restriction. Do not interpret that first rejection as a changed
+root password.
