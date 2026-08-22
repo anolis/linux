@@ -11469,3 +11469,26 @@ Finish through remote F12 or SIGTERM and require exit zero, child reap, PTY coun
 zero, fbcon restoration, clean GX unload, continuous uptime, and no GX/DRM
 timeout, FIFO stall, fallback, oops, panic, or machine check. A direct LAN
 connection to port 5900 must remain refused throughout.
+
+Hardware result: input correctness passed, but the candidate is rejected for
+interactive latency. Scripted and TigerVNC input both raised System and Terminal,
+and remote captures showed live System telemetry and terminal text. The server's
+disconnect statistics independently counted 294 key events and 1,107 pointer
+events, proving that input reached the Wii rather than being dropped by the
+tunnel or key mapping. The VNC disconnect hook also ran without leaving a
+modifier or drag state latched.
+
+The latency source is the full-frame export policy. Every KMS presentation marks
+all 640 by 480 pixels modified, including presentations caused by individual key
+events, pointer motion, the blinking cursor, and one-second telemetry. One
+46-minute diagnostic connection generated 331 framebuffer updates representing
+406,732,800 unencoded bytes. LibVNCServer's Ultra encoding reduced that to
+10,953,838 transmitted bytes, while the production TigerVNC client correctly
+negotiated Hextile because this minimal server has no zlib-backed Tight or ZRLE.
+Input remained delayed behind synchronous framebuffer work despite compression.
+
+Do not accept `995ea9f00` as the interactive milestone. The next candidate must
+compare the previous and newly presented RGB565 buffers, switch the exported
+framebuffer pointer, and mark only the bounding rectangle containing changed
+pixels. Re-run keyboard, pointer, telemetry, sustained-update, disconnect, and
+teardown controls with TigerVNC.
