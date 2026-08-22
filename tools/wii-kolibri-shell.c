@@ -48,10 +48,17 @@ struct font_data {
 #define SHELL_POLL_MS 10
 #define SHELL_FONT_WIDTH 8
 #define SHELL_FONT_HEIGHT 16
-#define SHELL_WORKSPACE_LEFT 112
+#define SHELL_WORKSPACE_LEFT 8
 #define SHELL_WORKSPACE_TOP 32
 #define SHELL_WORKSPACE_BOTTOM (TEST_HEIGHT - 24)
 #define SHELL_TITLE_HEIGHT 28
+#define SHELL_MENU_X 8
+#define SHELL_MENU_WIDTH 176
+#define SHELL_MENU_HEADER_HEIGHT 34
+#define SHELL_MENU_ROW_HEIGHT 40
+#define SHELL_MENU_PADDING 8
+#define SHELL_START_X 8
+#define SHELL_START_WIDTH 72
 #define SHELL_TASK_X 88
 #define SHELL_TASK_WIDTH 128
 #define SHELL_TASK_HEIGHT 20
@@ -183,6 +190,7 @@ struct shell_state {
 	int shift_down;
 	int control_down;
 	int caps_lock;
+	int menu_open;
 	int cursor_visible;
 	int pointer_x;
 	int pointer_y;
@@ -1259,26 +1267,57 @@ static void draw_text(struct test_buffer *buffer, int x, int y,
 	}
 }
 
-static void draw_launcher(struct test_buffer *buffer,
-			  const struct shell_state *shell)
+static int menu_height(void)
+{
+	return SHELL_MENU_HEADER_HEIGHT + SHELL_APP_COUNT * SHELL_MENU_ROW_HEIGHT +
+		SHELL_MENU_PADDING;
+}
+
+static int menu_y(void)
+{
+	return SHELL_WORKSPACE_BOTTOM - menu_height();
+}
+
+static void draw_start_menu(struct test_buffer *buffer,
+			    const struct shell_state *shell)
 {
 	unsigned int i;
+	int top;
 
-	fill_rect(buffer, 0, 32, 112, TEST_HEIGHT - 56, rgb565(COLOR_PANEL));
-	fill_rect(buffer, 111, 32, 1, TEST_HEIGHT - 56, rgb565(COLOR_BORDER));
+	if (!shell->menu_open)
+		return;
+	top = menu_y();
+	fill_rect(buffer, SHELL_MENU_X + 4, top + 4, SHELL_MENU_WIDTH,
+		  menu_height() - 4, rgb565(COLOR_TERMINAL));
+	fill_rect(buffer, SHELL_MENU_X, top, SHELL_MENU_WIDTH, menu_height(),
+		  rgb565(COLOR_PANEL));
+	stroke_rect(buffer, SHELL_MENU_X, top, SHELL_MENU_WIDTH, menu_height(),
+		    rgb565(COLOR_TEAL));
+	fill_rect(buffer, SHELL_MENU_X, top, SHELL_MENU_WIDTH,
+		  SHELL_MENU_HEADER_HEIGHT, rgb565(COLOR_BORDER));
+	fill_rect(buffer, SHELL_MENU_X, top, 4, SHELL_MENU_HEADER_HEIGHT,
+		  rgb565(COLOR_RED));
+	draw_text(buffer, SHELL_MENU_X + 14, top + 9, "WiiDesk",
+		  rgb565(COLOR_TEXT));
 	for (i = 0; i < SHELL_APP_COUNT; i++) {
-		int y = 62 + i * 56;
+		int y = top + SHELL_MENU_HEADER_HEIGHT +
+			i * SHELL_MENU_ROW_HEIGHT;
 
 		if (shell->selected == i) {
-			fill_rect(buffer, 8, y - 8, 96, 40,
+			fill_rect(buffer, SHELL_MENU_X + 6, y + 3,
+				  SHELL_MENU_WIDTH - 12, SHELL_MENU_ROW_HEIGHT - 4,
 				  rgb565(COLOR_BORDER));
-			fill_rect(buffer, 8, y - 8, 3, 40,
+			fill_rect(buffer, SHELL_MENU_X + 6, y + 3, 3,
+				  SHELL_MENU_ROW_HEIGHT - 4,
 				  rgb565(app_accents[i]));
 		}
-		fill_rect(buffer, 18, y, 16, 16, rgb565(app_accents[i]));
-		draw_text(buffer, 42, y, app_titles[i], rgb565(COLOR_TEXT));
+		fill_rect(buffer, SHELL_MENU_X + 18, y + 12, 16, 16,
+			  rgb565(app_accents[i]));
+		draw_text(buffer, SHELL_MENU_X + 46, y + 12, app_titles[i],
+			  rgb565(COLOR_TEXT));
 		if (shell->windows[i].visible)
-			fill_rect(buffer, 96, y + 5, 5, 5,
+			fill_rect(buffer, SHELL_MENU_X + SHELL_MENU_WIDTH - 20,
+				  y + 17, 6, 6,
 				  rgb565(app_accents[i]));
 	}
 }
@@ -1551,7 +1590,6 @@ static void draw_shell(struct test_buffer *buffer,
 		strftime(clock_text, sizeof(clock_text), "%H:%M", &local);
 	draw_text(buffer, 580, 8, clock_text, rgb565(COLOR_MUTED));
 
-	draw_launcher(buffer, shell);
 	for (i = 0; i < SHELL_APP_COUNT; i++) {
 		const struct shell_window *window =
 			&shell->windows[shell->z_order[i]];
@@ -1565,9 +1603,17 @@ static void draw_shell(struct test_buffer *buffer,
 	fill_rect(buffer, 0, TEST_HEIGHT - 24, TEST_WIDTH, 1,
 		  rgb565(COLOR_BORDER));
 	draw_text(buffer, 14, TEST_HEIGHT - 20, "Ready", rgb565(COLOR_MUTED));
+	fill_rect(buffer, SHELL_START_X, TEST_HEIGHT - 22, SHELL_START_WIDTH,
+		  SHELL_TASK_HEIGHT,
+		  rgb565(shell->menu_open ? COLOR_BORDER : COLOR_TERMINAL));
+	fill_rect(buffer, SHELL_START_X, TEST_HEIGHT - 22, 3,
+		  SHELL_TASK_HEIGHT, rgb565(COLOR_RED));
+	draw_text(buffer, SHELL_START_X + 10, TEST_HEIGHT - 20, "WiiDesk",
+		  rgb565(COLOR_TEXT));
 	draw_tasks(buffer, shell);
 	fill_rect(buffer, 602, TEST_HEIGHT - 16, 8, 8,
 		  rgb565(shell->cursor_visible ? COLOR_TEAL : COLOR_BORDER));
+	draw_start_menu(buffer, shell);
 	draw_pointer(buffer, shell->pointer_x, shell->pointer_y);
 }
 
@@ -1707,6 +1753,7 @@ static void open_window(struct shell_state *shell, unsigned int app)
 		refresh_system(&shell->system);
 	shell->windows[app].visible = 1;
 	shell->windows[app].minimized = 0;
+	shell->menu_open = 0;
 	raise_window(shell, app);
 }
 
@@ -1774,16 +1821,30 @@ static void toggle_task_window(struct shell_state *shell, unsigned int app)
 	raise_window(shell, app);
 }
 
-static int launcher_at(int x, int y)
+static int start_button_at(int x, int y)
+{
+	return x >= SHELL_START_X && x < SHELL_START_X + SHELL_START_WIDTH &&
+		y >= TEST_HEIGHT - 22 && y < TEST_HEIGHT - 2;
+}
+
+static int menu_contains(int x, int y)
+{
+	return x >= SHELL_MENU_X && x < SHELL_MENU_X + SHELL_MENU_WIDTH &&
+		y >= menu_y() && y < SHELL_WORKSPACE_BOTTOM;
+}
+
+static int launcher_at(const struct shell_state *shell, int x, int y)
 {
 	unsigned int i;
 
-	if (x < 8 || x >= 104)
+	if (!shell->menu_open || x < SHELL_MENU_X + 6 ||
+	    x >= SHELL_MENU_X + SHELL_MENU_WIDTH - 6)
 		return -1;
 	for (i = 0; i < SHELL_APP_COUNT; i++) {
-		int top = 54 + i * 56;
+		int top = menu_y() + SHELL_MENU_HEADER_HEIGHT +
+			i * SHELL_MENU_ROW_HEIGHT;
 
-		if (y >= top && y < top + 40)
+		if (y >= top && y < top + SHELL_MENU_ROW_HEIGHT)
 			return i;
 	}
 	return -1;
@@ -1849,6 +1910,8 @@ static int handle_key(struct shell_state *shell, unsigned int key)
 	switch (key) {
 	case KEY_LEFT:
 	case KEY_UP:
+		if (!shell->menu_open)
+			return 0;
 		if (shell->selected)
 			shell->selected--;
 		else
@@ -1857,10 +1920,14 @@ static int handle_key(struct shell_state *shell, unsigned int key)
 	case KEY_RIGHT:
 	case KEY_DOWN:
 	case KEY_TAB:
+		if (!shell->menu_open)
+			return 0;
 		shell->selected = (shell->selected + 1) % SHELL_APP_COUNT;
 		return 1;
 	case KEY_ENTER:
 	case KEY_SPACE:
+		if (!shell->menu_open)
+			return 0;
 		open_window(shell, shell->selected);
 		return 1;
 	case KEY_F1:
@@ -1890,7 +1957,16 @@ static int handle_key(struct shell_state *shell, unsigned int key)
 		if (shell->focused >= 0)
 			toggle_maximize_window(shell, shell->focused);
 		return 1;
+	case KEY_F8:
+		shell->menu_open = !shell->menu_open;
+		return 1;
 	case KEY_ESC:
+		if (shell->menu_open) {
+			shell->menu_open = 0;
+			return 1;
+		}
+		stop = 1;
+		return 0;
 	case KEY_F12:
 		stop = 1;
 		return 0;
@@ -2042,7 +2118,12 @@ static int handle_key_event(struct shell_state *shell, unsigned int key,
 	}
 	if (value != 1 && value != 2)
 		return 0;
-	if (key == KEY_F12 || (key >= KEY_F1 && key <= KEY_F7))
+	if (shell->menu_open && value == 1 &&
+	    (key == KEY_UP || key == KEY_DOWN || key == KEY_LEFT ||
+	     key == KEY_RIGHT || key == KEY_TAB || key == KEY_ENTER ||
+	     key == KEY_KPENTER || key == KEY_SPACE || key == KEY_ESC))
+		return handle_key(shell, key == KEY_KPENTER ? KEY_ENTER : key);
+	if (key == KEY_F12 || (key >= KEY_F1 && key <= KEY_F8))
 		return handle_key(shell, key);
 	if (shell->focused == SHELL_APP_TERMINAL &&
 	    shell->windows[SHELL_APP_TERMINAL].visible &&
@@ -2078,7 +2159,7 @@ static int update_pointer(struct shell_state *shell, int delta_x, int delta_y)
 	if (shell->pointer_y >= TEST_HEIGHT)
 		shell->pointer_y = TEST_HEIGHT - 1;
 
-	launcher = launcher_at(shell->pointer_x, shell->pointer_y);
+	launcher = launcher_at(shell, shell->pointer_x, shell->pointer_y);
 	if (launcher >= 0)
 		shell->selected = launcher;
 
@@ -2130,12 +2211,20 @@ static int handle_pointer_button(struct shell_state *shell, int pressed)
 		shell->dragging = -1;
 		return 1;
 	}
-	launcher = launcher_at(shell->pointer_x, shell->pointer_y);
+	if (start_button_at(shell->pointer_x, shell->pointer_y)) {
+		shell->menu_open = !shell->menu_open;
+		return 1;
+	}
+	launcher = launcher_at(shell, shell->pointer_x, shell->pointer_y);
 	if (launcher >= 0) {
 		shell->selected = launcher;
 		open_window(shell, launcher);
 		return 1;
 	}
+	if (shell->menu_open &&
+	    menu_contains(shell->pointer_x, shell->pointer_y))
+		return 1;
+	shell->menu_open = 0;
 	task = task_at(shell, shell->pointer_x, shell->pointer_y);
 	if (task >= 0) {
 		toggle_task_window(shell, task);
