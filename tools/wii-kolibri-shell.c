@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/* Minimal Kolibri-inspired desktop shell for the Wii VI DRM/KMS driver. */
+/* WiiDesk desktop shell for the Wii VI DRM/KMS driver. */
 
 #define main wii_drm_test_main
 #include "wii-drm-test.c"
@@ -51,6 +51,11 @@ struct font_data {
 #define SHELL_WORKSPACE_LEFT 112
 #define SHELL_WORKSPACE_TOP 32
 #define SHELL_WORKSPACE_BOTTOM (TEST_HEIGHT - 24)
+#define SHELL_TITLE_HEIGHT 28
+#define SHELL_TASK_X 88
+#define SHELL_TASK_WIDTH 128
+#define SHELL_TASK_HEIGHT 20
+#define SHELL_CONTROL_SIZE 12
 #define TERMINAL_COLUMNS 50
 #define TERMINAL_ROWS 14
 #define TERMINAL_CSI_PARAMS 4
@@ -78,6 +83,12 @@ struct shell_window {
 	int width;
 	int height;
 	int visible;
+	int minimized;
+	int maximized;
+	int restore_x;
+	int restore_y;
+	int restore_width;
+	int restore_height;
 };
 
 struct terminal_cell {
@@ -1053,7 +1064,7 @@ static int start_vnc(struct shell_state *shell, struct test_buffer *buffer)
 			      TEST_HEIGHT, 5, 3, 2);
 	if (!screen)
 		return -1;
-	screen->desktopName = "Wii Linux NGX";
+	screen->desktopName = "WiiDesk";
 	screen->frameBuffer = buffer->map;
 	screen->screenData = shell;
 	screen->listenInterface = htonl(INADDR_LOOPBACK);
@@ -1421,8 +1432,12 @@ static void draw_window(struct test_buffer *buffer,
 			const struct shell_state *shell,
 			const struct shell_window *window)
 {
+	int close_x = window->x + window->width - 24;
+	int maximize_x = close_x - 20;
+	int minimize_x = maximize_x - 20;
 	uint16_t frame = shell->focused == (int)window->app ?
 		rgb565(app_accents[window->app]) : rgb565(COLOR_BORDER);
+	int i;
 
 	fill_rect(buffer, window->x + 4, window->y + 4, window->width,
 		  window->height, rgb565(COLOR_TERMINAL));
@@ -1430,9 +1445,10 @@ static void draw_window(struct test_buffer *buffer,
 		  rgb565(COLOR_PANEL));
 	stroke_rect(buffer, window->x, window->y, window->width, window->height,
 		    frame);
-	fill_rect(buffer, window->x, window->y, window->width, 28,
+	fill_rect(buffer, window->x, window->y, window->width,
+		  SHELL_TITLE_HEIGHT,
 		  rgb565(COLOR_BORDER));
-	fill_rect(buffer, window->x, window->y, 3, 28, frame);
+	fill_rect(buffer, window->x, window->y, 3, SHELL_TITLE_HEIGHT, frame);
 	draw_text(buffer, window->x + 14, window->y + 6,
 		  app_titles[window->app], rgb565(COLOR_TEXT));
 	if (window->app == SHELL_APP_TERMINAL)
@@ -1440,8 +1456,29 @@ static void draw_window(struct test_buffer *buffer,
 			  shell->terminal.child_pid > 0 ? "Running" : "Exited",
 			  rgb565(shell->terminal.child_pid > 0 ?
 				 COLOR_TEAL : COLOR_MUTED));
-	fill_rect(buffer, window->x + window->width - 24, window->y + 8,
-		  12, 12, rgb565(COLOR_RED));
+	fill_rect(buffer, minimize_x, window->y + 8, SHELL_CONTROL_SIZE,
+		  SHELL_CONTROL_SIZE, rgb565(COLOR_PANEL));
+	fill_rect(buffer, minimize_x + 3, window->y + 15, 6, 2,
+		  rgb565(COLOR_TEXT));
+	fill_rect(buffer, maximize_x, window->y + 8, SHELL_CONTROL_SIZE,
+		  SHELL_CONTROL_SIZE, rgb565(COLOR_PANEL));
+	if (window->maximized) {
+		stroke_rect(buffer, maximize_x + 2, window->y + 12, 6, 5,
+			    rgb565(COLOR_TEXT));
+		stroke_rect(buffer, maximize_x + 4, window->y + 10, 6, 5,
+			    rgb565(COLOR_TEXT));
+	} else {
+		stroke_rect(buffer, maximize_x + 2, window->y + 10, 8, 8,
+			    rgb565(COLOR_TEXT));
+	}
+	fill_rect(buffer, close_x, window->y + 8, SHELL_CONTROL_SIZE,
+		  SHELL_CONTROL_SIZE, rgb565(COLOR_RED));
+	for (i = 0; i < 6; i++) {
+		fill_rect(buffer, close_x + 3 + i, window->y + 11 + i, 1, 1,
+			  rgb565(COLOR_TEXT));
+		fill_rect(buffer, close_x + 8 - i, window->y + 11 + i, 1, 1,
+			  rgb565(COLOR_TEXT));
+	}
 
 	switch (window->app) {
 	case SHELL_APP_TERMINAL:
@@ -1455,6 +1492,29 @@ static void draw_window(struct test_buffer *buffer,
 		break;
 	default:
 		break;
+	}
+}
+
+static void draw_tasks(struct test_buffer *buffer,
+		       const struct shell_state *shell)
+{
+	unsigned int i;
+
+	for (i = 0; i < SHELL_APP_COUNT; i++) {
+		const struct shell_window *window = &shell->windows[i];
+		int x = SHELL_TASK_X + i * SHELL_TASK_WIDTH;
+		uint16_t background;
+
+		if (!window->visible)
+			continue;
+		background = shell->focused == (int)i && !window->minimized ?
+			rgb565(COLOR_BORDER) : rgb565(COLOR_TERMINAL);
+		fill_rect(buffer, x, TEST_HEIGHT - 22, SHELL_TASK_WIDTH - 4,
+			  SHELL_TASK_HEIGHT, background);
+		fill_rect(buffer, x, TEST_HEIGHT - 22, 3, SHELL_TASK_HEIGHT,
+			  rgb565(window->minimized ? COLOR_MUTED : app_accents[i]));
+		draw_text(buffer, x + 12, TEST_HEIGHT - 20, app_titles[i],
+			  rgb565(window->minimized ? COLOR_MUTED : COLOR_TEXT));
 	}
 }
 
@@ -1486,7 +1546,7 @@ static void draw_shell(struct test_buffer *buffer,
 	fill_rect(buffer, 0, 0, TEST_WIDTH, 32, rgb565(COLOR_PANEL));
 	fill_rect(buffer, 0, 31, TEST_WIDTH, 1, rgb565(COLOR_BORDER));
 	fill_rect(buffer, 14, 8, 16, 16, rgb565(COLOR_RED));
-	draw_text(buffer, 40, 8, "WII LINUX NGX", rgb565(COLOR_TEXT));
+	draw_text(buffer, 40, 8, "WiiDesk", rgb565(COLOR_TEXT));
 	if (localtime_r(&now, &local))
 		strftime(clock_text, sizeof(clock_text), "%H:%M", &local);
 	draw_text(buffer, 580, 8, clock_text, rgb565(COLOR_MUTED));
@@ -1496,7 +1556,7 @@ static void draw_shell(struct test_buffer *buffer,
 		const struct shell_window *window =
 			&shell->windows[shell->z_order[i]];
 
-		if (window->visible)
+		if (window->visible && !window->minimized)
 			draw_window(buffer, shell, window);
 	}
 
@@ -1505,9 +1565,7 @@ static void draw_shell(struct test_buffer *buffer,
 	fill_rect(buffer, 0, TEST_HEIGHT - 24, TEST_WIDTH, 1,
 		  rgb565(COLOR_BORDER));
 	draw_text(buffer, 14, TEST_HEIGHT - 20, "Ready", rgb565(COLOR_MUTED));
-	if (shell->focused >= 0)
-		draw_text(buffer, 88, TEST_HEIGHT - 20,
-			  app_titles[shell->focused], rgb565(COLOR_TEXT));
+	draw_tasks(buffer, shell);
 	fill_rect(buffer, 602, TEST_HEIGHT - 16, 8, 8,
 		  rgb565(shell->cursor_visible ? COLOR_TEAL : COLOR_BORDER));
 	draw_pointer(buffer, shell->pointer_x, shell->pointer_y);
@@ -1613,7 +1671,8 @@ static void focus_top_window(struct shell_state *shell)
 
 	shell->focused = -1;
 	for (i = SHELL_APP_COUNT - 1; i >= 0; i--)
-		if (shell->windows[shell->z_order[i]].visible) {
+		if (shell->windows[shell->z_order[i]].visible &&
+		    !shell->windows[shell->z_order[i]].minimized) {
 			shell->focused = shell->z_order[i];
 			break;
 		}
@@ -1647,15 +1706,72 @@ static void open_window(struct shell_state *shell, unsigned int app)
 	if (app == SHELL_APP_SYSTEM)
 		refresh_system(&shell->system);
 	shell->windows[app].visible = 1;
+	shell->windows[app].minimized = 0;
 	raise_window(shell, app);
+}
+
+static void restore_window_geometry(struct shell_window *window)
+{
+	if (!window->maximized)
+		return;
+	window->x = window->restore_x;
+	window->y = window->restore_y;
+	window->width = window->restore_width;
+	window->height = window->restore_height;
+	window->maximized = 0;
 }
 
 static void close_window(struct shell_state *shell, unsigned int app)
 {
+	restore_window_geometry(&shell->windows[app]);
 	shell->windows[app].visible = 0;
+	shell->windows[app].minimized = 0;
 	if (shell->dragging == (int)app)
 		shell->dragging = -1;
 	focus_top_window(shell);
+}
+
+static void minimize_window(struct shell_state *shell, unsigned int app)
+{
+	shell->windows[app].minimized = 1;
+	if (shell->dragging == (int)app)
+		shell->dragging = -1;
+	focus_top_window(shell);
+}
+
+static void toggle_maximize_window(struct shell_state *shell, unsigned int app)
+{
+	struct shell_window *window = &shell->windows[app];
+
+	if (window->maximized) {
+		restore_window_geometry(window);
+		return;
+	}
+	window->restore_x = window->x;
+	window->restore_y = window->y;
+	window->restore_width = window->width;
+	window->restore_height = window->height;
+	window->x = SHELL_WORKSPACE_LEFT;
+	window->y = SHELL_WORKSPACE_TOP;
+	window->width = TEST_WIDTH - SHELL_WORKSPACE_LEFT;
+	window->height = SHELL_WORKSPACE_BOTTOM - SHELL_WORKSPACE_TOP;
+	window->maximized = 1;
+	window->minimized = 0;
+	shell->dragging = -1;
+}
+
+static void toggle_task_window(struct shell_state *shell, unsigned int app)
+{
+	struct shell_window *window = &shell->windows[app];
+
+	if (!window->visible)
+		return;
+	if (!window->minimized && shell->focused == (int)app) {
+		minimize_window(shell, app);
+		return;
+	}
+	window->minimized = 0;
+	raise_window(shell, app);
 }
 
 static int launcher_at(int x, int y)
@@ -1681,10 +1797,26 @@ static int window_at(const struct shell_state *shell, int x, int y)
 		const struct shell_window *window =
 			&shell->windows[shell->z_order[i]];
 
-		if (window->visible && x >= window->x &&
+		if (window->visible && !window->minimized && x >= window->x &&
 		    x < window->x + window->width && y >= window->y &&
 		    y < window->y + window->height)
 			return window->app;
+	}
+	return -1;
+}
+
+static int task_at(const struct shell_state *shell, int x, int y)
+{
+	unsigned int i;
+
+	if (y < TEST_HEIGHT - 22 || y >= TEST_HEIGHT - 2)
+		return -1;
+	for (i = 0; i < SHELL_APP_COUNT; i++) {
+		int left = SHELL_TASK_X + i * SHELL_TASK_WIDTH;
+
+		if (shell->windows[i].visible && x >= left &&
+		    x < left + SHELL_TASK_WIDTH - 4)
+			return i;
 	}
 	return -1;
 }
@@ -1704,7 +1836,8 @@ static void focus_next_window(struct shell_state *shell)
 	}
 	for (step = 1; step <= SHELL_APP_COUNT; step++) {
 		i = (focused_index - step + SHELL_APP_COUNT) % SHELL_APP_COUNT;
-		if (shell->windows[shell->z_order[i]].visible) {
+		if (shell->windows[shell->z_order[i]].visible &&
+		    !shell->windows[shell->z_order[i]].minimized) {
 			raise_window(shell, shell->z_order[i]);
 			return;
 		}
@@ -1746,8 +1879,16 @@ static int handle_key(struct shell_state *shell, unsigned int key)
 		if (shell->focused >= 0)
 			close_window(shell, shell->focused);
 		return 1;
+	case KEY_F5:
+		if (shell->focused >= 0)
+			minimize_window(shell, shell->focused);
+		return 1;
 	case KEY_F6:
 		focus_next_window(shell);
+		return 1;
+	case KEY_F7:
+		if (shell->focused >= 0)
+			toggle_maximize_window(shell, shell->focused);
 		return 1;
 	case KEY_ESC:
 	case KEY_F12:
@@ -1901,7 +2042,7 @@ static int handle_key_event(struct shell_state *shell, unsigned int key,
 	}
 	if (value != 1 && value != 2)
 		return 0;
-	if (key == KEY_F12 || (key >= KEY_F1 && key <= KEY_F6))
+	if (key == KEY_F12 || (key >= KEY_F1 && key <= KEY_F7))
 		return handle_key(shell, key);
 	if (shell->focused == SHELL_APP_TERMINAL &&
 	    shell->windows[SHELL_APP_TERMINAL].visible &&
@@ -1981,6 +2122,7 @@ static int files_entry_at(const struct shell_state *shell,
 static int handle_pointer_button(struct shell_state *shell, int pressed)
 {
 	struct shell_window *window;
+	int task;
 	int launcher;
 	int app;
 
@@ -1994,6 +2136,11 @@ static int handle_pointer_button(struct shell_state *shell, int pressed)
 		open_window(shell, launcher);
 		return 1;
 	}
+	task = task_at(shell, shell->pointer_x, shell->pointer_y);
+	if (task >= 0) {
+		toggle_task_window(shell, task);
+		return 1;
+	}
 	app = window_at(shell, shell->pointer_x, shell->pointer_y);
 	if (app < 0) {
 		shell->focused = -1;
@@ -2001,14 +2148,26 @@ static int handle_pointer_button(struct shell_state *shell, int pressed)
 	}
 	raise_window(shell, app);
 	window = &shell->windows[app];
-	if (shell->pointer_x >= window->x + window->width - 32 &&
-	    shell->pointer_x < window->x + window->width &&
-	    shell->pointer_y >= window->y &&
-	    shell->pointer_y < window->y + 28) {
-		close_window(shell, app);
-		return 1;
+	if (shell->pointer_y >= window->y &&
+	    shell->pointer_y < window->y + SHELL_TITLE_HEIGHT) {
+		int control_x = shell->pointer_x -
+			(window->x + window->width - 72);
+
+		if (control_x >= 48) {
+			close_window(shell, app);
+			return 1;
+		}
+		if (control_x >= 24) {
+			toggle_maximize_window(shell, app);
+			return 1;
+		}
+		if (control_x >= 0) {
+			minimize_window(shell, app);
+			return 1;
+		}
 	}
-	if (shell->pointer_y < window->y + 28) {
+	if (shell->pointer_y < window->y + SHELL_TITLE_HEIGHT &&
+	    !window->maximized) {
 		shell->dragging = app;
 		shell->drag_offset_x = shell->pointer_x - window->x;
 		shell->drag_offset_y = shell->pointer_y - window->y;
