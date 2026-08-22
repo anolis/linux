@@ -6,6 +6,7 @@
 #undef main
 
 #include <dirent.h>
+#include <grp.h>
 #include <limits.h>
 #include <linux/input.h>
 #include <sys/stat.h>
@@ -641,9 +642,12 @@ static int authenticate_login(const char *username, char *password,
 		if (slave > STDERR_FILENO)
 			close(slave);
 		close(master);
+		if (setgroups(0, NULL) < 0 || setgid(65534) < 0 ||
+		    setuid(65534) < 0)
+			_exit(126);
 		setenv("LC_ALL", "C", 1);
 		setenv("TERM", "vt100", 1);
-		execl("/bin/login", "login", username, (char *)NULL);
+		execl("/bin/su", "su", "-", username, (char *)NULL);
 		_exit(127);
 	}
 	flags = fcntl(master, F_GETFL);
@@ -679,7 +683,7 @@ static int authenticate_login(const char *username, char *password,
 			password_sent = 1;
 		}
 		if (password_sent && process_name(child, name, sizeof(name)) == 0 &&
-		    strcmp(name, "login")) {
+		    strcmp(name, "su")) {
 			authenticated = 1;
 			break;
 		}
@@ -698,7 +702,7 @@ static int authenticate_login(const char *username, char *password,
 		terminal_clear(terminal);
 		terminal->color = COLOR_TEXT;
 		(void)terminal_write(terminal, "\n", 1);
-		printf("wii-kolibri-shell: authenticated login pid=%d pty=%s\n",
+		printf("wii-kolibri-shell: authenticated session pid=%d pty=%s\n",
 		       child, slave_path);
 		return 1;
 	}
@@ -2956,7 +2960,7 @@ int main(int argc, char **argv)
 	open_inputs(&shell);
 	printf("wii-kolibri-shell: active %ux%u rgb565 with %u input device(s)\n",
 	       mode.hdisplay, mode.vdisplay, shell.input_count);
-	printf("wii-kolibri-shell: greeter ready; /bin/login provides PAM authentication\n");
+	printf("wii-kolibri-shell: greeter ready; unprivileged su provides PAM authentication\n");
 	fflush(stdout);
 	signal(SIGINT, handle_signal);
 	signal(SIGTERM, handle_signal);
