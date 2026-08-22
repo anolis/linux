@@ -11772,7 +11772,7 @@ checks for the next physical-input session.
 ### Stage the WiiDesk authenticated greeter
 
 - Test branch: `feature/wii-kolibri-shell`
-- Candidate commit: `82c32fad3`
+- Candidate commit: `63f1e5a84`
 
 Add an immediate full-screen WiiDesk splash followed by a username/password
 greeter. The greeter supports shared USB and VNC keyboard input, pointer field
@@ -11806,9 +11806,9 @@ identity.
 The checksum-pinned artifacts are:
 
 - dependency-free static PowerPC shell SHA-256:
-  `00734c5191d12514a39aa34645cfc91bca32ff85cc907008016e82a46db90e8d`
+  `cc0158a83b011cba8e5dcecce08b1bf77b052f823e762404d9e120395059771b`
 - VNC-enabled static PowerPC shell SHA-256:
-  `8d1cf90dddf176cfc1a81ac02acccb9d766b1ad6e097903150842e92b475f58c`
+  `323aa00668f4ca08bf9027f634851e4e2d8d1095670cb9948c59d27a92833d22`
 
 Host validation passed dependency-free and VNC-enabled static PowerPC builds
 with warnings treated as errors and `git diff --check`. Strict checkpatch has no
@@ -11845,3 +11845,19 @@ letters. Candidate `82c32fad3` maps every shifted US-layout symbol back to its
 Linux input base key and synthesizes Shift when the VNC client omits a modifier
 event. This does not affect the dependency-free artifact. It is required before
 password acceptance can be evaluated through VNC.
+
+The next hardware attempt showed `Login failed` with the known-good root
+password. A standalone static PowerPC probe then reproduced the identical PTY,
+privilege drop, setuid `su`, and password exchange without DRM or VNC. PAM
+accepted the credentials and produced `root@(none):~#`, proving the password and
+authentication provider are valid. The probe also showed `comm=su` remains
+unchanged for the complete authenticated shell session on this old Shadow
+implementation. Candidate `82c32fad3` therefore rejected a successful login
+because its process-name transition was an invalid positive control.
+
+Candidate `63f1e5a84` queues a constant `printf` after the password and accepts
+only a control-delimited marker emitted by the authenticated shell. The marker's
+control bytes do not appear in the echoed command, so terminal echo cannot
+produce a false success. A rejected password never executes the command and
+cannot emit the marker. This replaces process naming with a direct positive
+control that the requested shell is running.
