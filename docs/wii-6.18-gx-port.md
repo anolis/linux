@@ -11585,3 +11585,51 @@ the AVE chroma exchange returned to CPU scanout, and accelerator unregistration
 completed while Wii uptime remained continuous. The final kernel audit found no
 GX/DRM timeout, FIFO stall, fallback, oops, panic, or machine check. This accepts
 interactive SSH-tunneled VNC as WiiDesk's remote display and input path.
+
+### Stage WiiDesk task panel and window-state controls
+
+- Test branch: `feature/wii-kolibri-shell`
+- Candidate commit: `d5ce57e58`
+
+Extend the existing fixed WiiDesk window table with minimized and maximized
+states and saved normal geometry. Minimized windows remain open but no longer
+draw, receive input focus, or participate in focus cycling. Maximized windows
+occupy the complete workspace between the launcher and bottom panel; restoring
+returns the exact previous position and dimensions.
+
+Add familiar minimize, maximize/restore, and close controls to every title bar.
+Turn the bottom status band into a task panel with stable Terminal, Files, and
+System buttons. Clicking the focused task minimizes it. Clicking a minimized or
+background task restores and raises it. Keep the existing side buttons as the
+application launcher. F5 minimizes the focused window, F6 cycles visible
+non-minimized windows, and F7 toggles maximize/restore. USB and VNC input share
+the same handlers and state transitions.
+
+Present the product name as WiiDesk on the physical panel and in VNC desktop
+metadata. The checksum-pinned artifacts are:
+
+- dependency-free static PowerPC shell SHA-256:
+  `0454017d2870149a4cf7258d95b7ef156f1ac9051b6c365999dfa0e506f1f050`
+- VNC-enabled static PowerPC shell SHA-256:
+  `565a41dcf35c5153b09a22567ea0cf862fb5038e91dad3f4594fde660ee93d03`
+
+Host validation passed dependency-free and VNC-enabled static PowerPC builds
+with warnings treated as errors, ShellCheck for the deployment helpers,
+`git diff --check`, and strict checkpatch with no errors or warnings. The only
+strict checkpatch notices are the accepted camelCase identifiers from the
+external LibVNCServer API.
+
+Hardware acceptance requires all three task buttons and all three title-bar
+controls to remain legible and non-overlapping at 640 by 480. With a mouse,
+minimize each application from its title bar and restore it from the panel.
+Click the focused task to minimize it, then click background tasks to raise
+them. Maximize and restore every application, requiring exact geometry recovery
+and no drawing over the top panel, side launcher, or bottom task panel. Close
+and reopen each application and confirm it returns in normal state.
+
+Repeat minimize, focus cycle, maximize/restore, and close through F5, F6, F7,
+and F4. Require Terminal input and PTY output, Files navigation, System telemetry,
+window dragging, local pointer input, and VNC input to remain functional. Finish
+through F12 or SIGTERM and require exit zero, child reap, PTY count zero, fbcon
+restoration, clean GX unload, continuous uptime, and no GX/DRM timeout, FIFO
+stall, fallback, oops, panic, or machine check.
