@@ -45,7 +45,7 @@ struct font_data {
 
 #define SHELL_BUFFER_COUNT 3
 #define SHELL_INPUT_COUNT 16
-#define SHELL_POLL_MS 100
+#define SHELL_POLL_MS 10
 #define SHELL_FONT_WIDTH 8
 #define SHELL_FONT_HEIGHT 16
 #define SHELL_WORKSPACE_LEFT 112
