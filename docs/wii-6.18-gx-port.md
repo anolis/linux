@@ -11861,3 +11861,28 @@ control bytes do not appear in the echoed command, so terminal echo cannot
 produce a false success. A rejected password never executes the command and
 cannot emit the marker. This replaces process naming with a direct positive
 control that the requested shell is running.
+
+Hardware result: authenticated greeter, logout, and session recreation passed
+through the checksum-verified VNC candidate. The known rootfs credentials opened
+the WiiDesk desktop and retained `su - root` on `/dev/pts/1` as Terminal. There
+was no second unauthenticated shell. The user confirmed the login worked.
+
+Keyboard menu Logout returned to the greeter without ending WiiDesk or its VNC
+connection. The authenticated `su` process was reaped and `/dev/pts/1` vanished.
+A second credential entry then created a new authenticated `su - root` process
+and a fresh `/dev/pts/1`, proving session recreation after logout. The client
+logged both authenticated PTY sessions when stdout flushed during shutdown.
+
+The attempted automated invalid-password control did not activate Logout and
+therefore typed into the existing desktop Terminal; do not count it as an
+authentication rejection test. A visible invalid-password attempt remains a
+small UI regression control, although the isolated PTY probe and marker design
+establish that a rejected password cannot execute the success command.
+
+Final SIGTERM left the deployment wrapper active. It reported `TEST PASSED`,
+unloaded GX, restored the CPU console, reaped the active authenticated session,
+and left `/dev/pts` with only the pre-existing SSH PTY and `ptmx`. The rootfs was
+synced after the password-file write and remounted read-only. Uptime remained
+continuous, and the final kernel tail contained no GX/DRM timeout, FIFO stall,
+fallback, oops, panic, or machine check. PID 390 remains the unrelated old
+zombie documented by earlier interrupted testing.
