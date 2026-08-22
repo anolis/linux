@@ -63,6 +63,8 @@ struct font_data {
 #define SHELL_TASK_WIDTH 128
 #define SHELL_TASK_HEIGHT 20
 #define SHELL_CONTROL_SIZE 12
+#define SHELL_MENU_LOGOUT SHELL_APP_COUNT
+#define SHELL_MENU_ITEM_COUNT (SHELL_APP_COUNT + 1)
 #define TERMINAL_COLUMNS 50
 #define TERMINAL_ROWS 14
 #define TERMINAL_CSI_PARAMS 4
@@ -1269,7 +1271,8 @@ static void draw_text(struct test_buffer *buffer, int x, int y,
 
 static int menu_height(void)
 {
-	return SHELL_MENU_HEADER_HEIGHT + SHELL_APP_COUNT * SHELL_MENU_ROW_HEIGHT +
+	return SHELL_MENU_HEADER_HEIGHT +
+		SHELL_MENU_ITEM_COUNT * SHELL_MENU_ROW_HEIGHT +
 		SHELL_MENU_PADDING;
 }
 
@@ -1319,6 +1322,22 @@ static void draw_start_menu(struct test_buffer *buffer,
 			fill_rect(buffer, SHELL_MENU_X + SHELL_MENU_WIDTH - 20,
 				  y + 17, 6, 6,
 				  rgb565(app_accents[i]));
+	}
+	{
+		int y = top + SHELL_MENU_HEADER_HEIGHT +
+			SHELL_APP_COUNT * SHELL_MENU_ROW_HEIGHT;
+
+		if (shell->selected == SHELL_MENU_LOGOUT) {
+			fill_rect(buffer, SHELL_MENU_X + 6, y + 3,
+				  SHELL_MENU_WIDTH - 12, SHELL_MENU_ROW_HEIGHT - 4,
+				  rgb565(COLOR_BORDER));
+			fill_rect(buffer, SHELL_MENU_X + 6, y + 3, 3,
+				  SHELL_MENU_ROW_HEIGHT - 4, rgb565(COLOR_RED));
+		}
+		fill_rect(buffer, SHELL_MENU_X + 18, y + 12, 16, 16,
+			  rgb565(COLOR_RED));
+		draw_text(buffer, SHELL_MENU_X + 46, y + 12, "Log out",
+			  rgb565(COLOR_TEXT));
 	}
 }
 
@@ -1840,7 +1859,7 @@ static int launcher_at(const struct shell_state *shell, int x, int y)
 	if (!shell->menu_open || x < SHELL_MENU_X + 6 ||
 	    x >= SHELL_MENU_X + SHELL_MENU_WIDTH - 6)
 		return -1;
-	for (i = 0; i < SHELL_APP_COUNT; i++) {
+	for (i = 0; i < SHELL_MENU_ITEM_COUNT; i++) {
 		int top = menu_y() + SHELL_MENU_HEADER_HEIGHT +
 			i * SHELL_MENU_ROW_HEIGHT;
 
@@ -1915,19 +1934,24 @@ static int handle_key(struct shell_state *shell, unsigned int key)
 		if (shell->selected)
 			shell->selected--;
 		else
-			shell->selected = SHELL_APP_COUNT - 1;
+			shell->selected = SHELL_MENU_ITEM_COUNT - 1;
 		return 1;
 	case KEY_RIGHT:
 	case KEY_DOWN:
 	case KEY_TAB:
 		if (!shell->menu_open)
 			return 0;
-		shell->selected = (shell->selected + 1) % SHELL_APP_COUNT;
+		shell->selected = (shell->selected + 1) % SHELL_MENU_ITEM_COUNT;
 		return 1;
 	case KEY_ENTER:
 	case KEY_SPACE:
 		if (!shell->menu_open)
 			return 0;
+		if (shell->selected == SHELL_MENU_LOGOUT) {
+			shell->menu_open = 0;
+			stop = 1;
+			return 1;
+		}
 		open_window(shell, shell->selected);
 		return 1;
 	case KEY_F1:
@@ -1965,10 +1989,6 @@ static int handle_key(struct shell_state *shell, unsigned int key)
 			shell->menu_open = 0;
 			return 1;
 		}
-		stop = 1;
-		return 0;
-	case KEY_F12:
-		stop = 1;
 		return 0;
 	default:
 		return 0;
@@ -2123,7 +2143,7 @@ static int handle_key_event(struct shell_state *shell, unsigned int key,
 	     key == KEY_RIGHT || key == KEY_TAB || key == KEY_ENTER ||
 	     key == KEY_KPENTER || key == KEY_SPACE || key == KEY_ESC))
 		return handle_key(shell, key == KEY_KPENTER ? KEY_ENTER : key);
-	if (key == KEY_F12 || (key >= KEY_F1 && key <= KEY_F8))
+	if (key >= KEY_F1 && key <= KEY_F8)
 		return handle_key(shell, key);
 	if (shell->focused == SHELL_APP_TERMINAL &&
 	    shell->windows[SHELL_APP_TERMINAL].visible &&
@@ -2218,7 +2238,12 @@ static int handle_pointer_button(struct shell_state *shell, int pressed)
 	launcher = launcher_at(shell, shell->pointer_x, shell->pointer_y);
 	if (launcher >= 0) {
 		shell->selected = launcher;
-		open_window(shell, launcher);
+		if (launcher == SHELL_MENU_LOGOUT) {
+			shell->menu_open = 0;
+			stop = 1;
+		} else {
+			open_window(shell, launcher);
+		}
 		return 1;
 	}
 	if (shell->menu_open &&
@@ -2509,7 +2534,7 @@ int main(int argc, char **argv)
 	open_inputs(&shell);
 	printf("wii-kolibri-shell: active %ux%u rgb565 with %u input device(s)\n",
 	       mode.hdisplay, mode.vdisplay, shell.input_count);
-	printf("wii-kolibri-shell: terminal owns /bin/sh; F12 exits\n");
+	printf("wii-kolibri-shell: terminal owns /bin/sh; menu Logout exits\n");
 	fflush(stdout);
 	signal(SIGINT, handle_signal);
 	signal(SIGTERM, handle_signal);
