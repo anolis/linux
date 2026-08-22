@@ -1059,6 +1059,7 @@ static int start_vnc(struct shell_state *shell, struct test_buffer *buffer)
 	screen->listenInterface = htonl(INADDR_LOOPBACK);
 	screen->port = 5900;
 	screen->alwaysShared = TRUE;
+	screen->deferPtrUpdateTime = 16;
 	screen->kbdAddEvent = vnc_key_event;
 	screen->ptrAddEvent = vnc_pointer_event;
 	screen->newClientHook = vnc_new_client;
