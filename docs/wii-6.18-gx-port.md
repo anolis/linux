@@ -11754,3 +11754,17 @@ with F8, arrows, and Enter on local input when the physical console is available
 Both paths must exit zero, reap Terminal, leave no PTY, restore fbcon, unload GX,
 preserve uptime, and produce no graphics fault. Verify that Escape dismisses the
 menu without ending WiiDesk and F12 no longer ends the session.
+
+Hardware result: pointer logout accepted through authenticated VNC. TigerVNC
+connected through the loopback-only SSH forward, and the user reported that the
+updated menu worked well. Selecting Log out closed the VNC server, caused the
+viewer to exit on an orderly end-of-stream, and returned status zero from both
+WiiDesk and the deployment wrapper. The session received 116 pointer events and
+sent 92 Hextile rectangles in 27 framebuffer updates before logout.
+
+Terminal was reaped, `/dev/pts` contained only `ptmx`, GX unloaded, fbcon resumed
+through `gcn-vidrmfb`, and uptime remained continuous. The kernel log recorded
+`TEST PASSED`, accelerator unregistration, and CPU-console restoration with no
+GX/DRM timeout, FIFO stall, fallback, oops, panic, or machine check. The local
+F8/arrows/Enter logout path and explicit F12 non-exit control remain regression
+checks for the next physical-input session.
