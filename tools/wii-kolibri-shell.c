@@ -1045,6 +1045,8 @@ static int start_vnc(struct shell_state *shell, struct test_buffer *buffer)
 	int argument_count = 1;
 	rfbScreenInfoPtr screen;
 
+	if (buffer->create.pitch != TEST_WIDTH * sizeof(uint16_t))
+		return -1;
 	arguments[0] = program;
 	arguments[1] = NULL;
 	screen = rfbGetScreen(&argument_count, arguments, TEST_WIDTH,
@@ -1095,10 +1097,47 @@ static int process_vnc(struct shell_state *shell)
 
 static void update_vnc(struct shell_state *shell, struct test_buffer *buffer)
 {
+	const uint16_t *previous;
+	const uint16_t *current;
+	unsigned int stride;
+	int minimum_x = TEST_WIDTH;
+	int minimum_y = TEST_HEIGHT;
+	int maximum_x = -1;
+	int maximum_y = -1;
+	int y;
+
 	if (!shell->vnc.screen)
 		return;
+	previous = (const uint16_t *)shell->vnc.screen->frameBuffer;
+	current = buffer->map;
+	stride = buffer->create.pitch / sizeof(*current);
+	for (y = 0; y < TEST_HEIGHT; y++) {
+		const uint16_t *old_row = previous + y * stride;
+		const uint16_t *new_row = current + y * stride;
+		int first;
+		int last;
+
+		if (!memcmp(old_row, new_row,
+			    TEST_WIDTH * sizeof(*new_row)))
+			continue;
+		for (first = 0; first < TEST_WIDTH; first++)
+			if (old_row[first] != new_row[first])
+				break;
+		for (last = TEST_WIDTH - 1; last > first; last--)
+			if (old_row[last] != new_row[last])
+				break;
+		if (first < minimum_x)
+			minimum_x = first;
+		if (last > maximum_x)
+			maximum_x = last;
+		if (minimum_y == TEST_HEIGHT)
+			minimum_y = y;
+		maximum_y = y;
+	}
 	shell->vnc.screen->frameBuffer = buffer->map;
-	rfbMarkRectAsModified(shell->vnc.screen, 0, 0, TEST_WIDTH, TEST_HEIGHT);
+	if (maximum_x >= minimum_x)
+		rfbMarkRectAsModified(shell->vnc.screen, minimum_x, minimum_y,
+				      maximum_x + 1, maximum_y + 1);
 }
 
 static void stop_vnc(struct shell_state *shell)
