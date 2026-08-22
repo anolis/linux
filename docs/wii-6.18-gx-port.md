@@ -11633,3 +11633,77 @@ window dragging, local pointer input, and VNC input to remain functional. Finish
 through F12 or SIGTERM and require exit zero, child reap, PTY count zero, fbcon
 restoration, clean GX unload, continuous uptime, and no GX/DRM timeout, FIFO
 stall, fallback, oops, panic, or machine check.
+
+Hardware interaction result: passed. The checksum-verified dependency-free
+candidate ran with the accepted GX module on the physical 640 by 480 display.
+The Wii detected and grabbed the Dell USB keyboard and Microsoft USB mouse, and
+the user confirmed that the task buttons plus minimize, maximize/restore, close,
+focus, and application interactions all worked well.
+
+Do not count this run as teardown acceptance. The invoking SSH deployment
+wrapper was interrupted with Ctrl-C instead of ending WiiDesk through F12 or a
+direct SIGTERM. The wrapper consequently reported status 255 and unloaded GX
+before the still-running client received a separate SIGTERM. GX did unregister,
+CPU scanout returned, and no graphics fault was logged, but the client remained
+as a zombie because this minimal init did not reap it. The start-menu successor
+must repeat the full teardown control without interrupting the wrapper.
+
+### Stage the WiiDesk start menu
+
+- Test branch: `feature/wii-kolibri-shell`
+- Candidate commit: `028531c24`
+
+Replace the permanently visible 112-pixel application launcher with a compact
+WiiDesk button in the bottom panel. The button opens a transient application
+menu above the panel with hard-shadow depth, crisp borders, color-coded entries,
+pointer hover selection, and running indicators. Closing the menu returns the
+entire horizontal area to applications; maximized windows now use the workspace
+from x=8 through the right display edge.
+
+Mouse clicks toggle the menu button, launch selected applications, dismiss the
+menu when clicking elsewhere, and never leak through the menu to covered
+windows. Keyboard arrows, Tab, Enter, Space, and Escape operate an open menu.
+F8 toggles it directly, while F1 through F3 retain direct application launch.
+Local USB and VNC input continue to use the same event path.
+
+The checksum-pinned artifacts are:
+
+- dependency-free static PowerPC shell SHA-256:
+  `a39ab4f3ed80d2ebf3fa40851247479dd78e1195358aba85904afaec353208ec`
+- VNC-enabled static PowerPC shell SHA-256:
+  `50e79ff8926b0201e80a65ec8df2f91986d0caaa10ec29c9163c8f21473a6503`
+
+Host validation passed dependency-free and VNC-enabled static PowerPC builds
+with warnings treated as errors, `git diff --check`, and strict checkpatch with
+no errors or warnings. The remaining strict checks are only identifiers owned
+by the external LibVNCServer API.
+
+Hardware acceptance requires the closed menu to leave no sidebar or stale
+pixels. Open it through both the panel button and F8, launch all three
+applications with mouse and keyboard, and dismiss it through Escape and clicks
+on the desktop, task panel, and windows. Confirm that menu header/padding clicks
+do not affect covered windows. Maximize and restore every application in the
+expanded workspace, then repeat task minimize/restore, focus, close/reopen,
+dragging, terminal input, Files navigation, and System telemetry.
+
+Finish with direct SIGTERM or F12 while leaving the deployment wrapper alive.
+Require exit zero, child reap, PTY count zero, fbcon restoration, clean GX
+unload, continuous uptime, and no GX/DRM timeout, FIFO stall, fallback, oops,
+panic, or machine check. Repeat menu operation once through authenticated VNC.
+
+### Plan the WiiDesk splash and PAM greeter
+
+The current Wii rootfs has PowerPC `libpam.so.0`, `libpam_misc.so.0`, and the
+standard `/etc/pam.d/login` and `common-auth` policies. A real PAM greeter is
+therefore feasible without embedding password verification in WiiDesk. The
+rootfs currently exposes only `root` as an interactive account, however, and
+DRM plus input event nodes are mode 0600 and owned by root. The GX device is
+likewise root-owned when its module is loaded.
+
+Create a non-root `wiidesk` account and explicit video, input, audio, and GX
+device policy before treating the greeter as a security boundary. The display
+manager should own an immediate splash, collect credentials through PAM, create
+the user session, drop supplementary groups and UID/GID, and execute WiiDesk.
+Logout must destroy the session and return to the greeter; failed authentication
+must not start or retain a privileged desktop. Keep an emergency text-console
+path available throughout development.
