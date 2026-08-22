@@ -11492,3 +11492,47 @@ compare the previous and newly presented RGB565 buffers, switch the exported
 framebuffer pointer, and mark only the bounding rectangle containing changed
 pixels. Re-run keyboard, pointer, telemetry, sustained-update, disconnect, and
 teardown controls with TigerVNC.
+
+### Stage dirty-rectangle WiiDesk VNC export
+
+- Test branch: `feature/wii-kolibri-shell`
+- Candidate commit: `9aa127bce`
+
+Replace full-frame invalidation with an old/new RGB565 comparison on every
+successful KMS presentation. Skip identical rows, find the first and last
+changed pixel in each remaining row, and union those differences into one
+bounding rectangle. Switch LibVNCServer to the newly visible scanout buffer and
+mark only that rectangle modified. A presentation with no pixel changes sends
+nothing.
+
+Require a tightly packed 640 by 480 RGB565 dumb buffer when VNC is enabled,
+because LibVNCServer does not expose an independent source-stride setting. This
+check does not affect dependency-free builds or the accepted KMS/GX path.
+
+The checksum-pinned artifacts are:
+
+- unchanged `zImage` / `dtbImage.wii` SHA-256:
+  `85137fa760fef6e840d5ef6cc0a74b8f1cf187a7f0a59a4e8b73fb3165b03463`
+- unchanged `gcn-gx.ko` SHA-256:
+  `bebd391507cc57104aa11a96f80783e56e13ed7cb26860f56027cdd1c8a4950c`
+- unchanged static minimal `libvncserver.a` SHA-256:
+  `8ec7f3793eb205f1086883846a0695d32d42372aa0e9a669763174e949f1fbbc`
+- static PowerPC dirty-rectangle VNC shell SHA-256:
+  `7318b869fed56521b8e070920324a3c3f7e52b10ca44b9ac10ccdd9ede2d61bd`
+
+Host validation passed warning-clean dependency-free and VNC-enabled static
+PowerPC builds, ShellCheck, `git diff --check`, and strict checkpatch with zero
+findings after excluding external LibVNCServer camelCase identifiers.
+
+Hardware acceptance requires TigerVNC keyboard and pointer input to feel
+interactive rather than arriving in a delayed batch. Exercise System telemetry,
+terminal typing and command output, launcher clicks, Files scrolling, and window
+dragging. Capture the viewer and require correct colors and no stale pixels after
+both small updates and window movement. On disconnect, compare server statistics
+against the rejected candidate and require substantially lower raw-equivalent
+and transmitted bytes per ordinary update.
+
+Finish with remote F12 or SIGTERM and require exit zero, child reap, PTY count
+zero, fbcon restoration, clean GX unload, continuous uptime, and no GX/DRM
+timeout, FIFO stall, fallback, oops, panic, or machine check. Direct LAN access
+to port 5900 must remain refused.
