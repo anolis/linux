@@ -1,3 +1,15 @@
+Wii Linux NXT
+=============
+
+This repository carries the modern Linux kernel port and experimental
+DRM/KMS and GX graphics stack for the Nintendo GameCube and Wii hardware
+family.  The current development baseline is Linux 6.18.
+
+Start with ``Documentation/wii-linux-nxt.rst`` for supported functionality,
+build instructions, hardware status, and the remaining graphics roadmap.
+WiiDesk is a separate userspace project and is intentionally not part of this
+kernel tree.
+
 Linux kernel
 ============
 
