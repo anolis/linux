@@ -61,6 +61,24 @@ WPA2/CCMP trace. Do not substitute WPA/TKIP, alter the known SDIO queue fix, or
 repeat control-port transport tests unless new evidence contradicts these
 positive controls.
 
+### 2026-08-23: b43 software-crypto control deployed
+
+The next replacement-Wii control keeps the production `wpa_supplicant` 2.10,
+WPA2/CCMP configuration, firmware, kernel, AP, and SDIO one-queue fix unchanged.
+It adds only `/etc/modprobe.d/b43-nohwcrypt-control.conf` with
+`options b43 nohwcrypt=1`, moving CCMP key handling and encryption out of b43
+hardware and into mac80211 software. The deployed configuration file SHA-256 is
+`a4604a94d12a200d7212c410e65efc8bea37b7fc18f6150a291d8c112f896876`.
+
+The positive control is not merely association: a valid result requires all
+four EAPOL messages, at least eight consecutive seconds in `COMPLETED`, DHCP,
+and usable bidirectional traffic. If it succeeds where hardware crypto reached
+`COMPLETED` and then received the AP's reason-2 deauthentication, investigate
+b43 key programming or encrypted PIO framing. If it reaches and retains
+`COMPLETED` but DHCP or traffic fails, investigate the mac80211 software-crypto
+data path separately. A failure before message 3 does not exercise this control
+and cannot rule software crypto in or out.
+
 ## 2026-07-28: CPU framebuffer positive control (invalid build)
 
 - Source implementation: `89a40599d` (`video: fbdev: port the Wii VI
