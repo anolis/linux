@@ -4,6 +4,63 @@ This ledger tracks the modern-kernel port of the Wii VI framebuffer and the
 reloadable GX accelerator. Hardware conclusions require a committed source
 state and a checksum-verified deployed image.
 
+## Persistent wireless baseline
+
+Do not reopen the original Wii `b43` SDIO authentication failure as an
+unexplained WPA problem. Its root cause and fix are established. The Wii SDIO
+receive path acknowledges directed QoS frames in hardware but does not deliver
+them to the b43 PIO receive queue. Kernel commit `68aab0768` advertises one
+hardware queue for SDIO-hosted b43 devices, suppressing WMM/QoS negotiation so
+the access point sends ordinary data frames. Runtime `b43-phy0 debug: QoS
+disabled` confirms that fix is active.
+
+The hardware positive control used Wii MAC `00:1e:35:98:ea:c9`, BSSID
+`6e:3b:6b:d9:91:64`, `wpa_supplicant` 2.3, and RSN/WPA2-PSK with CCMP. It
+received EAPOL messages 1 and 3, transmitted messages 2 and 4, reached
+`CTRL-EVENT-CONNECTED`, obtained DHCP, passed bidirectional ICMP, and sustained
+an SSH session. The original 3.15 test image SHA-256 was
+`91982ab5c1c4b67d4cbb74ce035789e6c4d460fa2e270727dd790a17b81f0bf5`;
+the same one-queue fix is carried in this 6.18 tree. The archived root-cause
+report is `wii-b43-sdio-qos-pr.md` in the Wii test-artifact archive.
+
+A 2026-08-23 fresh-rootfs failure on the replacement Wii, MAC
+`00:24:1e:47:de:6f`, is downstream of that solved defect. Passive monitor
+capture proves the AP's ordinary non-QoS EAPOL message 1 reaches Linux and a
+cryptographically valid message 2 is transmitted byte-for-byte over the air.
+The PMKID, PMK, PTK/KCK, and message-2 MIC were independently verified, and
+forcing PF_PACKET EAPOL instead of the nl80211 control port produced the same
+result.
+
+A subsequent production-config boot completed all four EAPOL messages,
+installed PTK and GTK, and reached `CTRL-EVENT-CONNECTED`. The AP
+deauthenticated the Wii about 1.75 seconds later with reason 2
+(`PREV_AUTH_NOT_VALID`); later retries stalled after message 2. This proves the
+credentials, handshake cryptography, and basic 2.10 supplicant path can work.
+Investigate post-key encrypted traffic, AP station state, and the replacement
+console/userspace interaction rather than the already-fixed SDIO QoS receive
+path.
+
+An isolated Debian PowerPC `wpa_supplicant` 2.3 control was then run on the
+same fresh rootfs, replacement Wii, kernel, firmware, AP, and WPA2/CCMP
+configuration. Three consecutive associations each received message 1, sent
+message 2, received no message 3, and were deauthenticated by the AP about
+3.4 seconds later with reason 2. The interface reported zero TX errors and the
+kernel continued to report `QoS disabled`. This rules out a regression specific
+to the rootfs's `wpa_supplicant` 2.10 as the general explanation. The production
+2.10 service was restored after the control.
+
+The complete 2.3 logs are archived under
+`wii-test-artifacts/wpa23-control-20260823/`. Their SHA-256 values are
+`3dc765ac70bd368bda2ac2d0843899bcb9b89e77b0226d161a02abb9f4793a51`
+for `wii-wpa23-control-wpa-20260823.txt` and
+`e9d2b078f6adc0bc7c3eddcc54908fd69ca5181b11a2cf58e1f015a8ca04878c`
+for `wii-wpa23-control-network-20260823.txt`.
+
+Before another wireless experiment, compare against the archived successful
+WPA2/CCMP trace. Do not substitute WPA/TKIP, alter the known SDIO queue fix, or
+repeat control-port transport tests unless new evidence contradicts these
+positive controls.
+
 ## 2026-07-28: CPU framebuffer positive control (invalid build)
 
 - Source implementation: `89a40599d` (`video: fbdev: port the Wii VI
