@@ -218,6 +218,23 @@ for `wpa_supplicant-wii.log`, and
 `7d4f4b469fa2f65f7d0783f90a1a0c8c4495c686e0df99dfe0d3941399e273d8`
 for `wii-network.log`.
 
+### 2026-08-23: fresh station-MAC control deployed
+
+The next run changes the replacement Wii's station identity from factory MAC
+`00:24:1e:47:de:6f` to locally administered MAC `02:24:1e:47:de:6f` before the
+interface is brought up. The address is collision-safe and does not impersonate
+the known-good original Wii. The service reads sysfs back and refuses to test if
+the requested address is not active.
+
+Everything else remains fixed: BSSID, WPA2/CCMP credentials, production
+`wpa_supplicant` 2.10, b43 firmware, kernel, SDIO one-queue fix, no-hardware-
+crypto control, targeted EAPOL ACK module, and automated retries. A success
+would isolate AP state or policy associated with the factory station MAC. A
+repeat of ACKed message 2 followed by no message 3 would rule out a stale
+per-station AP cache as the general cause. The service passes `sh -n` and
+`shellcheck`; its deployed SHA-256 is
+`842e2a55dc3da4c0f4a1c4635d77e0711e3f3a1355fdb0a00a45aadd66cc65ac`.
+
 ## 2026-07-28: CPU framebuffer positive control (invalid build)
 
 - Source implementation: `89a40599d` (`video: fbdev: port the Wii VI
