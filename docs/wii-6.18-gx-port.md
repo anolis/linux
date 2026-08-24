@@ -79,6 +79,22 @@ b43 key programming or encrypted PIO framing. If it reaches and retains
 data path separately. A failure before message 3 does not exercise this control
 and cannot rule software crypto in or out.
 
+The first boot was inconclusive. The service confirmed the deployed control
+file, but both association attempts received message 1, sent message 2, and
+were deauthenticated with reason 2 before message 3 or any key installation.
+Because `b43.nohwcrypt` is only exercised when mac80211 installs a key, this run
+does not test software CCMP. Preserve it as a pre-key failure control rather
+than recording it as a software-crypto failure.
+
+The complete run is archived under
+`wii-test-artifacts/nohwcrypt-control-20260823-run1/`. SHA-256 values are
+`41496a032b2aeb5950c62d974d9ba711339c062752ac2f99164d387a61bcb351`
+for `wpa_supplicant-wii.log`,
+`5057495b925ac5e5f35530da067fbebabf24ad88f94a5d34188a9860c85bf171`
+for `wii-network.log`, and
+`148d3d2e1f59f8ddfcbb76586766e06c59c6ca07651f9fdcf65b1a3b96f0a885`
+for `dmesg`.
+
 ## 2026-07-28: CPU framebuffer positive control (invalid build)
 
 - Source implementation: `89a40599d` (`video: fbdev: port the Wii VI
