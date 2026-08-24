@@ -368,6 +368,49 @@ immediately after one failure and remove the rule afterward. This should show
 whether RouterOS transmits handshake message 3 and fails to receive its 802.11
 ACK, rejects message 2 internally, or times out at another wireless stage.
 
+Hardware result: the AP-side counter capture materially narrows the failure.
+The temporary debug rule confirmed that the replacement Wii is accepted by
+default policy, connects at `-44` to `-54 dBm`, and is removed three to four
+seconds later for extensive data loss. During one association, the
+registration table showed only five logical frames while one hardware-frame
+counter advanced to 328; its byte count advanced in exact 153-byte units.
+`tx-frames-timed-out` remained zero while the entry existed, so that field is
+not a useful positive indicator on this RouterOS version.
+
+The archived successful WPA trace identifies the retried frame exactly.
+Message 1 is a 121-byte EAPOL frame, which is 153 bytes after adding the
+8-byte LLC and 24-byte 802.11 headers. Successful message 3 is a 155-byte
+EAPOL frame and would be 187 bytes with those headers. The AP hardware is
+therefore repeatedly transmitting message 1, not message 3, and is failing to
+receive most 802.11 ACKs from the production-card station. The generic
+RouterOS sniffer produced only a 24-byte PCAP header because locally consumed
+wireless EAPOL is not exposed through that capture path; this is an apparatus
+failure and not a negative packet result.
+
+A stronger same-hardware control then booted the known-good card in the exact
+same replacement Wii. The motherboard, BCM4318, factory MAC
+`00:24:1e:47:de:6f`, antenna, location, and AP were unchanged. Kernel
+`6.18.40-wii+ #2` loaded b43 firmware 666.2, completed WPA2-PSK/CCMP, obtained
+`10.3.10.59`, and accepted SSH. RouterOS reported
+`802.1x-port-enabled=yes`. This rules out the replacement Wii hardware,
+antenna, signal, credentials, ACL, and general MikroTik compatibility.
+
+The card control leaves two observed software variables. The working card's
+`b43.ko` SHA-256 is
+`4a48832d39cdae68376a2bf8d5e33652706efb144276ac6484fbfe93af080df0`
+and it loads firmware 666.2; the failing production module SHA-256 is
+`212b9a1e58dcb113a7459a468129258ec0134d5664da119bc33d64c60cd9ffed`
+and it loads firmware 784.2. The next controls must change one variable at a
+time on the failing card: first keep its production module and userspace while
+replacing only the four b43 firmware blobs with the archived 666.2 set; if
+that fails, restore 784.2 and test only the known-good module. The temporary
+MikroTik debug logging rule was removed after capture.
+
+The same-hardware control files are archived under
+`wii-test-artifacts/working-card-control-20260824/`. The router snapshot
+SHA-256 is
+`2d8630815bfed65563c91f8a2aa5bb8015cc414419e0fe756b5b35b65660ca45`.
+
 ## 2026-07-28: CPU framebuffer positive control (invalid build)
 
 - Source implementation: `89a40599d` (`video: fbdev: port the Wii VI
