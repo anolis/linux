@@ -140,6 +140,28 @@ a lead because monitor capture can miss short control frames. The b43 firmware
 `acked` status is the direct control: the last relevant TX report before each
 reason-2 deauthentication should establish whether the radio saw an ACK.
 
+The debugfs control completed and positively validated the TX-status ring.
+Each of the six attempts that reached EAPOL again received message 1, sent
+message 2, and received no message 3. Their snapshots contain the same pattern:
+a run of unacknowledged scan probes followed by exactly three ACKed frames at
+authentication time. In attempt 1 these are status sequences `0x000d` through
+`0x000f`; later attempts show equivalent clusters. Ordering strongly identifies
+the cluster as authentication, association, and message 2, but this remains an
+inference because debugfs records no frame type or skb contents. Add a targeted
+PIO diagnostic that labels the EAPOL skb before treating message-2 ACK as
+proven.
+
+The complete run is archived under
+`wii-test-artifacts/b43-txstatus-control-20260823/`. Core SHA-256 values are
+`268b44edc21dfc323d2e28f5f67ffa2deff0d46547853c3df34d7bd0adac9255`
+for `wpa_supplicant-wii.log`,
+`49967a8e0b83418f2184dd2fd18bc0adef22c8adf6787691dfe16bdb7bd866b9`
+for `wii-network.log`,
+`7389efb023e1935f244bbbebb45b079eb787022f6139f34e44237b35133b8d07`
+for `dmesg`, and
+`c2a4845c38e02df2dac4e1fc79ee56d45c4f5273f00d3a52bcd830eff7694401`
+for the decisive `attempt-1.txt` snapshot.
+
 ## 2026-07-28: CPU framebuffer positive control (invalid build)
 
 - Source implementation: `89a40599d` (`video: fbdev: port the Wii VI
