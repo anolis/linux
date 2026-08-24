@@ -508,6 +508,21 @@ Hardware acceptance requires the firmware-666.2 card to complete WPA and
 DHCP, accept an SSH key connection, run a command, and leave no seccomp,
 OpenSSH, kernel, or wireless failure in the returned logs.
 
+Initial deployment result: invalid. The deploy helper reported that it copied
+SHA-256
+`5e286833533c8f13fb3f5fcd41d14b5494566d841de64691f03564ce0b5f1f53`,
+but the completed build artifact subsequently resolved to SHA-256
+`e6a38ce22ff965689b4e5d49cfbefaba15132aaf71989d9bf46e4b77b01c5509`.
+Extracting the embedded config from the latter confirms
+`CONFIG_SECCOMP=y` and `CONFIG_SECCOMP_FILTER=y`. The Wii booted the former
+hash, completed Wi-Fi, but repeated the same pre-banner SSH reset. Because the
+deployed and final image hashes differ, that boot does not test the seccomp
+fix and cannot be used as a negative result.
+
+Redeploy only the completed `e6a38c...` image, verify that exact hash on the
+card, then repeat the existing acceptance test. Do not change firmware,
+OpenSSH configuration, or any other variable.
+
 ## 2026-07-28: CPU framebuffer positive control (invalid build)
 
 - Source implementation: `89a40599d` (`video: fbdev: port the Wii VI
