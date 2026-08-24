@@ -106,6 +106,24 @@ DHCP before declaring success. The test service passed `sh -n` and `shellcheck`;
 its deployed SHA-256 is
 `865f9bd3b7f64104ec3e8c161f2eac8c476a229b5beb54dc1984dd59fdf789b5`.
 
+The automated run positively confirmed `b43.nohwcrypt=1` and completed all ten
+attempts. Six attempts associated, received message 1, sent message 2, and
+received the AP's reason-2 deauthentication about 3.2 to 3.6 seconds later.
+Four attempts failed during rapid reassociation before reaching EAPOL. No
+attempt received message 3, installed a key, or entered `COMPLETED`, so software
+crypto again remained unexercised. The repeated pre-key result shifts the
+immediate investigation to whether the AP acknowledges the b43 PIO message-2
+transmission.
+
+The complete run is archived under
+`wii-test-artifacts/nohwcrypt-control-20260823-run2/`. SHA-256 values are
+`bb60158a93f08c527d3a2d4841d2f24271882fa6a1dbf6a03cc8938b7e28c907`
+for `wpa_supplicant-wii.log`,
+`499b0f423c0c51a4884c6370c7dd67359a65833d819e0cd53689f6dc095a4544`
+for `wii-network.log`, and
+`4e97133791f1cedebd420aa46532a4d63b3098f03ebc1108eb05faebce7c12bb`
+for `dmesg`.
+
 ## 2026-07-28: CPU framebuffer positive control (invalid build)
 
 - Source implementation: `89a40599d` (`video: fbdev: port the Wii VI
