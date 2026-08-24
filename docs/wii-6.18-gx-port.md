@@ -523,6 +523,14 @@ Redeploy only the completed `e6a38c...` image, verify that exact hash on the
 card, then repeat the existing acceptance test. Do not change firmware,
 OpenSSH configuration, or any other variable.
 
+Corrected deployment: completed. The deploy helper staged, copied, and
+verified SHA-256
+`e6a38ce22ff965689b4e5d49cfbefaba15132aaf71989d9bf46e4b77b01c5509`
+at `/gumboot/zImage.ngx`, then safely unmounted both card partitions. No build
+process remained active before checksumming, and extracting the config from
+this exact source image again confirmed `CONFIG_SECCOMP=y` and
+`CONFIG_SECCOMP_FILTER=y`. Hardware acceptance remains pending the next boot.
+
 ## 2026-07-28: CPU framebuffer positive control (invalid build)
 
 - Source implementation: `89a40599d` (`video: fbdev: port the Wii VI
