@@ -481,6 +481,33 @@ connection after DHCP. The file-backed log should identify whether the
 accepted connection fails in the monitor, authentication helper, session
 helper, privilege separation, sandbox, or dynamic-runtime path.
 
+Hardware result: the trace identified an exact kernel configuration failure.
+OpenSSH 10.4 started normally, loaded all four host keys, accepted the TCP
+connection, re-executed `sshd-session`, forked its network and monitor
+children, entered `sshd-auth` as unprivileged UID 989, and set
+`PR_SET_NO_NEW_PRIVS`. Attaching the pre-authentication seccomp filter then
+failed with `prctl(PR_SET_SECCOMP): Invalid argument`; the child exited 255
+before sending the SSH server banner. This explains the client-side reset and
+rules out keys, authentication policy, missing helpers, libraries, and Wi-Fi.
+
+### 2026-08-24: seccomp-filter kernel fix deployed
+
+- Candidate commit: `31631daba`
+- `zImage` SHA-256:
+  `5e286833533c8f13fb3f5fcd41d14b5494566d841de64691f03564ce0b5f1f53`
+
+Replace the Wii defconfig's explicit `# CONFIG_SECCOMP is not set` with
+`CONFIG_SECCOMP=y`. PowerPC already selects `CONFIG_HAVE_ARCH_SECCOMP=y` and
+`CONFIG_HAVE_ARCH_SECCOMP_FILTER=y`; with the existing networking config, the
+generated kernel configuration now contains both `CONFIG_SECCOMP=y` and
+`CONFIG_SECCOMP_FILTER=y`.
+
+This keeps OpenSSH's unprivileged pre-authentication filter sandbox intact.
+Do not work around the reset by weakening or disabling privilege separation.
+Hardware acceptance requires the firmware-666.2 card to complete WPA and
+DHCP, accept an SSH key connection, run a command, and leave no seccomp,
+OpenSSH, kernel, or wireless failure in the returned logs.
+
 ## 2026-07-28: CPU framebuffer positive control (invalid build)
 
 - Source implementation: `89a40599d` (`video: fbdev: port the Wii VI
