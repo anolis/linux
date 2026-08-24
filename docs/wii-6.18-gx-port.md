@@ -290,6 +290,38 @@ identical ACKed-message-2/no-message-3 failure against this independent AP
 will shift the boundary back to replacement-Wii behavior shared across
 authenticators.
 
+Hardware result: invalid due to host-AP apparatus failure. The Wii positively
+confirmed factory MAC `00:24:1e:47:de:6f` and `b43.nohwcrypt=0`, then began
+three second-AP attempts. It never reached EAPOL and its targeted EAPOL status
+log remained empty.
+
+The workstation's Intel AX200 repeatedly crashed its firmware while operating
+as this AP. Host kernel logs report firmware `77.f39cc7f9.0`,
+`NMI_INTERRUPT_UMAC_FATAL`, `ADVANCED_SYSASSERT`, and successive software reset
+and full reprobe cycles approximately ten seconds apart. NetworkManager
+therefore removed and recreated `wlp8s0` throughout the Wii attempts. This is
+not a valid second-authenticator result and says nothing about the Wii's WPA
+behavior.
+
+The AP profile was stopped with autoconnect disabled, and the test evidence is
+archived under `wii-test-artifacts/second-ap-host-failure-20260823/`. Wii log
+SHA-256 values are
+`e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`
+for the empty `b43-eapol-tx-control.log`,
+`1bd54811dee8e28b950bfec4465790e24038ce8f6e52af602ef860992fb48ef6`
+for `wpa_supplicant-wii.log`,
+`0f9b8d44f360cdf5503423a063f27b8a925e64352f27c76097c716437c291d5c`
+for `wii-network.log`, and
+`41a9a85b66985f2a42abb8394e9033aebe547ea685e065e6bd8d88a5686d5924`
+for `dmesg`. The concise host failure record SHA-256 is
+`5568c28cd31e93762b4b2c0887cac2182ad881b37fdec1d5cd6b56919962401f`.
+
+The checksum-preserved production 2.10 service and production b43 module were
+restored after archiving this failure; the temporary WPA configuration and
+disabled software-crypto control file were removed. A valid independent-
+authenticator control still requires separate AP hardware; do not repeat it on
+this AX200/firmware combination.
+
 ## 2026-07-28: CPU framebuffer positive control (invalid build)
 
 - Source implementation: `89a40599d` (`video: fbdev: port the Wii VI
