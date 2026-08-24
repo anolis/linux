@@ -95,6 +95,17 @@ for `wii-network.log`, and
 `148d3d2e1f59f8ddfcbb76586766e06c59c6ca07651f9fdcf65b1a3b96f0a885`
 for `dmesg`.
 
+To reach the post-key boundary without repeated card cycles, the second run
+temporarily replaces the card's network service with an automated ten-attempt
+control. Every attempt starts a fresh `wpa_supplicant` process, records a full
+debug trace, and resets immediately after a four-way-handshake failure instead
+of waiting through exponential wrong-key backoff. The service first verifies
+that `/sys/module/b43/parameters/nohwcrypt` reports `1`, prints each attempt on
+the Wii console, and still requires eight consecutive `COMPLETED` samples plus
+DHCP before declaring success. The test service passed `sh -n` and `shellcheck`;
+its deployed SHA-256 is
+`865f9bd3b7f64104ec3e8c161f2eac8c476a229b5beb54dc1984dd59fdf789b5`.
+
 ## 2026-07-28: CPU framebuffer positive control (invalid build)
 
 - Source implementation: `89a40599d` (`video: fbdev: port the Wii VI
