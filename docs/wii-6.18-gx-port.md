@@ -435,10 +435,23 @@ The deployed replacement hashes are the known-good 666.2 set:
 - `b0g0initvals5.fw`: `3d695c6bceadf189c0f0486a590d85ccbbcd69401222160e7e577cb7e2c3da0e`
 - `b0g0bsinitvals5.fw`: `61ab057c95d4852dbdaac5f22605a4b75cd996d027e36ecb417021bb899194fb`
 
-Hardware result is pending the next boot. WPA completion with the existing
-production module will identify firmware compatibility as the cause. If the
-card still fails at message 1, restore the archived production firmware and
-run the module-only control.
+Hardware result: accepted as a firmware compatibility fix. The same
+production module and service, with only these four firmware files changed,
+associated successfully and remained registered for at least 90 seconds.
+RouterOS reported `802.1x-port-enabled=yes`, WPA2-PSK/AES-CCM, signal around
+`-48 dBm`, `last-ip=10.3.10.59`, and no extensive-data-loss disconnect. This
+is the first controlled change that converts the production card from repeated
+message-1 loss to a stable authenticated station, strongly identifying the
+784.2 firmware set as incompatible with this 6.18 b43 path on the Wii.
+
+TCP port 22 was reachable, but the SSH daemon closed the session before key
+exchange during this boot, so Wii-side `wpa_cli` confirmation is pending a
+separate service check. The AP-side authentication and stability result is
+independent of SSH. The successful RouterOS result is archived under
+`wii-test-artifacts/firmware-only-control-20260824/`; its snapshot SHA-256 is
+`7533443211d5700898e287c09fe4946644c1319cd44b5d9c835c6155fb067b2a`.
+
+Do not run the module-only control unless a later test disproves this result.
 
 ## 2026-07-28: CPU framebuffer positive control (invalid build)
 
