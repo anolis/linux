@@ -195,6 +195,29 @@ and `shellcheck`; the replacement service SHA-256 is
 This makes any single completed EAPOL attempt sufficient even if later retries
 are interrupted.
 
+The corrected targeted run is a positive control. Six independently labeled
+EAPOL message-2 transmissions reported `frames=1`, `rts=0`, `suppression=0`,
+and `acked=1`; firmware sequences were `0x000f`, `0x002c`, `0x0055`, `0x009e`,
+`0x0148`, and `0x01f2`. Every corresponding WPA trace received message 1,
+sent message 2, received no message 3, and ended with the AP's reason-2
+deauthentication. Message 2 therefore reaches the AP radio with a valid FCS
+and receives its 802.11 ACK. Rule out PIO delivery, retry exhaustion, and
+unacknowledged/corrupt-on-air transmission as the cause of the pre-key failure.
+
+Combined with the independently verified PMK, PTK/KCK, message-2 MIC, and
+passive payload capture, the remaining boundary is the AP authenticator's
+station/PMK state or an interoperability detail above 802.11 delivery. Test a
+fresh locally administered station MAC before changing cryptography or b43 TX.
+
+The complete result is archived under
+`wii-test-artifacts/targeted-eapol-ack-20260823-positive/`. Core SHA-256 values
+are `4585fb98945b80073cf3d04553bac4aa883bd958863ce56c898fb769332635f0`
+for `b43-eapol-tx-control.log`,
+`3c3f880a1cd7a72dec14f0d42314af13327c8582ef3ac0cd627833c3f5d3b0a7`
+for `wpa_supplicant-wii.log`, and
+`7d4f4b469fa2f65f7d0783f90a1a0c8c4495c686e0df99dfe0d3941399e273d8`
+for `wii-network.log`.
+
 ## 2026-07-28: CPU framebuffer positive control (invalid build)
 
 - Source implementation: `89a40599d` (`video: fbdev: port the Wii VI
