@@ -344,6 +344,30 @@ for the accumulated `wii-network.log`, and
 `d7d63ccd0193bf29ddc37773770431a086883dc80ed12d2dd71f943ac814689d`
 for `dmesg`.
 
+### 2026-08-23: MikroTik AP-side wireless debug staged
+
+`GNet` is served directly by a MikroTik RB2011UiAS-2HnD running RouterOS and
+wireless package 6.49.19. It is virtual interface `wlan3`, BSSID
+`6e:3b:6b:d9:91:64`, on the physical Atheros AR9300 `wlan1`; its `Home`
+security profile permits WPA-PSK and WPA2-PSK with dynamic keys. No access-list
+entry matches or overrides the replacement Wii.
+
+The router's existing information log supplies an independent AP-side result
+for the production and preceding controls. Each association from
+`00:24:1e:47:de:6f` is logged as connected at strong signal between `-45` and
+`-51 dBm`, followed three to four seconds later by `disconnected, extensive
+data loss`. This aligns with Linux receiving message 1, sending an ACKed
+message 2, and then receiving the AP's reason-2 deauthentication. Weak signal
+is ruled out, but the information log does not reveal which AP transmission or
+ACK failed.
+
+The next unchanged production-card boot adds only a temporary MikroTik
+`wireless,debug` logging rule targeting the router's 1000-line in-memory ring.
+It does not alter radio, security, or station settings. Capture the debug ring
+immediately after one failure and remove the rule afterward. This should show
+whether RouterOS transmits handshake message 3 and fails to receive its 802.11
+ACK, rejects message 2 internally, or times out at another wireless stage.
+
 ## 2026-07-28: CPU framebuffer positive control (invalid build)
 
 - Source implementation: `89a40599d` (`video: fbdev: port the Wii VI
