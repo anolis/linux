@@ -444,14 +444,42 @@ is the first controlled change that converts the production card from repeated
 message-1 loss to a stable authenticated station, strongly identifying the
 784.2 firmware set as incompatible with this 6.18 b43 path on the Wii.
 
-TCP port 22 was reachable, but the SSH daemon closed the session before key
-exchange during this boot, so Wii-side `wpa_cli` confirmation is pending a
-separate service check. The AP-side authentication and stability result is
-independent of SSH. The successful RouterOS result is archived under
-`wii-test-artifacts/firmware-only-control-20260824/`; its snapshot SHA-256 is
+The returned card's own wpa_supplicant 2.10 trace independently confirms the
+entire exchange. Message 1 was received, message 2 was transmitted, message 3
+arrived 69 milliseconds later, message 4 was transmitted, and
+`Key negotiation completed` plus `CTRL-EVENT-CONNECTED` followed. About 145
+seconds later, a group-key renewal also completed. The network service logged
+`WPA stable; requesting DHCP lease` and `ready on 10.3.10.59/24`.
+
+TCP port 22 was reachable, but the OpenSSH 10.4 daemon closed sessions before
+key exchange during this boot. Static inspection found valid host keys, the
+PowerPC `sshd-auth` and `sshd-session` helpers, all directly required shared
+libraries, no TCP-wrapper denial, and key-based root login enabled. Treat this
+as a separate SSH child-process failure, not a wireless failure.
+
+The successful result is archived under
+`wii-test-artifacts/firmware-only-control-20260824/`. The RouterOS snapshot
+SHA-256 is
 `7533443211d5700898e287c09fe4946644c1319cd44b5d9c835c6155fb067b2a`.
+Fresh card-log SHA-256 values are
+`d7d1cec1b8fd3808fc0f57b6cdbc78c136f94c973ad4eb93f9e26cee5768d1b8`
+for `dmesg`,
+`2027b9c37878dbb2318cfb840b716e75856a0a30cc586bbff4ccf6bbf02ccb4a`
+for `wii-network.log`, and
+`f7fd586a41980fa710c7bf5e956923e14c587bea739b63518d2b1d61feccbbbb`
+for `wpa_supplicant-wii.log`.
 
 Do not run the module-only control unless a later test disproves this result.
+
+### 2026-08-24: OpenSSH pre-banner reset diagnostic deployed
+
+The card's existing OpenSSH policy and binaries are unchanged. Add only
+`-E /var/log/sshd-debug.log -o LogLevel=DEBUG3` to `SSHD_OPTS` in
+`/etc/default/ssh`, preserving the original file as
+`/etc/default/ssh.pre-debug-20260824`. On the next boot, attempt one SSH
+connection after DHCP. The file-backed log should identify whether the
+accepted connection fails in the monitor, authentication helper, session
+helper, privilege separation, sandbox, or dynamic-runtime path.
 
 ## 2026-07-28: CPU framebuffer positive control (invalid build)
 
