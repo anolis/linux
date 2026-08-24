@@ -265,6 +265,31 @@ for `wii-network.log`, and
 `ec34dd13797afc44290ba1a8e07230f4ef97df9f84762c8218985abbde2daa3b`
 for `dmesg`.
 
+### 2026-08-23: isolated second-authenticator control deployed
+
+The next run changes only the WPA authenticator. The workstation now hosts a
+temporary 2.4 GHz access point on channel 6 with SSID `WiiControl`, BSSID
+`34:cf:f6:fa:c7:e7`, RSN/WPA2-PSK, CCMP pairwise and group ciphers, and PMF
+disabled. NetworkManager provides an isolated `192.168.77.0/24` shared network
+through the otherwise unused `wlp8s0` adapter; the workstation's normal route
+remains on Ethernet. Credentials remain local to the card and NetworkManager
+profile and are intentionally not committed.
+
+The Wii control restores factory MAC `00:24:1e:47:de:6f` and requires
+`b43.nohwcrypt=0`, removing the two previous experimental variables. The
+kernel, firmware, SDIO one-queue fix, production `wpa_supplicant` 2.10, and
+targeted PIO EAPOL ACK diagnostic remain unchanged. The automated service still
+requires eight consecutive `COMPLETED` samples before DHCP and preserves direct
+EAPOL TX status after every attempt. It passes `sh -n` and ShellCheck; its
+deployed SHA-256 is
+`a22e2e052d047bdf6cbd544c41c9b5a5722cc2075856bf324924259398a09d73`.
+
+Success through message 3 and `COMPLETED` will isolate the recurring pre-key
+failure to interoperability or state in the original `GNet` authenticator. An
+identical ACKed-message-2/no-message-3 failure against this independent AP
+will shift the boundary back to replacement-Wii behavior shared across
+authenticators.
+
 ## 2026-07-28: CPU framebuffer positive control (invalid build)
 
 - Source implementation: `89a40599d` (`video: fbdev: port the Wii VI
