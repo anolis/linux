@@ -235,6 +235,36 @@ per-station AP cache as the general cause. The service passes `sh -n` and
 `shellcheck`; its deployed SHA-256 is
 `842e2a55dc3da4c0f4a1c4635d77e0711e3f3a1355fdb0a00a45aadd66cc65ac`.
 
+The control completed and positively verified that the locally administered
+address was active. Both the service and `wpa_supplicant` reported
+`02:24:1e:47:de:6f`. The first association received message 1, sent message 2,
+received a retransmitted message 1 about one second later, and sent message 2
+again. The two directly labeled PIO EAPOL statuses were firmware sequences
+`0x001c` and `0x001d`; both reported `suppression=0` and `acked=1`. The first
+required three frame attempts and the second one. A second association sent
+message 2 as sequence `0x0037`, which was ACKed on its first frame. Neither
+association received message 3, and both ended with the AP's reason-2
+deauthentication.
+
+Changing the complete station identity therefore does not alter the failure.
+Rule out stale AP cache or policy tied specifically to the replacement Wii's
+factory MAC as the general cause. Together with the validated message-2 MIC,
+passive payload capture, and direct firmware ACKs, the highest-value next
+control is a second WPA2/CCMP authenticator. Restore the factory station MAC and
+normal hardware-crypto baseline before that run so only the AP changes; retain
+the targeted EAPOL diagnostic for observation.
+
+The complete result is archived under
+`wii-test-artifacts/fresh-station-mac-20260823/`. SHA-256 values are
+`ee77577b8bf2a8409ee6422a9f67eeeadbe71dae2c007eae04604526bacf0857`
+for `b43-eapol-tx-control.log`,
+`e55f2a4cd77b784c16f2d47697e82d11515c733e8930681aa8a123203f7da538`
+for `wpa_supplicant-wii.log`,
+`8572b0e6dde9c9296960fcd5085289d3ddeafe3e8ba054efb2dc24fafd34a102`
+for `wii-network.log`, and
+`ec34dd13797afc44290ba1a8e07230f4ef97df9f84762c8218985abbde2daa3b`
+for `dmesg`.
+
 ## 2026-07-28: CPU framebuffer positive control (invalid build)
 
 - Source implementation: `89a40599d` (`video: fbdev: port the Wii VI
