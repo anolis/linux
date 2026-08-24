@@ -124,6 +124,22 @@ for `wii-network.log`, and
 `4e97133791f1cedebd420aa46532a4d63b3098f03ebc1108eb05faebce7c12bb`
 for `dmesg`.
 
+The next run enables the b43 driver's existing debugfs TX-status ring and
+captures a snapshot after every automated attempt. This requires no kernel
+change: `CONFIG_B43_DEBUG=y` already exposes each firmware report's sequence,
+frame count, retry count, suppression reason, and `acked` bit at
+`/sys/kernel/debug/b43/phy0/txstat`. The service validates that the endpoint is
+readable before starting WPA and stores the baseline plus per-attempt snapshots
+under `/var/log/b43-txstat-control/`. Its `sh -n`- and `shellcheck`-validated
+SHA-256 is
+`5324729b44b35d2b8a077658e125f62ed36bd2fb62d8b7f3c32cdfc86dae8093`.
+
+The saved passive air capture contains two decodable message-2 frames from the
+replacement Wii but no ACK frame addressed back to its MAC. Treat that only as
+a lead because monitor capture can miss short control frames. The b43 firmware
+`acked` status is the direct control: the last relevant TX report before each
+reason-2 deauthentication should establish whether the radio saw an ACK.
+
 ## 2026-07-28: CPU framebuffer positive control (invalid build)
 
 - Source implementation: `89a40599d` (`video: fbdev: port the Wii VI
