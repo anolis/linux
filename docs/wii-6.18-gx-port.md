@@ -181,6 +181,20 @@ The replaced production module was preserved on the card as
 The automated no-hardware-crypto and per-attempt debugfs controls remain active
 so a single boot produces repeated labeled EAPOL results.
 
+The first targeted boot reached attempt 9 and reproduced six message-2
+failures, but it did not preserve the new printk lines. The service wrote its
+kernel-log dump only after all ten attempts, while the card was returned during
+attempt 9. This is an apparatus failure, not a hardware result; draw no ACK
+conclusion from this run. Its incomplete logs are archived under
+`wii-test-artifacts/targeted-eapol-ack-20260823-run1-incomplete/`.
+
+The service now snapshots `PIO EAPOL TX status` lines and calls `sync` after
+every attempt, alongside the existing debugfs snapshot. It again passes `sh -n`
+and `shellcheck`; the replacement service SHA-256 is
+`5b038268f40c24d0810e2122f1e8b2964a4a61f5e7d5d3b775fda070d8c7471b`.
+This makes any single completed EAPOL attempt sufficient even if later retries
+are interrupted.
+
 ## 2026-07-28: CPU framebuffer positive control (invalid build)
 
 - Source implementation: `89a40599d` (`video: fbdev: port the Wii VI
