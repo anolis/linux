@@ -560,6 +560,26 @@ out:
 	return err;
 }
 
+static bool pio_skb_is_eapol(const struct sk_buff *skb)
+{
+	static const u8 eapol_snap[] = {
+		0xaa, 0xaa, 0x03, 0x00, 0x00, 0x00, 0x88, 0x8e,
+	};
+	const struct ieee80211_hdr *hdr;
+	unsigned int hdrlen;
+
+	if (skb->len < sizeof(*hdr))
+		return false;
+	hdr = (const struct ieee80211_hdr *)skb->data;
+	if (!ieee80211_is_data_present(hdr->frame_control))
+		return false;
+	hdrlen = ieee80211_hdrlen(hdr->frame_control);
+	if (skb->len < hdrlen + sizeof(eapol_snap))
+		return false;
+
+	return !memcmp(skb->data + hdrlen, eapol_snap, sizeof(eapol_snap));
+}
+
 void b43_pio_handle_txstatus(struct b43_wldev *dev,
 			     const struct b43_txstatus *status)
 {
@@ -574,6 +594,12 @@ void b43_pio_handle_txstatus(struct b43_wldev *dev,
 	B43_WARN_ON(!pack);
 
 	info = IEEE80211_SKB_CB(pack->skb);
+
+	if (pio_skb_is_eapol(pack->skb))
+		b43info(dev->wl,
+			"PIO EAPOL TX status: seq=0x%04x frames=%u rts=%u suppression=%u acked=%u\n",
+			status->seq, status->frame_count, status->rts_count,
+			status->supp_reason, status->acked);
 
 	b43_fill_txstatus_report(dev, info, status);
 
