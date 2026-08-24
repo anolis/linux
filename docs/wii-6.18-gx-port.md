@@ -162,6 +162,25 @@ for `dmesg`, and
 `c2a4845c38e02df2dac4e1fc79ee56d45c4f5273f00d3a52bcd830eff7694401`
 for the decisive `attempt-1.txt` snapshot.
 
+### 2026-08-23: targeted PIO EAPOL ACK diagnostic deployed
+
+Kernel commit `c1aa94165` identifies RFC1042 SNAP-encapsulated EAPOL frames
+while their skb is still attached to the b43 PIO transmit packet. For those
+frames only, it logs the exact firmware sequence, frame count, RTS count,
+suppression reason, and `acked` value before mac80211 consumes the TX status.
+This directly labels message 2 and removes the frame-ordering inference from the
+debugfs control.
+
+The PowerPC module build used `ARCH=powerpc`,
+`CROSS_COMPILE=powerpc-linux-gnu-`, and `-j16`. The deployed `b43.ko` has
+vermagic `6.18.40-wii+ preempt mod_unload` and SHA-256
+`3a7c15b395cb8512298256d167df2c27920088bd7c30b03cc4f7f8e2944f879d`.
+The replaced production module was preserved on the card as
+`b43.ko.production`; its SHA-256 is
+`212b9a1e58dcb113a7459a468129258ec0134d5664da119bc33d64c60cd9ffed`.
+The automated no-hardware-crypto and per-attempt debugfs controls remain active
+so a single boot produces repeated labeled EAPOL results.
+
 ## 2026-07-28: CPU framebuffer positive control (invalid build)
 
 - Source implementation: `89a40599d` (`video: fbdev: port the Wii VI
