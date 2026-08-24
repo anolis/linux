@@ -322,6 +322,28 @@ disabled software-crypto control file were removed. A valid independent-
 authenticator control still requires separate AP hardware; do not repeat it on
 this AX200/firmware combination.
 
+The completed boot after restoration verified both production hashes on the
+card:
+`e38b343edccbacc5c9596ded4b8ea44972eafebd45174ff0db6161f4a44f7502`
+for the init service and
+`212b9a1e58dcb113a7459a468129258ec0134d5664da119bc33d64c60cd9ffed`
+for `b43.ko`. The production configuration found `GNet` at approximately
+`-43 dBm` and ran its complete 60-second stabilization window. Three
+associations each received message 1, sent message 2, received no message 3,
+and were deauthenticated by the AP with reason 2. The service finalized
+`WPA did not stabilize (state=4WAY_HANDSHAKE)`. No key was installed, no DHCP
+request was made, and no new kernel fault occurred. This confirms the
+restoration itself is sound; it does not add a new wireless failure mode.
+
+The fresh production trace is archived under
+`wii-test-artifacts/production-restore-20260823/`. SHA-256 values are
+`83eec12353ee4b150e14f845b4f186792d5563a7c11a531887fa3ea3f7999a11`
+for `wpa_supplicant-wii.log`,
+`0b29ba60a371bea52dcd86f13f0b908db404b1133b0d7e99a0bdda55e504a7dd`
+for the accumulated `wii-network.log`, and
+`d7d63ccd0193bf29ddc37773770431a086883dc80ed12d2dd71f943ac814689d`
+for `dmesg`.
+
 ## 2026-07-28: CPU framebuffer positive control (invalid build)
 
 - Source implementation: `89a40599d` (`video: fbdev: port the Wii VI
