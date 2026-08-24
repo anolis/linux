@@ -531,6 +531,28 @@ process remained active before checksumming, and extracting the config from
 this exact source image again confirmed `CONFIG_SECCOMP=y` and
 `CONFIG_SECCOMP_FILTER=y`. Hardware acceptance remains pending the next boot.
 
+Hardware result: accepted. The Wii booted Linux `6.18.40-wii+ #2`, and
+`/proc/config.gz` reported both `CONFIG_SECCOMP=y` and
+`CONFIG_SECCOMP_FILTER=y`. Firmware 666.2 completed WPA and DHCP at
+`10.3.10.59`; the running `ucode5.fw` and production `b43.ko` retained their
+expected SHA-256 values.
+
+OpenSSH 10.4 accepted the host key connection, completed key authentication,
+opened the PAM root session, and executed the requested command. Its DEBUG3
+trace shows the pre-authentication child now passing the sandbox stage and
+terminating successfully instead of exiting 255 at `PR_SET_SECCOMP`. The
+kernel fault audit found no seccomp error, invalid argument, oops, panic,
+machine check, segmentation fault, OOM kill, or other new fault.
+
+The temporary file-backed debug options were removed from `/etc/default/ssh`
+after acceptance, restoring `SSHD_OPTS=` for subsequent boots. The successful
+trace SHA-256 is
+`7678e94a20523f5713cb5c227c700bafc98479609eb04a8ecec18dac853231d3`;
+the runtime acceptance summary SHA-256 is
+`8cb7244be5f2541043ef4c8f13b3e76b8a2e6656ced873166567ba8faa47d205`.
+Both are archived under
+`wii-test-artifacts/seccomp-ssh-acceptance-20260824/`.
+
 ## 2026-07-28: CPU framebuffer positive control (invalid build)
 
 - Source implementation: `89a40599d` (`video: fbdev: port the Wii VI
