@@ -411,6 +411,35 @@ The same-hardware control files are archived under
 SHA-256 is
 `2d8630815bfed65563c91f8a2aa5bb8015cc414419e0fe756b5b35b65660ca45`.
 
+### 2026-08-24: firmware-only b43 666.2 control deployed
+
+The failing production card was mounted as `/media/anolis/WIIDESK`. Its
+production b43 module was preserved unchanged, and only the four firmware
+blobs selected by the BCM4318 b43 path were replaced with the exact files
+extracted from the known-good card. The card was then synced and safely
+unmounted. No kernel, module, wpa_supplicant, init service, station MAC, or
+MikroTik setting changed.
+
+The pre-test production firmware was archived locally with these SHA-256
+values:
+
+- `ucode5.fw`: `6fcbba7662f8ad76acb8c343875fb5dea5182a4bb820a57f6e7e305def5a3b11`
+- `pcm5.fw`: `7eec99341ad49d4745752f4cedf33bfc8554820332c4443f1fbad62ad1da88f9`
+- `b0g0initvals5.fw`: `b5e5a8f63df0ac77f6b83f7dcbe76049eaab53d9c68bc810e956d3cc191fbfd7`
+- `b0g0bsinitvals5.fw`: `f3b4bc16f17efb5fa832b7acc2d3b44694d8cdccef0ebf5bba01f731f15fd555`
+
+The deployed replacement hashes are the known-good 666.2 set:
+
+- `ucode5.fw`: `e266e485572183e1e78b5e57761b9678904076f5c94136d6a2aa860ce3486754`
+- `pcm5.fw`: `7eec99341ad49d4745752f4cedf33bfc8554820332c4443f1fbad62ad1da88f9`
+- `b0g0initvals5.fw`: `3d695c6bceadf189c0f0486a590d85ccbbcd69401222160e7e577cb7e2c3da0e`
+- `b0g0bsinitvals5.fw`: `61ab057c95d4852dbdaac5f22605a4b75cd996d027e36ecb417021bb899194fb`
+
+Hardware result is pending the next boot. WPA completion with the existing
+production module will identify firmware compatibility as the cause. If the
+card still fails at message 1, restore the archived production firmware and
+run the module-only control.
+
 ## 2026-07-28: CPU framebuffer positive control (invalid build)
 
 - Source implementation: `89a40599d` (`video: fbdev: port the Wii VI
