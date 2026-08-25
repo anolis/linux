@@ -553,6 +553,55 @@ the runtime acceptance summary SHA-256 is
 Both are archived under
 `wii-test-artifacts/seccomp-ssh-acceptance-20260824/`.
 
+### 2026-08-24: accept persistent NTSC 480p output
+
+- Progressive implementation commit: `3ebb36648`
+- Boot-enable commit: `6936dcea8`
+- Deployed `zImage` / `dtbImage.wii` SHA-256:
+  `e3311c9562e35171bf37ee072e1e6d8734b2b9fa50eecb8e5a940a74edf8cf5e`
+- Generated `.config` SHA-256:
+  `3c52bdcbdd126b2e7299ff95dd8126294f618739614095d3faf0acd973764804`
+- Preserved 480i rollback-image SHA-256:
+  `e6a38ce22ff965689b4e5d49cfbefaba15132aaf71989d9bf46e4b77b01c5509`
+
+Restore the libogc `TVNtsc480Prog`-derived VI mode that was previously tested
+on the original Wii, and enable it persistently through the embedded
+`gcn_drm.progressive=1` boot argument. The progressive path selects
+non-interlaced DCR operation, the doubled VI clock, 480-line vertical timing,
+progressive horizontal and burst-blanking values, a single-field XFB mapping,
+and the progressive vblank interrupt. The accepted 480i programming remains
+available by omitting the parameter, and the previous kernel is retained as a
+checksum-verified host rollback artifact.
+
+The `-j16` build completed `zImage` and modules. The exact deployed image
+contains `CONFIG_SECCOMP=y`, `CONFIG_SECCOMP_FILTER=y`, and the progressive
+boot argument, preserving the accepted OpenSSH fix. The SSH deployment helper
+downloaded and verified the running 480i image before uploading the candidate
+to a temporary boot-partition file, verifying the new checksum, replacing
+`zImage.ngx`, syncing, and rebooting.
+
+Hardware result: accepted. The replacement Wii booted Linux
+`6.18.40-wii+` with `gcn_drm.progressive=1`; both the read-only `progressive`
+and `program_mode` parameters reported `Y`. VI readback exactly matched the
+progressive gate: `DCR=0005`, `VTR=1e0c`, `HTR0=476901ad`,
+`HTR1=02ea5140`, `PCR=2828`, and `CLK=0001`. DRM bound the fixed 640 by 480
+NTSC 480p mode. Firmware 666.2 again completed WPA and DHCP at
+`10.3.10.59`, and key-authenticated SSH remained operational.
+
+The first generated GX scanout after boot timed out waiting for its final PE
+finish and used the existing per-frame CPU-conversion fallback. This was a
+single startup event rather than a persistent acceleration failure: subsequent
+runtime counters reached 205 submitted GX frames and 409 PE finish interrupts,
+with the GX module still loaded and no additional timeout recorded. Preserve
+this observation for a later startup-race cleanup, but it does not invalidate
+the mode-setting result or leave the system in software-only scanout.
+
+Direct observation passed. The user confirmed that the progressive output is
+sharp, visibly much better than the interlaced mode, and no longer exhibits the
+monitor-abusing interlaced presentation that motivated this change. Make NTSC
+480p the production default for this component-output installation; retain
+480i as the explicit compatibility and rollback path.
+
 ## 2026-07-28: CPU framebuffer positive control (invalid build)
 
 - Source implementation: `89a40599d` (`video: fbdev: port the Wii VI
