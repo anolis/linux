@@ -11787,3 +11787,53 @@ Accept only after a second checksum-identical strict run, normal provider
 unload, CPU AVE scanout restoration, and a clean candidate interval with no
 timeout, FIFO stall, fallback, oops, panic, machine check, capacity leak,
 stale region, or display corruption.
+
+Hardware result: accepted in two complete checksum-identical runs. The pinned
+kernel booted as `6.18.40-wii+` with boot ID
+`29baf788-2446-4cc4-b38a-cf4a3a16985b`. Live SHA-256 verification matched the
+boot image, GX module, and strict client listed above.
+
+Both passing runs rejected every malformed state control and matched the new
+pixel oracles exactly. Disabled full-state rendering classified 17024
+interior pixels, matching the accepted stateless triangle. The translated
+half-size viewport classified 7381 pixels, the bounded scissor classified
+3165 pixels, and source-alpha blending classified 31878 pixels with an
+interior RGB565 sample of `0x800f`; all exterior pixels retained their exact
+seed values. The accepted single triangle and stateless batch again matched
+their 17024/46960 and 4278/4278/55636 classifications respectively. Every
+retained allocator, mapping, context, syncobj, copy, fill, rectangle, alias,
+scale, system-object, and XRGB8888 operation also passed in both complete
+runs, including all 307200 pixels in each full-frame case and exact MEM1
+capacity preservation.
+
+The first complete interval ran from 14688.375 through 14691.170 seconds and
+the second from 14729.211 through 14733.145 seconds. Both registered and
+unregistered the provider normally, selected and restored CPU AVE scanout,
+and ended with the CPU console live. Neither interval contains a GX/DRM
+timeout, FIFO stall, fallback, oops, panic, or machine check.
+
+A checksum-identical control between those passes preserved the previously
+tracked transient scaling anomaly: one 640-wide sample at `(547,4)` was
+`0x0390` rather than `0x0391`, a one-bit RGB565 blue-channel difference. Every
+new state oracle and every other regression passed in that run. The mismatch
+did not reproduce in the following run and is not attributed to this additive
+state ABI; retain it as an unresolved scale-path observation rather than
+weakening the exact oracle.
+
+An earlier attempt loaded the new provider and client under the old built-in
+DRM core before deploying the candidate kernel. The private provider callback
+layout and ioctl table did not match, producing seven unrelated `EINVAL`
+failures. That interval is invalid as a graphics result and establishes an
+operational requirement: any candidate that changes
+`struct gcn_drm_accel_ops` or the DRM ioctl table must deploy and boot its
+matching `zImage` before loading `gcn-gx.ko`.
+
+One `DRM frame timed out waiting for final PE finish` message at 14645.171
+seconds came from the older rootfs-installed batch module before the first
+candidate cycle. It is outside every candidate test interval. After
+acceptance, the rootfs module was replaced with the pinned candidate at
+`/lib/modules/6.18.40-wii+/kernel/drivers/video/fbdev/gcn-gx.ko`, `depmod`
+completed, and its SHA-256 was verified as
+`317b87bd4a53c2b628b3b6ddf1df68392a7dfcc577df7d74db9ea70c44fddbf3`.
+The prior module remains available as
+`gcn-gx.ko.backup.84900554f7c4233e57f75b97525bc57708e6d09fd40112b885c0850a0f7b9412`.
