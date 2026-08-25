@@ -25,12 +25,11 @@ Standard RGB565 KMS scanout sustains the full display cadence. Direct scanout
 of private tiled objects still awaits a standard DRM modifier, and no Mesa
 driver exists yet.
 
-The first Stage 5 operation is hardware-accepted: an untextured,
-Gouraud-shaded triangle with three screen-space RGBA8 vertices rendered into a
-tiled RGB565 GEM object. The next candidate batches up to 64 such triangles
-against one destination, EFB restore, primitive stream, copyback, and fence.
-Both operations establish semantic primitive submission without exposing raw
-GX packets, registers, or addresses.
+The first Stage 5 operations are hardware-accepted: an untextured,
+Gouraud-shaded triangle with three screen-space RGBA8 vertices, plus batches of
+up to 64 such triangles against one destination, EFB restore, primitive
+stream, copyback, and fence. Both operations establish semantic primitive
+submission without exposing raw GX packets, registers, or addresses.
 
 ## Non-negotiable constraints
 
@@ -238,23 +237,14 @@ No render client may wedge fbcon or prevent provider removal indefinitely.
 
 ## Immediate implementation slice
 
-Validate the bounded color-triangle batch before broadening 3D state:
+Add explicit viewport/scissor and blend/depth state to the accepted primitive
+batch in the next slice. Keep state semantic and bounded: fixed-width values,
+known enums, destination-relative rectangles, finite depth ranges, and no raw
+BP/XF register payloads. Establish disabled-state equivalence first, then add
+one positive visual and readback control for each enabled state while retaining
+the complete batch and 2D regression suite.
 
-- reject unknown contexts, null or inaccessible arrays, zero or excessive
-  counts, non-MEM1 destinations, wrong formats/layouts, reserved fields,
-  non-opaque alpha, out-of-bounds vertices, and any degenerate triangle;
-- copy and validate the complete userspace array before taking destination
-  ownership or emitting commands;
-- restore the destination into EFB once, emit one bounded triangle stream,
-  copy the completed EFB back once, and signal one reservation and optional
-  syncobj fence only after the final token;
-- verify two separated solid-color triangles and every safely classified
-  background pixel against a CPU oracle; and
-- rerun every established single-triangle, 2D, KMS, unload, and CPU-fallback
-  regression.
-
-After this passes, add state incrementally in the order required by a Gallium
-prototype: viewport/scissor and blend/depth state, indexed vertex buffers,
-RGB565 textures and samplers, then a bounded TEV combiner description. Each
-extension remains feature-bit-gated and must have a positive hardware control
-before Mesa depends on it.
+After state passes, add indexed vertex buffers, RGB565 textures and samplers,
+then a bounded TEV combiner description in the order required by a Gallium
+prototype. Each extension remains feature-bit-gated and must have a positive
+hardware control before Mesa depends on it.

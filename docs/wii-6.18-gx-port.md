@@ -11701,10 +11701,24 @@ module, a complete `-j16` PowerPC `zImage modules` build, and warning-clean
 static client compilation. A detached exact-commit UML build passed all 14
 `gcn_drm_render` tests and all 3 `gcn_gx_mem1` tests.
 
-Hardware acceptance remains pending. Deploy the pinned boot image because the
-new ioctl is part of built-in `gcn-drm`, boot it, verify all three artifact
-checksums, and run the complete strict render client. Require the new batch
-oracle and every retained allocator, mapping, context, syncobj, copy, fill,
-rectangle, alias, scale, system-object, XRGB8888, and single-triangle test to
-pass. Then unload GX and require normal CPU-console restoration with no
-timeout, FIFO stall, fallback, oops, panic, machine check, or capacity leak.
+Hardware result: accepted in two checksum-identical runs. The pinned kernel
+booted as `6.18.40-wii+` with boot ID
+`6738a911-dac0-446c-bb32-b98f2b8c6fac`. Live SHA-256 verification matched the
+boot image, GX module, and strict client listed above.
+
+Both runs rejected every malformed batch control and then matched 4278 red
+interior pixels, 4278 blue interior pixels, and 55636 preserved green
+background pixels. The accepted single triangle again matched 17024 interior
+and 46960 exterior pixels. Every retained allocator, mapping, context,
+syncobj, copy, fill, rectangle, alias, 25-case scale, wide scale, system-object,
+and XRGB8888 operation passed; full-frame cases matched all 307200 pixels and
+MEM1 capacity remained exactly 524288 bytes.
+
+The first candidate interval ran from 175.745 through 180.595 seconds and the
+checksum-reuse interval ran from 209.717 through 211.789 seconds. Both loaded
+and unloaded GX normally, selected AVE `0x62=0x00` only while GX was active,
+restored `0x62=0x02` for CPU scanout, and ended with the CPU console live. No
+timeout, FIFO stall, fallback, oops, panic, machine check, or capacity leak
+occurred in either interval. One scanout finish timeout at 23.052 seconds came
+from the older rootfs-installed module during boot, before the candidate was
+uploaded; it is outside both acceptance intervals.
