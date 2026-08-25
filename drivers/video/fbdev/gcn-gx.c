@@ -3096,8 +3096,8 @@ static int gcn_gx_drm_submit_rgb565(void *src_allocation,
 	if (ret)
 		goto out_unlock;
 
-	completed = gx_wait_for_pe_finishes(finish_count,
-					    GX_DRM_FRAME_PE_FINISHES);
+	/* The unique final token orders copyback; finish IRQs may coalesce. */
+	completed = gx_wait_for_pe_finishes(finish_count, 1);
 	if (!completed) {
 		pr_warn_ratelimited("gcn-gx: render copy timed out waiting for final PE finish\n");
 		ret = -ETIMEDOUT;
@@ -3155,8 +3155,8 @@ static int gcn_gx_drm_fill_rgb565(void *dst_allocation, u16 width,
 	if (ret)
 		goto out_unlock;
 
-	completed = gx_wait_for_pe_finishes(finish_count,
-					    GX_DRM_FRAME_PE_FINISHES);
+	/* The unique final token orders copyback; finish IRQs may coalesce. */
+	completed = gx_wait_for_pe_finishes(finish_count, 1);
 	if (!completed) {
 		pr_warn_ratelimited("gcn-gx: render fill timed out waiting for final PE finish\n");
 		ret = -ETIMEDOUT;
