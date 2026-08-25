@@ -11608,3 +11608,50 @@ destination preservation and copyback, destination reservation fencing, and
 syncobj completion on Wii hardware. Visual interpolated-color presentation is
 still pending and remains the positive control before exposing broader blend,
 depth, viewport, scissor, texture, or batch state to Mesa.
+
+### Accept coalesced full-surface completion and stage visual interpolation
+
+- Synchronization fix commit: `2919f8dc5`
+- Visual client commits: `26bd4bc1e`, `815175146`
+
+The private full-surface `COPY_RGB565` and `FILL_RGB565` providers still
+required two independently counted PE finish interrupts after a submission.
+This contradicted the accepted rectangle, blit, scale, and triangle paths.
+PE finish status is level-triggered, so adjacent draw and copy markers may
+coalesce into one interrupt even though `gx_submit_cmds()` observes its unique
+token after the final copyback.
+
+Require one finish event after that final token for the two remaining private
+full-surface paths. No command byte, cache operation, object fence, or UAPI
+contract changes. The exact pre-fix failure reproduced when the visual client
+performed an immediate fill after module registration:
+`gcn-gx: render fill timed out waiting for final PE finish`. The corrected
+module completed that immediate sequence without delay or timeout.
+
+The checksum-pinned artifacts are:
+
+- corrected `gcn-gx.ko` SHA-256:
+  `3c6d63959375686123a2a6e9e442e6a1bd593ca534c654b9beae8cb2a052a978`
+- unchanged strict render client SHA-256:
+  `3dbab26d9ec405a7faedc9ad441343a22f86d103632cf504199a97463da1a6a6`
+- visual KMS triangle client SHA-256:
+  `a8a4675545e4c78ad2fce216d27c871b36d54b05149b7f37765ee06088ecacb9`
+
+The isolated visual client filled a private tiled target black, rendered one
+red/green/blue Gouraud triangle, CPU-detiled the completed target into a
+standard linear RGB565 framebuffer, presented it through KMS for 15 seconds,
+and restored the previous console framebuffer. Its automated positive control
+counted 198388 black pixels, 12452 red-dominant pixels, 13356 green-dominant
+pixels, 12392 blue-dominant pixels, and 2329 distinct RGB565 colors. Direct
+human confirmation of vertex placement and smooth interpolation remains
+pending.
+
+Three consecutive checksum-identical strict suites then passed in full. Each
+run passed the 17024-interior/46960-exterior triangle oracle plus every
+allocator, mapping, context, syncobj, copy, fill, rectangle, alias, scale,
+system-object, and XRGB8888 check. Each provider registered and unloaded
+normally, CPU AVE scanout returned, and the three test intervals contain no
+GX/DRM timeout, FIFO stall, fallback, oops, panic, or machine check. The two
+different one-pixel scale mismatches observed before this candidate did not
+recur in these runs; they remain tracked as unexplained pre-fix transient
+observations rather than being declared solved by this synchronization change.
