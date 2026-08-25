@@ -15,6 +15,7 @@ Options:
   --client FILE        test client (default: /tmp/wii-gcn-render-test)
   --kms-client FILE    optional linear-render/KMS presentation client
   --kms-hold SECONDS   presentation duration (default: 5)
+  --kms-mode MODE      KMS scene: pattern or triangle (default: pattern)
   --flip-client FILE   optional linear-render/KMS page-flip client
   --flip-count COUNT   page flips requested from flip client (default: 120)
   --flip-format FORMAT source format: rgb565, xrgb8888, or
@@ -34,6 +35,7 @@ module=
 client=/tmp/wii-gcn-render-test
 kms_client=
 kms_hold=5
+kms_mode=pattern
 flip_client=
 flip_count=120
 flip_format=rgb565
@@ -62,6 +64,10 @@ while (($#)); do
 		;;
 	--kms-hold)
 		kms_hold=$2
+		shift
+		;;
+	--kms-mode)
+		kms_mode=$2
 		shift
 		;;
 	--flip-client)
@@ -117,6 +123,10 @@ if [[ -n $flip_client && ! -f $flip_client ]]; then
 fi
 if [[ ! $kms_hold =~ ^[0-9]+$ ]]; then
 	printf 'Invalid KMS hold duration: %s\n' "$kms_hold" >&2
+	exit 2
+fi
+if [[ $kms_mode != pattern && $kms_mode != triangle ]]; then
+	printf 'Invalid KMS mode: %s\n' "$kms_mode" >&2
 	exit 2
 fi
 if [[ ! $flip_count =~ ^[1-9][0-9]*$ ]] || (( flip_count > 10000 )); then
@@ -261,7 +271,7 @@ fi
 if [[ -n $kms_client ]]; then
 	remote_notice "running KMS presentation test"
 	set +e
-	remote_exec "$remote_kms_client /dev/dri/card0 $kms_hold"
+	remote_exec "$remote_kms_client /dev/dri/card0 $kms_hold $kms_mode"
 	test_status=$?
 	set -e
 	if (( test_status )); then

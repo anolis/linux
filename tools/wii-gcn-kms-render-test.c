@@ -98,6 +98,28 @@ static int create_linear_bo(int fd, struct drm_gcn_gem_create *bo,
 	return *map == MAP_FAILED ? -1 : 0;
 }
 
+static int create_tiled_bo(int fd, struct drm_gcn_gem_create *bo,
+			   unsigned int width, unsigned int height, void **map)
+{
+	struct drm_gcn_gem_mmap mmap_args = {};
+
+	*bo = (struct drm_gcn_gem_create) {
+		.width = width,
+		.height = height,
+		.format = DRM_GCN_GEM_FORMAT_RGB565,
+		.layout = DRM_GCN_GEM_LAYOUT_TILED_4X4,
+	};
+	if (xioctl(fd, DRM_IOCTL_GCN_GEM_CREATE, bo) < 0)
+		return -1;
+
+	mmap_args.handle = bo->handle;
+	if (xioctl(fd, DRM_IOCTL_GCN_GEM_MMAP, &mmap_args) < 0)
+		return -1;
+	*map = mmap(NULL, bo->size, PROT_READ | PROT_WRITE, MAP_SHARED, fd,
+		    mmap_args.offset);
+	return *map == MAP_FAILED ? -1 : 0;
+}
+
 static void close_bo(int fd, struct drm_gcn_gem_create *bo, void *map)
 {
 	struct drm_gem_close close_args = { .handle = bo->handle };
@@ -198,10 +220,25 @@ int main(int argc, char **argv)
 {
 	const char *card = argc > 1 ? argv[1] : "/dev/dri/card0";
 	unsigned int hold_seconds = argc > 2 ? strtoul(argv[2], NULL, 10) : 5;
+	const char *scene = argc > 3 ? argv[3] : "pattern";
+	int triangle_scene = !strcmp(scene, "triangle");
 	struct drm_gcn_gem_create src = {}, dst = {};
 	struct drm_gcn_ctx_create ctx = {};
 	struct drm_gcn_ctx_free free_ctx = {};
 	struct drm_gcn_blit_scaled blit = {};
+	struct drm_gcn_submit fill = {
+		.op = DRM_GCN_RENDER_OP_FILL_RGB565,
+	};
+	struct drm_gcn_draw_triangle draw = {
+		.vertices = {
+			{ SRC_WIDTH / 2, 20,
+			  DRM_GCN_RGBA8(0xff, 0, 0, 0xff) },
+			{ 24, SRC_HEIGHT - 20,
+			  DRM_GCN_RGBA8(0, 0, 0xff, 0xff) },
+			{ SRC_WIDTH - 24, SRC_HEIGHT - 20,
+			  DRM_GCN_RGBA8(0, 0xff, 0, 0xff) },
+		},
+	};
 	struct drm_mode_card_res resources;
 	struct drm_mode_modeinfo mode;
 	struct drm_mode_crtc old_crtc = {};
@@ -218,6 +255,12 @@ int main(int argc, char **argv)
 	int fd = -1;
 	int ret = EXIT_FAILURE;
 
+	if (strcmp(scene, "pattern") && !triangle_scene) {
+		fprintf(stderr, "unknown scene '%s' (expected pattern or triangle)\n",
+			scene);
+		goto out;
+	}
+
 	fd = open(card, O_RDWR | O_CLOEXEC);
 	if (fd < 0) {
 		perror(card);
@@ -227,21 +270,41 @@ int main(int argc, char **argv)
 		perror("DRM_IOCTL_SET_MASTER");
 		goto out;
 	}
-	if (create_linear_bo(fd, &src, SRC_WIDTH, SRC_HEIGHT,
-			     (void **)&src_map) < 0 ||
+	if ((triangle_scene ?
+	     create_tiled_bo(fd, &src, SRC_WIDTH, SRC_HEIGHT,
+			     (void **)&src_map) :
+	     create_linear_bo(fd, &src, SRC_WIDTH, SRC_HEIGHT,
+			      (void **)&src_map)) < 0 ||
 	    create_linear_bo(fd, &dst, DST_WIDTH, DST_HEIGHT,
 			     (void **)&dst_map) < 0) {
-		perror("create linear render objects");
+		perror("create render objects");
 		goto out;
 	}
-	for (y = 0; y < SRC_HEIGHT; y++)
-		for (x = 0; x < SRC_WIDTH; x++)
-			src_map[(size_t)y * SRC_WIDTH + x] = pattern(x, y);
+	if (!triangle_scene) {
+		for (y = 0; y < SRC_HEIGHT; y++)
+			for (x = 0; x < SRC_WIDTH; x++)
+				src_map[(size_t)y * SRC_WIDTH + x] =
+					pattern(x, y);
+	}
 	memset(dst_map, 0x5a, DST_WIDTH * DST_HEIGHT * sizeof(*dst_map));
 
 	if (xioctl(fd, DRM_IOCTL_GCN_CTX_CREATE, &ctx) < 0) {
 		perror("DRM_IOCTL_GCN_CTX_CREATE");
 		goto out;
+	}
+	if (triangle_scene) {
+		fill.ctx_id = ctx.id;
+		fill.dst_handle = src.handle;
+		if (xioctl(fd, DRM_IOCTL_GCN_SUBMIT, &fill) < 0) {
+			perror("seed triangle target");
+			goto out;
+		}
+		draw.ctx_id = ctx.id;
+		draw.dst_handle = src.handle;
+		if (xioctl(fd, DRM_IOCTL_GCN_DRAW_TRIANGLE, &draw) < 0) {
+			perror("DRM_IOCTL_GCN_DRAW_TRIANGLE");
+			goto out;
+		}
 	}
 	blit = (struct drm_gcn_blit_scaled) {
 		.ctx_id = ctx.id,
@@ -256,22 +319,66 @@ int main(int argc, char **argv)
 		perror("DRM_IOCTL_GCN_BLIT_SCALED");
 		goto out;
 	}
-	for (y = 0; y < DST_HEIGHT; y++) {
-		for (x = 0; x < DST_WIDTH; x++) {
-			unsigned int sx = scaled_source(x, SRC_WIDTH, DST_WIDTH);
-			unsigned int sy = scaled_source(y, SRC_HEIGHT, DST_HEIGHT);
-			uint16_t expected = pattern(sx, sy);
+	if (triangle_scene) {
+		unsigned int black = 0;
+		unsigned int red = 0;
+		unsigned int green = 0;
+		unsigned int blue = 0;
+		unsigned int distinct = 0;
+		unsigned char *seen = xcalloc(1U << 16, sizeof(*seen));
 
-			if (dst_map[(size_t)y * DST_WIDTH + x] != expected) {
-				fprintf(stderr,
-					"pixel mismatch at (%u,%u): got=%04x expected=%04x\n",
-					x, y, dst_map[(size_t)y * DST_WIDTH + x],
-					expected);
-				goto out;
+		for (y = 0; y < DST_HEIGHT; y++) {
+			for (x = 0; x < DST_WIDTH; x++) {
+				uint16_t pixel = dst_map[(size_t)y * DST_WIDTH + x];
+				unsigned int r = (pixel >> 11) & 0x1f;
+				unsigned int g = (pixel >> 5) & 0x3f;
+				unsigned int b = pixel & 0x1f;
+
+				if (!seen[pixel]) {
+					seen[pixel] = 1;
+					distinct++;
+				}
+				if (!pixel)
+					black++;
+				else if (r > 20 && g < 20 && b < 10)
+					red++;
+				else if (g > 40 && r < 10 && b < 10)
+					green++;
+				else if (b > 20 && r < 10 && g < 20)
+					blue++;
 			}
 		}
+		free(seen);
+		if (black < 100000 || red < 500 || green < 500 || blue < 500 ||
+		    distinct < 128) {
+			fprintf(stderr,
+				"triangle sanity failed: black=%u red=%u green=%u blue=%u distinct=%u\n",
+				black, red, green, blue, distinct);
+			goto out;
+		}
+		printf("gcn-kms-render-test: triangle black=%u red=%u green=%u blue=%u distinct=%u\n",
+		       black, red, green, blue, distinct);
+	} else {
+		for (y = 0; y < DST_HEIGHT; y++) {
+			for (x = 0; x < DST_WIDTH; x++) {
+				unsigned int sx = scaled_source(x, SRC_WIDTH,
+							DST_WIDTH);
+				unsigned int sy = scaled_source(y, SRC_HEIGHT,
+							DST_HEIGHT);
+				uint16_t expected = pattern(sx, sy);
+
+				if (dst_map[(size_t)y * DST_WIDTH + x] != expected) {
+					fprintf(stderr,
+						"pixel mismatch at (%u,%u): got=%04x expected=%04x\n",
+						x, y,
+						dst_map[(size_t)y * DST_WIDTH + x],
+						expected);
+					goto out;
+				}
+			}
+		}
+		puts("gcn-kms-render-test: all 307200 linear pixels passed");
 	}
-	puts("gcn-kms-render-test: all 307200 linear pixels passed");
 
 	if (get_resources(fd, &resources, &crtc_ids, &connector_ids) < 0 ||
 	    !resources.count_crtcs ||
@@ -310,8 +417,8 @@ int main(int argc, char **argv)
 		goto out;
 	}
 	displayed = 1;
-	printf("gcn-kms-render-test: displaying GX-scaled linear framebuffer for %u seconds\n",
-	       hold_seconds);
+	printf("gcn-kms-render-test: displaying GX %s scene for %u seconds\n",
+	       scene, hold_seconds);
 	fflush(stdout);
 	sleep(hold_seconds);
 	ret = EXIT_SUCCESS;
