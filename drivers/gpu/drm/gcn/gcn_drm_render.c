@@ -6,6 +6,8 @@
 #include <linux/ktime.h>
 #include <linux/module.h>
 #include <linux/slab.h>
+#include <linux/string.h>
+#include <linux/uaccess.h>
 #include <linux/xarray.h>
 
 #include <drm/drm_device.h>
@@ -843,6 +845,127 @@ out_put:
 	return ret;
 }
 
+static int gcn_drm_ioctl_draw_triangles(struct drm_device *drm, void *data,
+					struct drm_file *file)
+{
+	struct gcn_drm_render_file *render = file->driver_priv;
+	struct drm_gcn_draw_triangles *args = data;
+	struct drm_gcn_color_triangle *triangles = NULL;
+	struct gcn_drm_color_vertex *vertices = NULL;
+	struct drm_syncobj *out_syncobj = NULL;
+	struct drm_gem_object *dst_gem = NULL;
+	struct dma_fence *fence = NULL;
+	struct gcn_drm_bo *dst;
+	struct drm_exec exec;
+	unsigned int i;
+	unsigned int vertex_count;
+	int ret;
+
+	(void)drm;
+
+	ret = gcn_drm_render_validate_triangle_batch(args);
+	if (ret)
+		return ret;
+	if (!xa_load(&render->contexts, args->ctx_id))
+		return -ENOENT;
+
+	if (args->out_syncobj) {
+		out_syncobj = drm_syncobj_find(file, args->out_syncobj);
+		if (!out_syncobj)
+			return -ENOENT;
+	}
+
+	triangles = memdup_array_user(u64_to_user_ptr(args->triangles_ptr),
+				      args->triangle_count, sizeof(*triangles));
+	if (IS_ERR(triangles)) {
+		ret = PTR_ERR(triangles);
+		triangles = NULL;
+		goto out_put;
+	}
+
+	dst_gem = drm_gem_object_lookup(file, args->dst_handle);
+	if (!dst_gem) {
+		ret = -ENOENT;
+		goto out_put;
+	}
+	if (!gcn_drm_is_mem1_bo(dst_gem)) {
+		ret = -EINVAL;
+		goto out_put;
+	}
+
+	dst = to_gcn_drm_bo(dst_gem);
+	if (dst->format != DRM_GCN_GEM_FORMAT_RGB565 ||
+	    dst->layout != DRM_GCN_GEM_LAYOUT_TILED_4X4) {
+		ret = -EINVAL;
+		goto out_put;
+	}
+
+	for (i = 0; i < args->triangle_count; i++) {
+		ret = gcn_drm_render_validate_color_triangle(triangles[i].vertices,
+							     dst->width,
+							     dst->height);
+		if (ret)
+			goto out_put;
+	}
+
+	vertex_count = args->triangle_count * 3;
+	vertices = kcalloc(vertex_count, sizeof(*vertices), GFP_KERNEL);
+	if (!vertices) {
+		ret = -ENOMEM;
+		goto out_put;
+	}
+	for (i = 0; i < vertex_count; i++) {
+		const struct drm_gcn_color_vertex *src =
+			&triangles[i / 3].vertices[i % 3];
+
+		vertices[i].x = src->x;
+		vertices[i].y = src->y;
+		vertices[i].r = src->rgba >> 24;
+		vertices[i].g = src->rgba >> 16;
+		vertices[i].b = src->rgba >> 8;
+		vertices[i].a = src->rgba;
+	}
+
+	drm_exec_init(&exec, DRM_EXEC_INTERRUPTIBLE_WAIT, 1);
+	drm_exec_until_all_locked(&exec) {
+		ret = drm_exec_prepare_obj(&exec, dst_gem, 1);
+		drm_exec_retry_on_contention(&exec);
+		if (ret)
+			break;
+	}
+	if (ret)
+		goto out_exec;
+
+	fence = dma_fence_allocate_private_stub(ktime_get());
+	if (!fence) {
+		ret = -ENOMEM;
+		goto out_exec;
+	}
+
+	ret = gcn_drm_provider_draw_triangles(dst->provider, dst->allocation,
+					      dst->width, dst->height,
+					      vertices,
+					      args->triangle_count);
+	if (ret)
+		goto out_exec;
+
+	dma_resv_add_fence(dst_gem->resv, fence, DMA_RESV_USAGE_WRITE);
+	if (out_syncobj)
+		drm_syncobj_replace_fence(out_syncobj, fence);
+
+out_exec:
+	drm_exec_fini(&exec);
+out_put:
+	dma_fence_put(fence);
+	if (dst_gem)
+		drm_gem_object_put(dst_gem);
+	if (out_syncobj)
+		drm_syncobj_put(out_syncobj);
+	kfree(vertices);
+	kfree(triangles);
+	return ret;
+}
+
 const struct drm_ioctl_desc gcn_drm_render_ioctls[DRM_GCN_NUM_IOCTLS] = {
 	DRM_IOCTL_DEF_DRV(GCN_GET_PARAM, gcn_drm_ioctl_get_param,
 			  DRM_RENDER_ALLOW),
@@ -859,6 +982,8 @@ const struct drm_ioctl_desc gcn_drm_render_ioctls[DRM_GCN_NUM_IOCTLS] = {
 	DRM_IOCTL_DEF_DRV(GCN_BLIT_SCALED, gcn_drm_ioctl_blit_scaled,
 			  DRM_RENDER_ALLOW),
 	DRM_IOCTL_DEF_DRV(GCN_DRAW_TRIANGLE, gcn_drm_ioctl_draw_triangle,
+			  DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(GCN_DRAW_TRIANGLES, gcn_drm_ioctl_draw_triangles,
 			  DRM_RENDER_ALLOW),
 };
 

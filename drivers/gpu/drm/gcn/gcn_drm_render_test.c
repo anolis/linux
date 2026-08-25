@@ -17,8 +17,10 @@ static void gcn_drm_render_uapi_layout(struct kunit *test)
 	KUNIT_EXPECT_EQ(test, sizeof(struct drm_gcn_submit), 32U);
 	KUNIT_EXPECT_EQ(test, sizeof(struct drm_gcn_blit_scaled), 40U);
 	KUNIT_EXPECT_EQ(test, sizeof(struct drm_gcn_color_vertex), 8U);
+	KUNIT_EXPECT_EQ(test, sizeof(struct drm_gcn_color_triangle), 24U);
 	KUNIT_EXPECT_EQ(test, sizeof(struct drm_gcn_draw_triangle), 48U);
-	KUNIT_EXPECT_EQ(test, DRM_GCN_NUM_IOCTLS, 9);
+	KUNIT_EXPECT_EQ(test, sizeof(struct drm_gcn_draw_triangles), 48U);
+	KUNIT_EXPECT_EQ(test, DRM_GCN_NUM_IOCTLS, 10);
 	KUNIT_EXPECT_EQ(test, DRM_GCN_PARAM_FEATURES, 9);
 	KUNIT_EXPECT_EQ(test,
 			DRM_GCN_FEATURE_BLIT_RECT_RGB565_UNEQUAL_DIMS,
@@ -36,6 +38,8 @@ static void gcn_drm_render_uapi_layout(struct kunit *test)
 			1ULL << 14);
 	KUNIT_EXPECT_EQ(test, DRM_GCN_FEATURE_DRAW_TRIANGLE_RGB565,
 			1ULL << 15);
+	KUNIT_EXPECT_EQ(test, DRM_GCN_FEATURE_DRAW_TRIANGLES_RGB565,
+			1ULL << 16);
 }
 
 static void gcn_drm_render_validates_color_triangle(struct kunit *test)
@@ -78,6 +82,49 @@ static void gcn_drm_render_validates_color_triangle(struct kunit *test)
 	KUNIT_EXPECT_EQ(test,
 			gcn_drm_render_validate_triangle(&args, 640, 480),
 			-EINVAL);
+}
+
+static void gcn_drm_render_validates_triangle_batch(struct kunit *test)
+{
+	struct drm_gcn_draw_triangles args = {
+		.ctx_id = 1,
+		.dst_handle = 2,
+		.triangle_count = 2,
+		.triangles_ptr = 0x1000,
+	};
+	struct drm_gcn_color_triangle triangle = {
+		.vertices = {
+			{ 0, 0, DRM_GCN_RGBA8(0xff, 0, 0, 0xff) },
+			{ 640, 0, DRM_GCN_RGBA8(0, 0xff, 0, 0xff) },
+			{ 320, 480, DRM_GCN_RGBA8(0, 0, 0xff, 0xff) },
+		},
+	};
+	int ret;
+
+	KUNIT_EXPECT_EQ(test, gcn_drm_render_validate_triangle_batch(&args), 0);
+	ret = gcn_drm_render_validate_color_triangle(triangle.vertices, 640, 480);
+	KUNIT_EXPECT_EQ(test, ret, 0);
+	args.triangle_count = 0;
+	KUNIT_EXPECT_EQ(test, gcn_drm_render_validate_triangle_batch(&args),
+			-EINVAL);
+	args.triangle_count = DRM_GCN_MAX_TRIANGLES + 1;
+	KUNIT_EXPECT_EQ(test, gcn_drm_render_validate_triangle_batch(&args),
+			-EINVAL);
+	args.triangle_count = 2;
+	args.triangles_ptr = 0;
+	KUNIT_EXPECT_EQ(test, gcn_drm_render_validate_triangle_batch(&args),
+			-EINVAL);
+	args.triangles_ptr = 0x1000;
+	args.flags = 1;
+	KUNIT_EXPECT_EQ(test, gcn_drm_render_validate_triangle_batch(&args),
+			-EINVAL);
+	args.flags = 0;
+	args.pad[1] = 1;
+	KUNIT_EXPECT_EQ(test, gcn_drm_render_validate_triangle_batch(&args),
+			-EINVAL);
+	triangle.vertices[2] = triangle.vertices[0];
+	ret = gcn_drm_render_validate_color_triangle(triangle.vertices, 640, 480);
+	KUNIT_EXPECT_EQ(test, ret, -EINVAL);
 }
 
 static void gcn_drm_render_validates_scaled_blit(struct kunit *test)
@@ -422,6 +469,7 @@ static struct kunit_case gcn_drm_render_test_cases[] = {
 	KUNIT_CASE(gcn_drm_render_validates_rect_blit_submit),
 	KUNIT_CASE(gcn_drm_render_validates_scaled_blit),
 	KUNIT_CASE(gcn_drm_render_validates_color_triangle),
+	KUNIT_CASE(gcn_drm_render_validates_triangle_batch),
 	{}
 };
 

@@ -1033,6 +1033,35 @@ static int64_t triangle_edge(const struct drm_gcn_color_vertex *a,
 	return (bx - ax) * (py - ay) - (by - ay) * (px - ax);
 }
 
+static int triangle_classify(const struct drm_gcn_color_triangle *triangle,
+			     unsigned int x, unsigned int y, int64_t margin)
+{
+	int64_t area = triangle_edge(&triangle->vertices[0],
+				     &triangle->vertices[1],
+				     triangle->vertices[2].x,
+				     triangle->vertices[2].y);
+	int64_t edges[3] = {
+		triangle_edge(&triangle->vertices[0], &triangle->vertices[1],
+			      x, y),
+		triangle_edge(&triangle->vertices[1], &triangle->vertices[2],
+			      x, y),
+		triangle_edge(&triangle->vertices[2], &triangle->vertices[0],
+			      x, y),
+	};
+
+	if (area < 0) {
+		edges[0] = -edges[0];
+		edges[1] = -edges[1];
+		edges[2] = -edges[2];
+	}
+	if (edges[0] > margin && edges[1] > margin && edges[2] > margin)
+		return 1;
+	if (edges[0] < -margin || edges[1] < -margin ||
+	    edges[2] < -margin)
+		return -1;
+	return 0;
+}
+
 static void test_draw_triangle(int fd)
 {
 	struct drm_syncobj_create sync = {};
@@ -1185,6 +1214,171 @@ out:
 		fail("unmap triangle destination");
 	if (dst.handle && close_bo(fd, dst.handle))
 		fail("close triangle destination");
+}
+
+static void test_draw_triangles(int fd)
+{
+	struct drm_syncobj_create sync = {};
+	struct drm_syncobj_destroy destroy = {};
+	struct drm_gcn_ctx_create ctx = {};
+	struct drm_gcn_ctx_free free_ctx = {};
+	struct drm_gcn_gem_create dst = {};
+	struct drm_gcn_submit fill = {
+		.op = DRM_GCN_RENDER_OP_FILL_RGB565,
+		.data = 0x07e0,
+	};
+	struct drm_gcn_color_triangle triangles[2] = {
+		{
+			.vertices = {
+				{ 16, 16, DRM_GCN_RGBA8(0xff, 0, 0, 0xff) },
+				{ 112, 16, DRM_GCN_RGBA8(0xff, 0, 0, 0xff) },
+				{ 16, 112, DRM_GCN_RGBA8(0xff, 0, 0, 0xff) },
+			},
+		},
+		{
+			.vertices = {
+				{ 144, 144, DRM_GCN_RGBA8(0, 0, 0xff, 0xff) },
+				{ 240, 144, DRM_GCN_RGBA8(0, 0, 0xff, 0xff) },
+				{ 240, 240, DRM_GCN_RGBA8(0, 0, 0xff, 0xff) },
+			},
+		},
+	};
+	struct drm_gcn_draw_triangles draw = {
+		.triangle_count = ARRAY_SIZE(triangles),
+		.triangles_ptr = (uintptr_t)triangles,
+	};
+	struct drm_syncobj_wait sync_wait = {};
+	uint16_t *map = MAP_FAILED;
+	unsigned int checked_red = 0;
+	unsigned int checked_blue = 0;
+	unsigned int checked_background = 0;
+	const int64_t edge_margin = 512;
+
+	if (create_bo(fd, &dst)) {
+		fail("create triangle-batch destination");
+		return;
+	}
+	map = map_bo(fd, &dst);
+	if (map == MAP_FAILED) {
+		fail("map triangle-batch destination");
+		goto out;
+	}
+	if (ioctl(fd, DRM_IOCTL_GCN_CTX_CREATE, &ctx)) {
+		fail("create triangle-batch context");
+		goto out;
+	}
+	if (ioctl(fd, DRM_IOCTL_SYNCOBJ_CREATE, &sync)) {
+		fail("create triangle-batch syncobj");
+		goto out_ctx;
+	}
+
+	fill.ctx_id = ctx.id;
+	fill.dst_handle = dst.handle;
+	if (ioctl(fd, DRM_IOCTL_GCN_SUBMIT, &fill)) {
+		fail("seed triangle-batch background");
+		goto out_sync;
+	}
+
+	draw.ctx_id = ctx.id;
+	draw.dst_handle = dst.handle;
+	draw.out_syncobj = sync.handle;
+	draw.triangle_count = 0;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_TRIANGLES, &draw) || errno != EINVAL)
+		fail("empty triangle batch should return EINVAL");
+	draw.triangle_count = DRM_GCN_MAX_TRIANGLES + 1;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_TRIANGLES, &draw) || errno != EINVAL)
+		fail("oversized triangle batch should return EINVAL");
+	draw.triangle_count = ARRAY_SIZE(triangles);
+	draw.triangles_ptr = 0;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_TRIANGLES, &draw) || errno != EINVAL)
+		fail("null triangle-batch pointer should return EINVAL");
+	draw.triangles_ptr = 1;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_TRIANGLES, &draw) || errno != EFAULT)
+		fail("bad triangle-batch pointer should return EFAULT");
+	draw.triangles_ptr = (uintptr_t)triangles;
+	draw.pad[0] = 1;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_TRIANGLES, &draw) || errno != EINVAL)
+		fail("padded triangle batch should return EINVAL");
+	draw.pad[0] = 0;
+	triangles[1].vertices[0].rgba &= ~0xffU;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_TRIANGLES, &draw) || errno != EINVAL)
+		fail("invalid later triangle should reject complete batch");
+	triangles[1].vertices[0].rgba |= 0xff;
+
+	if (ioctl(fd, DRM_IOCTL_GCN_DRAW_TRIANGLES, &draw)) {
+		fail("draw RGB565 triangle batch");
+		goto out_sync;
+	}
+	{
+		uint32_t sync_handle = sync.handle;
+
+		sync_wait.handles = (uintptr_t)&sync_handle;
+		sync_wait.timeout_nsec = (int64_t)(monotonic_ns() +
+							  1000000000ULL);
+		sync_wait.count_handles = 1;
+		if (ioctl(fd, DRM_IOCTL_SYNCOBJ_WAIT, &sync_wait)) {
+			fail("wait for triangle-batch syncobj");
+			goto out_sync;
+		}
+	}
+
+	for (unsigned int y = 0; y < TEST_HEIGHT; y++) {
+		for (unsigned int x = 0; x < TEST_WIDTH; x++) {
+			int red = triangle_classify(&triangles[0], x, y,
+						    edge_margin);
+			int blue = triangle_classify(&triangles[1], x, y,
+						     edge_margin);
+			uint16_t expected;
+			size_t pixel;
+
+			if (red > 0) {
+				expected = 0xf800;
+				checked_red++;
+			} else if (blue > 0) {
+				expected = 0x001f;
+				checked_blue++;
+			} else if (red < 0 && blue < 0) {
+				expected = 0x07e0;
+				checked_background++;
+			} else {
+				continue;
+			}
+
+			pixel = tiled_rgb565_index(x, y, TEST_WIDTH);
+			if (map[pixel] != expected) {
+				fprintf(stderr,
+					"FAIL: triangle-batch mismatch at (%u,%u): got=0x%04x expected=0x%04x\n",
+					x, y, map[pixel], expected);
+				failures++;
+				goto out_sync;
+			}
+		}
+	}
+	if (!checked_red || !checked_blue || !checked_background)
+		fail("triangle-batch oracle did not classify pixels");
+	else
+		printf("DRAW: batch matched %u red, %u blue, and %u background RGB565 pixels\n",
+		       checked_red, checked_blue, checked_background);
+
+out_sync:
+	destroy.handle = sync.handle;
+	if (ioctl(fd, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy))
+		fail("destroy triangle-batch syncobj");
+out_ctx:
+	free_ctx.id = ctx.id;
+	if (ioctl(fd, DRM_IOCTL_GCN_CTX_FREE, &free_ctx))
+		fail("free triangle-batch context");
+out:
+	if (map != MAP_FAILED && munmap(map, dst.size))
+		fail("unmap triangle-batch destination");
+	if (dst.handle && close_bo(fd, dst.handle))
+		fail("close triangle-batch destination");
 }
 
 static void test_wide_scaled_blit(int fd)
@@ -1862,6 +2056,11 @@ int main(int argc, char **argv)
 		else
 			fail_value("triangle render feature", features,
 				   DRM_GCN_FEATURE_DRAW_TRIANGLE_RGB565);
+		if (features & DRM_GCN_FEATURE_DRAW_TRIANGLES_RGB565)
+			test_draw_triangles(fd);
+		else
+			fail_value("triangle-batch render feature", features,
+				   DRM_GCN_FEATURE_DRAW_TRIANGLES_RGB565);
 		if (features & DRM_GCN_FEATURE_BLIT_SCALED_RGB565)
 			test_wide_scaled_blit(fd);
 		if (features & DRM_GCN_FEATURE_BLIT_SCALED_RGB565)

@@ -65,29 +65,52 @@ gcn_drm_render_validate_scaled(const struct drm_gcn_blit_scaled *args,
 }
 
 static inline int
-gcn_drm_render_validate_triangle(const struct drm_gcn_draw_triangle *args,
-				 u16 dst_width, u16 dst_height)
+gcn_drm_render_validate_color_triangle(const struct drm_gcn_color_vertex vertices[3],
+				       u16 dst_width, u16 dst_height)
 {
 	s64 area;
 	unsigned int i;
 
-	if (!args || !args->ctx_id || !args->dst_handle || args->flags ||
-	    args->pad[0] || args->pad[1])
+	if (!vertices)
 		return -EINVAL;
 
 	for (i = 0; i < 3; i++) {
-		const struct drm_gcn_color_vertex *vertex = &args->vertices[i];
+		const struct drm_gcn_color_vertex *vertex = &vertices[i];
 
 		if (vertex->x > dst_width || vertex->y > dst_height ||
 		    (vertex->rgba & 0xff) != 0xff)
 			return -EINVAL;
 	}
 
-	area = (s64)(args->vertices[1].x - args->vertices[0].x) *
-		(args->vertices[2].y - args->vertices[0].y) -
-		(s64)(args->vertices[2].x - args->vertices[0].x) *
-		(args->vertices[1].y - args->vertices[0].y);
+	area = (s64)(vertices[1].x - vertices[0].x) *
+		(vertices[2].y - vertices[0].y) -
+		(s64)(vertices[2].x - vertices[0].x) *
+		(vertices[1].y - vertices[0].y);
 	return area ? 0 : -EINVAL;
+}
+
+static inline int
+gcn_drm_render_validate_triangle(const struct drm_gcn_draw_triangle *args,
+				 u16 dst_width, u16 dst_height)
+{
+	if (!args || !args->ctx_id || !args->dst_handle || args->flags ||
+	    args->pad[0] || args->pad[1])
+		return -EINVAL;
+
+	return gcn_drm_render_validate_color_triangle(args->vertices, dst_width,
+						      dst_height);
+}
+
+static inline int
+gcn_drm_render_validate_triangle_batch(const struct drm_gcn_draw_triangles *args)
+{
+	if (!args || !args->ctx_id || !args->dst_handle || args->flags ||
+	    !args->triangle_count ||
+	    args->triangle_count > DRM_GCN_MAX_TRIANGLES || args->pad0 ||
+	    !args->triangles_ptr || args->pad[0] || args->pad[1])
+		return -EINVAL;
+
+	return 0;
 }
 
 static inline int
