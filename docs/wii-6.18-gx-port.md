@@ -11530,3 +11530,51 @@ Host validation passed a warning-enabled PowerPC module build, `git diff
 acceptance remains pending: run the strict RGB565 copy case repeatedly, require
 the destination oracle to pass, and require no timeout, stall, fallback, oops,
 panic, or machine check.
+
+### Stage the first bounded fixed-function triangle operation
+
+- Development branch: `feature/gcn-driver-productization`
+- Candidate commit: `78027f623`
+- Kernel release: `6.18.40-wii+`
+
+Add the first Mesa-oriented primitive operation to the private render ABI. The
+feature-gated `DRM_IOCTL_GCN_DRAW_TRIANGLE` accepts one screen-space triangle,
+three opaque RGBA8 vertex colors, a context, a tiled MEM1 RGB565 destination,
+and an optional output syncobj. It does not accept FIFO bytes, register values,
+physical addresses, copy targets, or other unvalidated hardware state.
+
+The DRM core validates the context and object, format and layout, reserved
+fields, coordinate bounds, alpha, and non-degenerate geometry. It locks the
+destination reservation, invokes the serialized provider, attaches a write
+fence, and replaces the optional output syncobj after synchronous completion.
+The GX provider restores existing destination pixels into EFB, emits a direct
+XY plus RGBA8 `GX_TRIANGLES` primitive through the established direct-color
+state, copies the completed EFB back to the destination, waits for PE
+completion, and performs the required cache transitions.
+
+The strict PowerPC render client first seeds a green 256 by 256 target, checks
+that invalid alpha, coordinates, padding, and degenerate geometry are rejected,
+draws a solid red triangle, waits its syncobj, and verifies pixels away from
+rasterization edges with a CPU inside/outside oracle over the native tiled
+RGB565 object.
+
+The checksum-pinned artifacts are:
+
+- `zImage` / `dtbImage.wii` SHA-256:
+  `fbeb55f7f9e60c21dae32d60c295f5dd989064d8440af309a8691396c10ecbf6`
+- `gcn-gx.ko` SHA-256:
+  `15b12d8ce7fb32c5b026551870ed6976efe3fa2cc3976c13e70a9fe5c4d73b39`
+- static PowerPC `wii-gcn-render-test` SHA-256:
+  `3dbab26d9ec405a7faedc9ad441343a22f86d103632cf504199a97463da1a6a6`
+
+Host validation passed all 16 targeted KUnit tests, a clean `-j16` PowerPC
+`modules zImage` build, warning-enabled driver and static-client builds,
+`git diff --check`, and strict full-patch checkpatch with zero diagnostics.
+
+Hardware acceptance requires the complete strict render client to pass,
+including its new triangle oracle and every established allocator, mapping,
+context, syncobj, fill, rectangle, copy, scale, and system-object regression.
+Then display an interpolated RGB triangle through standard KMS and require
+correct full-frame output. Unload the provider and require normal CPU console
+restoration. Reject the candidate on any mismatch, timeout, FIFO stall,
+fallback, oops, panic, machine check, stale region, or display corruption.
