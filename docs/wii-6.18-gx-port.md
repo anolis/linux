@@ -11837,3 +11837,43 @@ completed, and its SHA-256 was verified as
 `317b87bd4a53c2b628b3b6ddf1df68392a7dfcc577df7d74db9ea70c44fddbf3`.
 The prior module remains available as
 `gcn-gx.ko.backup.84900554f7c4233e57f75b97525bc57708e6d09fd40112b885c0850a0f7b9412`.
+
+### Version the private accelerator registration ABI
+
+- Candidate commit: `1e5cb1652`
+- `zImage` / `dtbImage.wii` SHA-256:
+  `08d89d2ef288d991ecb8325f26f3bb9b007b62f36a42f75e6ba84af5c36aed6d`
+- `gcn-gx.ko` SHA-256:
+  `86f4e92e516ebd8b255d07a968167073969a89a332459b60ef17177712dde702`
+- unchanged static `wii-gcn-render-test` SHA-256:
+  `b61a736c328d6f29e6a66a8931240524d35663f2de1b871067e01be2b8494389`
+
+The semantic-state deployment exposed a private kernel/module ABI hazard. A
+new `gcn-gx.ko` was initially loaded under the previous built-in DRM core. The
+new state callback had been inserted before existing blit callbacks, so the
+old core interpreted it as `blit_rect_rgb565` and seven unrelated strict
+operations returned `EINVAL`. Linux accepted the module because the exported
+registration symbol itself had not changed.
+
+Rename the private registration exports to `gcn_drm_register_accel_v2` and
+`gcn_drm_unregister_accel_v2`. The matching module imports those exact symbols
+and the matching kernel exports them. Preserve all current callback offsets,
+and establish an explicit maintenance rule: append future callbacks only at
+the end of `struct gcn_drm_accel_ops`, and bump the registration symbol suffix
+for every layout change. No UAPI, callback implementation, FIFO command,
+register value, cache operation, or rendered pixel changes in this candidate.
+
+Host validation passed `git diff --check`, strict checkpatch with zero
+diagnostics, warning-enabled compilation of both changed PowerPC objects, and
+a complete `-j16` PowerPC `zImage modules` build. Static symbol inspection
+confirmed that the module imports only the two v2 registration symbols and
+that the candidate kernel exports both.
+
+Hardware acceptance requires bidirectional mismatch controls. First, load the
+v2 module under the currently booted v1 core and require clean unresolved-v2
+symbol rejection with no provider registration or display failure. Then boot
+the v2 kernel and load the preserved v1 module; require clean unresolved-v1
+symbol rejection and continued CPU scanout. Finally, load the matching v2
+module, run the complete checksum-pinned strict suite, unload it, and require
+normal CPU console restoration with no timeout, stall, fallback, oops, panic,
+or machine check.
