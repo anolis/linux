@@ -11508,3 +11508,25 @@ desktop can proceed now using standard RGB565 dumb buffers. Separately,
 improving full-frame XRGB8888 requires reducing its packed-to-tiled RGB565
 conversion and memory/cache traffic; that optimization is no longer a blocker
 for beginning desktop-userspace integration.
+
+### Correct the render-copy PE completion baseline
+
+- Development branch: `feature/gcn-driver-productization`
+
+The production audit found that `gcn_gx_drm_submit_rgb565()` passed an
+uninitialized local `finish_count` to `gx_wait_for_pe_finishes()`. The unique
+PE token observed by `gx_submit_cmds()` still ordered the destination copy, so
+the accepted hardware results remain evidence for command completion and
+pixel correctness. The following finish-IRQ wait could nevertheless pass or
+time out according to an indeterminate stack value.
+
+Sample `gx_pe_finish_count` while holding `gx_submit_lock`, immediately before
+building the copy submission. This matches every other synchronous GX render
+operation and changes no FIFO command byte, register value, allocation, cache
+operation, or UAPI contract.
+
+Host validation passed a warning-enabled PowerPC module build, `git diff
+--check`, and strict patch checkpatch with zero diagnostics. Hardware
+acceptance remains pending: run the strict RGB565 copy case repeatedly, require
+the destination oracle to pass, and require no timeout, stall, fallback, oops,
+panic, or machine check.

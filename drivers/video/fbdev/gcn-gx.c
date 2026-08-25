@@ -3059,6 +3059,7 @@ static int gcn_gx_drm_submit_rgb565(void *src_allocation,
 	flush_dcache_range((unsigned long)dst->cpu_addr,
 			   (unsigned long)dst->cpu_addr + bytes);
 
+	finish_count = READ_ONCE(gx_pe_finish_count);
 	fifo_pos = 0;
 	gx_load_libogc_init_preamble();
 	gx_setup_display_copy_state();
