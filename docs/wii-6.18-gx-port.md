@@ -11643,8 +11643,16 @@ standard linear RGB565 framebuffer, presented it through KMS for 15 seconds,
 and restored the previous console framebuffer. Its automated positive control
 counted 198388 black pixels, 12452 red-dominant pixels, 13356 green-dominant
 pixels, 12392 blue-dominant pixels, and 2329 distinct RGB565 colors. Direct
-human confirmation of vertex placement and smooth interpolation remains
-pending.
+human review found the interpolated triangle's chroma visually ambiguous, so
+it was not accepted by subjective inspection alone. The checksum-identical
+client then held the established full-screen quadrant fixture through the same
+GX-to-XFB and KMS path. Its oracle passed all 307200 linear pixels, while the
+user confirmed top-left red, top-right green, bottom-left blue, bottom-right
+white, and the center magenta/gold checkerboard. The driver selected AVE
+`0x62=0x00` for GX scanout and restored `0x62=0x02` before WiiDesk resumed.
+This controlled positive result confirms correct chroma order and accepts the
+visual presentation path; interpolation made the original triangle harder to
+classify but did not expose a chroma regression.
 
 Three consecutive checksum-identical strict suites then passed in full. Each
 run passed the 17024-interior/46960-exterior triangle oracle plus every
