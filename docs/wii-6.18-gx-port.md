@@ -11732,3 +11732,58 @@ Preserve the prior module as
 `gcn-gx.ko.backup.f5745a452793ecec12be422555718b6ffca7356e84de5461a57f887753dcd487`.
 The next boot will therefore auto-load the accepted provider rather than the
 older build that produced the out-of-interval timeout.
+
+### Stage bounded semantic triangle state
+
+- Candidate commit: `285c160c0`
+- `zImage` / `dtbImage.wii` SHA-256:
+  `a15c5ec5b87efc199c02adaf27922d53f6ede5fa091705ea816da2f80bcb6740`
+- `gcn-gx.ko` SHA-256:
+  `317b87bd4a53c2b628b3b6ddf1df68392a7dfcc577df7d74db9ea70c44fddbf3`
+- static `wii-gcn-render-test` SHA-256:
+  `b61a736c328d6f29e6a66a8931240524d35663f2de1b871067e01be2b8494389`
+- detached UML KUnit log SHA-256:
+  `f80c783c7db7da6080e7c533594bbcd28da6c01c60aabd4b063e19ff85bd0965`
+
+Add feature-gated `DRM_IOCTL_GCN_DRAW_TRIANGLES_STATE_RGB565` as the first
+bounded fixed-function state operation. The request retains the accepted
+kernel-copied array of 1 through 64 semantic color triangles and adds a fixed
+24-byte state block containing viewport, scissor, and blend mode. It exposes
+no FIFO bytes, raw register values, physical addresses, copy targets, or
+unbounded arrays. The accepted single-triangle and stateless batch ioctls are
+unchanged.
+
+The DRM core rejects unknown blend modes, empty or out-of-destination
+viewports and scissors, nonzero padding, and all existing malformed batch
+cases before taking the destination lock or invoking the provider. Legacy and
+unblended paths continue to require opaque vertex alpha. Arbitrary vertex
+alpha is accepted only with source-alpha blending.
+
+The GX provider begins from the accepted direct-color state, emits a semantic
+XF viewport with the Wii EFB bias, programs the proven BP scissor registers,
+and selects either disabled blending or additive source-alpha blending with
+`SRC_ALPHA` and `INV_SRC_ALPHA`. It restores the destination into EFB once,
+draws the complete batch once, copies back once, and retains the accepted
+token, PE finish, reservation-fence, and optional syncobj flow. Depth state is
+deliberately deferred until the semantic vertex ABI carries a Z coordinate.
+
+Host validation passed `git diff --check`, strict full-patch checkpatch with
+zero diagnostics, warning-enabled compilation of all changed PowerPC driver
+objects, a complete `-j16` PowerPC `zImage modules` build, and warning-clean
+static client compilation. A detached exact-commit UML build passed all 15
+`gcn_drm_render` tests and all 3 `gcn_gx_mem1` tests.
+
+Hardware acceptance is pending. Run the checksum-pinned strict client and
+require every established allocator, mapping, context, syncobj, copy, fill,
+rectangle, alias, scale, system-object, XRGB8888, single-triangle, and
+stateless-batch regression to pass. The new controls must reject invalid
+blend, rectangle, and alpha state without partial execution; disabled
+full-state rendering must match the stateless baseline; translated viewport
+and bounded scissor pixels must match their CPU oracles; and 50-percent red
+over blue must land within the conservative RGB565 blend range while every
+exterior pixel remains byte-exact.
+
+Accept only after a second checksum-identical strict run, normal provider
+unload, CPU AVE scanout restoration, and a clean candidate interval with no
+timeout, FIFO stall, fallback, oops, panic, machine check, capacity leak,
+stale region, or display corruption.
