@@ -11663,3 +11663,48 @@ GX/DRM timeout, FIFO stall, fallback, oops, panic, or machine check. The two
 different one-pixel scale mismatches observed before this candidate did not
 recur in these runs; they remain tracked as unexplained pre-fix transient
 observations rather than being declared solved by this synchronization change.
+
+### Stage bounded color-triangle batching
+
+- Candidate commit: `da4ccde89`
+- `zImage` / `dtbImage.wii` SHA-256:
+  `cc0ea7a123179825886598938fa189cb7fab8c70d5f0452b388eddad1b7541e1`
+- `gcn-gx.ko` SHA-256:
+  `84900554f7c4233e57f75b97525bc57708e6d09fd40112b885c0850a0f7b9412`
+- static `wii-gcn-render-test` SHA-256:
+  `cc85a2ee51335e7f1ae9a9c98a97aa4349939c6abfe49e70314a5d2c483c1a7e`
+- detached UML KUnit log SHA-256:
+  `42d43901716544b04183c321536aa25b628ce1832bdb86b45736fc9424485a93`
+
+Add feature-gated `DRM_IOCTL_GCN_DRAW_TRIANGLES` as the first bounded primitive
+batch. One request targets one private tiled MEM1 RGB565 object and names a
+kernel-copied array of 1 through 64 semantic color triangles. The DRM core
+rejects an unknown context, wrong object class/format/layout, null or
+inaccessible pointer, zero or excessive count, nonzero flags or padding,
+non-opaque color, out-of-bounds vertex, or any degenerate triangle before it
+locks the destination or invokes the provider.
+
+The GX provider restores the destination into EFB once, emits all vertices in
+one `GX_TRIANGLES` primitive, copies EFB back once, waits for the accepted
+final token and finish event, and publishes one destination reservation fence
+plus optional syncobj. The accepted single-triangle ioctl remains unchanged.
+
+The strict client adds a two-triangle positive control: separated solid red
+and blue triangles over a preserved green destination. Its CPU oracle checks
+every pixel safely classified away from either raster edge. It also requires
+empty, oversized, null-pointer, inaccessible-pointer, padded, and
+partially-invalid batches to fail without partial execution.
+
+Host validation passed strict patch checkpatch with zero diagnostics,
+warning-enabled PowerPC compilation of both changed DRM objects and the GX
+module, a complete `-j16` PowerPC `zImage modules` build, and warning-clean
+static client compilation. A detached exact-commit UML build passed all 14
+`gcn_drm_render` tests and all 3 `gcn_gx_mem1` tests.
+
+Hardware acceptance remains pending. Deploy the pinned boot image because the
+new ioctl is part of built-in `gcn-drm`, boot it, verify all three artifact
+checksums, and run the complete strict render client. Require the new batch
+oracle and every retained allocator, mapping, context, syncobj, copy, fill,
+rectangle, alias, scale, system-object, XRGB8888, and single-triangle test to
+pass. Then unload GX and require normal CPU-console restoration with no
+timeout, FIFO stall, fallback, oops, panic, machine check, or capacity leak.
