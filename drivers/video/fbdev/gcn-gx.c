@@ -1574,6 +1574,26 @@ static void gx_draw_color_rect(u16 x0, u16 y0, u16 x1, u16 y1,
 	gx_wr8(r); gx_wr8(g); gx_wr8(b); gx_wr8(0xff);
 }
 
+#if IS_ENABLED(CONFIG_DRM_GCN_GX)
+static void
+gx_draw_color_triangle(const struct gcn_drm_color_vertex vertices[3])
+{
+	unsigned int i;
+
+	gx_wr8(0x90); /* GX_TRIANGLES | vtxfmt 0 */
+	gx_wr16be(3);
+
+	for (i = 0; i < 3; i++) {
+		wg_f32_bits(f32_from_u16(vertices[i].x));
+		wg_f32_bits(f32_from_u16(vertices[i].y));
+		gx_wr8(vertices[i].r);
+		gx_wr8(vertices[i].g);
+		gx_wr8(vertices[i].b);
+		gx_wr8(vertices[i].a);
+	}
+}
+#endif
+
 static void gx_draw_color_quad(u16 width, u16 height, u8 r, u8 g, u8 b)
 {
 	gx_draw_color_rect(0, 0, width, height, r, g, b);
@@ -2946,7 +2966,8 @@ static int gcn_gx_drm_mem1_info(struct gcn_drm_mem1_info *info)
 			 DRM_GCN_FEATURE_SYSTEM_GEM |
 			 DRM_GCN_FEATURE_BLIT_SCALED_SYSTEM_RGB565 |
 			 DRM_GCN_FEATURE_SYSTEM_GEM_LINEAR |
-			 DRM_GCN_FEATURE_BLIT_SCALED_SYSTEM_XRGB8888_TO_RGB565;
+			 DRM_GCN_FEATURE_BLIT_SCALED_SYSTEM_XRGB8888_TO_RGB565 |
+			 DRM_GCN_FEATURE_DRAW_TRIANGLE_RGB565;
 	mutex_unlock(&gx_mem1_lock);
 	return 0;
 }
@@ -3216,6 +3237,77 @@ static int gcn_gx_drm_fill_rect_rgb565(void *dst_allocation, u16 width,
 	completed = gx_wait_for_pe_finishes(finish_count, 1);
 	if (!completed) {
 		pr_warn_ratelimited("gcn-gx: rectangle fill timed out waiting for final PE finish\n");
+		ret = -ETIMEDOUT;
+		goto out_unlock;
+	}
+
+	invalidate_dcache_range((unsigned long)dst->cpu_addr,
+				(unsigned long)dst->cpu_addr + bytes);
+
+out_unlock:
+	mutex_unlock(&gx_submit_lock);
+	return ret;
+}
+
+static int
+gcn_gx_drm_draw_triangle_rgb565(void *dst_allocation, u16 width, u16 height,
+				const struct gcn_drm_color_vertex vertices[3])
+{
+	struct gx_mem1_allocation *dst = dst_allocation;
+	u32 finish_count;
+	size_t bytes;
+	long completed;
+	unsigned int i;
+	int ret;
+
+	if (!dst || !vertices || !width || !height || (width & 3) ||
+	    (height & 3))
+		return -EINVAL;
+	for (i = 0; i < 3; i++) {
+		if (vertices[i].x > width || vertices[i].y > height ||
+		    vertices[i].a != 0xff)
+			return -EINVAL;
+	}
+
+	bytes = (size_t)width * height * sizeof(u16);
+	if (bytes > dst->size)
+		return -E2BIG;
+	if (!READ_ONCE(gx_accel_ready))
+		return -ENODEV;
+
+	mutex_lock(&gx_submit_lock);
+	flush_dcache_range((unsigned long)dst->cpu_addr,
+			   (unsigned long)dst->cpu_addr + bytes);
+
+	finish_count = READ_ONCE(gx_pe_finish_count);
+	fifo_pos = 0;
+	gx_load_libogc_init_preamble();
+	gx_setup_display_copy_state();
+
+	/* Preserve destination pixels around the triangle. */
+	gx_setup_rgb565_texture_state(width, height);
+	gx_setup_texture_rgb565(dst->cpu_addr, width, height);
+	gx_draw_color_quad(width, height, 0xff, 0xff, 0xff);
+	gx_load_bp_reg(0x45000002);
+	for (i = 0; i < 32; i++)
+		gx_wr8(0);
+
+	gx_setup_vertex_color_state(width, height);
+	gx_draw_color_triangle(vertices);
+	gx_load_bp_reg(0x45000002);
+	for (i = 0; i < 32; i++)
+		gx_wr8(0);
+
+	gx_set_copy_clear_rgb(0x00, 0x00, 0x00);
+	gx_copy_efb_to_rgb565_texture(dst->cpu_addr, width, height, true);
+	ret = gx_submit_cmds("render-draw-triangle");
+	if (ret)
+		goto out_unlock;
+
+	/* The final token orders copyback; closely spaced finish IRQs may merge. */
+	completed = gx_wait_for_pe_finishes(finish_count, 1);
+	if (!completed) {
+		pr_warn_ratelimited("gcn-gx: triangle draw timed out waiting for final PE finish\n");
 		ret = -ETIMEDOUT;
 		goto out_unlock;
 	}
@@ -3690,6 +3782,7 @@ static const struct gcn_drm_accel_ops gcn_gx_drm_accel_ops = {
 	.submit_rgb565 = gcn_gx_drm_submit_rgb565,
 	.fill_rgb565 = gcn_gx_drm_fill_rgb565,
 	.fill_rect_rgb565 = gcn_gx_drm_fill_rect_rgb565,
+	.draw_triangle_rgb565 = gcn_gx_drm_draw_triangle_rgb565,
 	.blit_rect_rgb565 = gcn_gx_drm_blit_rect_rgb565,
 	.blit_scaled_rgb565 = gcn_gx_drm_blit_scaled_rgb565,
 	.blit_scaled_system_rgb565 = gcn_gx_drm_blit_scaled_system_rgb565,

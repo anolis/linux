@@ -16,7 +16,9 @@ static void gcn_drm_render_uapi_layout(struct kunit *test)
 	KUNIT_EXPECT_EQ(test, sizeof(struct drm_gcn_wait), 16U);
 	KUNIT_EXPECT_EQ(test, sizeof(struct drm_gcn_submit), 32U);
 	KUNIT_EXPECT_EQ(test, sizeof(struct drm_gcn_blit_scaled), 40U);
-	KUNIT_EXPECT_EQ(test, DRM_GCN_NUM_IOCTLS, 8);
+	KUNIT_EXPECT_EQ(test, sizeof(struct drm_gcn_color_vertex), 8U);
+	KUNIT_EXPECT_EQ(test, sizeof(struct drm_gcn_draw_triangle), 48U);
+	KUNIT_EXPECT_EQ(test, DRM_GCN_NUM_IOCTLS, 9);
 	KUNIT_EXPECT_EQ(test, DRM_GCN_PARAM_FEATURES, 9);
 	KUNIT_EXPECT_EQ(test,
 			DRM_GCN_FEATURE_BLIT_RECT_RGB565_UNEQUAL_DIMS,
@@ -32,6 +34,50 @@ static void gcn_drm_render_uapi_layout(struct kunit *test)
 	KUNIT_EXPECT_EQ(test,
 			DRM_GCN_FEATURE_BLIT_SCALED_SYSTEM_XRGB8888_TO_RGB565,
 			1ULL << 14);
+	KUNIT_EXPECT_EQ(test, DRM_GCN_FEATURE_DRAW_TRIANGLE_RGB565,
+			1ULL << 15);
+}
+
+static void gcn_drm_render_validates_color_triangle(struct kunit *test)
+{
+	struct drm_gcn_draw_triangle args = {
+		.ctx_id = 1,
+		.dst_handle = 2,
+		.vertices = {
+			{ 0, 0, DRM_GCN_RGBA8(0xff, 0, 0, 0xff) },
+			{ 640, 0, DRM_GCN_RGBA8(0, 0xff, 0, 0xff) },
+			{ 320, 480, DRM_GCN_RGBA8(0, 0, 0xff, 0xff) },
+		},
+	};
+
+	KUNIT_EXPECT_EQ(test,
+			gcn_drm_render_validate_triangle(&args, 640, 480), 0);
+	args.vertices[1].x = 641;
+	KUNIT_EXPECT_EQ(test,
+			gcn_drm_render_validate_triangle(&args, 640, 480),
+			-EINVAL);
+	args.vertices[1].x = 640;
+	args.vertices[2].rgba &= ~0xffU;
+	KUNIT_EXPECT_EQ(test,
+			gcn_drm_render_validate_triangle(&args, 640, 480),
+			-EINVAL);
+	args.vertices[2].rgba |= 0xff;
+	args.vertices[2].x = 0;
+	args.vertices[2].y = 0;
+	KUNIT_EXPECT_EQ(test,
+			gcn_drm_render_validate_triangle(&args, 640, 480),
+			-EINVAL);
+	args.vertices[2].x = 320;
+	args.vertices[2].y = 480;
+	args.flags = 1;
+	KUNIT_EXPECT_EQ(test,
+			gcn_drm_render_validate_triangle(&args, 640, 480),
+			-EINVAL);
+	args.flags = 0;
+	args.pad[1] = 1;
+	KUNIT_EXPECT_EQ(test,
+			gcn_drm_render_validate_triangle(&args, 640, 480),
+			-EINVAL);
 }
 
 static void gcn_drm_render_validates_scaled_blit(struct kunit *test)
@@ -375,6 +421,7 @@ static struct kunit_case gcn_drm_render_test_cases[] = {
 	KUNIT_CASE(gcn_drm_render_validates_rect_fill_submit),
 	KUNIT_CASE(gcn_drm_render_validates_rect_blit_submit),
 	KUNIT_CASE(gcn_drm_render_validates_scaled_blit),
+	KUNIT_CASE(gcn_drm_render_validates_color_triangle),
 	{}
 };
 

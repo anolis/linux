@@ -750,6 +750,99 @@ out_put:
 	return ret;
 }
 
+static int gcn_drm_ioctl_draw_triangle(struct drm_device *drm, void *data,
+				       struct drm_file *file)
+{
+	struct gcn_drm_render_file *render = file->driver_priv;
+	struct drm_gcn_draw_triangle *args = data;
+	struct gcn_drm_color_vertex vertices[3];
+	struct drm_syncobj *out_syncobj = NULL;
+	struct drm_gem_object *dst_gem = NULL;
+	struct dma_fence *fence = NULL;
+	struct gcn_drm_bo *dst;
+	struct drm_exec exec;
+	unsigned int i;
+	int ret;
+
+	(void)drm;
+
+	if (!args->ctx_id || !args->dst_handle || args->flags ||
+	    args->pad[0] || args->pad[1])
+		return -EINVAL;
+	if (!xa_load(&render->contexts, args->ctx_id))
+		return -ENOENT;
+
+	if (args->out_syncobj) {
+		out_syncobj = drm_syncobj_find(file, args->out_syncobj);
+		if (!out_syncobj)
+			return -ENOENT;
+	}
+
+	dst_gem = drm_gem_object_lookup(file, args->dst_handle);
+	if (!dst_gem) {
+		ret = -ENOENT;
+		goto out_put;
+	}
+	if (!gcn_drm_is_mem1_bo(dst_gem)) {
+		ret = -EINVAL;
+		goto out_put;
+	}
+
+	dst = to_gcn_drm_bo(dst_gem);
+	if (dst->format != DRM_GCN_GEM_FORMAT_RGB565 ||
+	    dst->layout != DRM_GCN_GEM_LAYOUT_TILED_4X4) {
+		ret = -EINVAL;
+		goto out_put;
+	}
+	ret = gcn_drm_render_validate_triangle(args, dst->width, dst->height);
+	if (ret)
+		goto out_put;
+
+	for (i = 0; i < 3; i++) {
+		vertices[i].x = args->vertices[i].x;
+		vertices[i].y = args->vertices[i].y;
+		vertices[i].r = args->vertices[i].rgba >> 24;
+		vertices[i].g = args->vertices[i].rgba >> 16;
+		vertices[i].b = args->vertices[i].rgba >> 8;
+		vertices[i].a = args->vertices[i].rgba;
+	}
+
+	drm_exec_init(&exec, DRM_EXEC_INTERRUPTIBLE_WAIT, 1);
+	drm_exec_until_all_locked(&exec) {
+		ret = drm_exec_prepare_obj(&exec, dst_gem, 1);
+		drm_exec_retry_on_contention(&exec);
+		if (ret)
+			break;
+	}
+	if (ret)
+		goto out_exec;
+
+	fence = dma_fence_allocate_private_stub(ktime_get());
+	if (!fence) {
+		ret = -ENOMEM;
+		goto out_exec;
+	}
+
+	ret = gcn_drm_provider_draw_triangle(dst->provider, dst->allocation,
+					     dst->width, dst->height, vertices);
+	if (ret)
+		goto out_exec;
+
+	dma_resv_add_fence(dst_gem->resv, fence, DMA_RESV_USAGE_WRITE);
+	if (out_syncobj)
+		drm_syncobj_replace_fence(out_syncobj, fence);
+
+out_exec:
+	drm_exec_fini(&exec);
+out_put:
+	dma_fence_put(fence);
+	if (dst_gem)
+		drm_gem_object_put(dst_gem);
+	if (out_syncobj)
+		drm_syncobj_put(out_syncobj);
+	return ret;
+}
+
 const struct drm_ioctl_desc gcn_drm_render_ioctls[DRM_GCN_NUM_IOCTLS] = {
 	DRM_IOCTL_DEF_DRV(GCN_GET_PARAM, gcn_drm_ioctl_get_param,
 			  DRM_RENDER_ALLOW),
@@ -764,6 +857,8 @@ const struct drm_ioctl_desc gcn_drm_render_ioctls[DRM_GCN_NUM_IOCTLS] = {
 	DRM_IOCTL_DEF_DRV(GCN_WAIT, gcn_drm_ioctl_wait, DRM_RENDER_ALLOW),
 	DRM_IOCTL_DEF_DRV(GCN_SUBMIT, gcn_drm_ioctl_submit, DRM_RENDER_ALLOW),
 	DRM_IOCTL_DEF_DRV(GCN_BLIT_SCALED, gcn_drm_ioctl_blit_scaled,
+			  DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(GCN_DRAW_TRIANGLE, gcn_drm_ioctl_draw_triangle,
 			  DRM_RENDER_ALLOW),
 };
 

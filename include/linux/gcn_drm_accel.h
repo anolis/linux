@@ -18,6 +18,15 @@ struct gcn_drm_mem1_info {
 	u64 features;
 };
 
+struct gcn_drm_color_vertex {
+	u16 x;
+	u16 y;
+	u8 r;
+	u8 g;
+	u8 b;
+	u8 a;
+};
+
 struct gcn_drm_accel_ops {
 	const char *name;
 	struct module *owner;
@@ -36,6 +45,8 @@ struct gcn_drm_accel_ops {
 	int (*fill_rect_rgb565)(void *dst_allocation, u16 width, u16 height,
 				u16 x, u16 y, u16 rect_width,
 				u16 rect_height, u16 color);
+	int (*draw_triangle_rgb565)(void *dst_allocation, u16 width, u16 height,
+				    const struct gcn_drm_color_vertex vertices[3]);
 	int (*blit_rect_rgb565)(void *src_allocation, void *dst_allocation,
 				u16 src_width, u16 src_height, u16 dst_width,
 				u16 dst_height, u16 src_x, u16 src_y, u16 dst_x,

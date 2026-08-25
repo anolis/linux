@@ -1019,6 +1019,174 @@ out:
 		fail("close unequal-dimension blit source");
 }
 
+static int64_t triangle_edge(const struct drm_gcn_color_vertex *a,
+			     const struct drm_gcn_color_vertex *b,
+			     unsigned int x, unsigned int y)
+{
+	int64_t ax = 2 * a->x;
+	int64_t ay = 2 * a->y;
+	int64_t bx = 2 * b->x;
+	int64_t by = 2 * b->y;
+	int64_t px = 2 * x + 1;
+	int64_t py = 2 * y + 1;
+
+	return (bx - ax) * (py - ay) - (by - ay) * (px - ax);
+}
+
+static void test_draw_triangle(int fd)
+{
+	struct drm_syncobj_create sync = {};
+	struct drm_syncobj_destroy destroy = {};
+	struct drm_gcn_ctx_create ctx = {};
+	struct drm_gcn_ctx_free free_ctx = {};
+	struct drm_gcn_gem_create dst = {};
+	struct drm_gcn_submit fill = {
+		.op = DRM_GCN_RENDER_OP_FILL_RGB565,
+		.data = 0x07e0,
+	};
+	struct drm_syncobj_wait sync_wait = {};
+	struct drm_gcn_draw_triangle draw = {
+		.vertices = {
+			{ 32, 32, DRM_GCN_RGBA8(0xff, 0, 0, 0xff) },
+			{ 224, 48, DRM_GCN_RGBA8(0xff, 0, 0, 0xff) },
+			{ 112, 224, DRM_GCN_RGBA8(0xff, 0, 0, 0xff) },
+		},
+	};
+	uint16_t *map = MAP_FAILED;
+	unsigned int checked_inside = 0;
+	unsigned int checked_outside = 0;
+	const int64_t edge_margin = 1024;
+	int64_t area;
+
+	if (create_bo(fd, &dst)) {
+		fail("create triangle destination");
+		return;
+	}
+	map = map_bo(fd, &dst);
+	if (map == MAP_FAILED) {
+		fail("map triangle destination");
+		goto out;
+	}
+	if (ioctl(fd, DRM_IOCTL_GCN_CTX_CREATE, &ctx)) {
+		fail("create triangle context");
+		goto out;
+	}
+	if (ioctl(fd, DRM_IOCTL_SYNCOBJ_CREATE, &sync)) {
+		fail("create triangle syncobj");
+		goto out_ctx;
+	}
+
+	fill.ctx_id = ctx.id;
+	fill.dst_handle = dst.handle;
+	if (ioctl(fd, DRM_IOCTL_GCN_SUBMIT, &fill)) {
+		fail("seed triangle background");
+		goto out_sync;
+	}
+
+	draw.ctx_id = ctx.id;
+	draw.dst_handle = dst.handle;
+	draw.out_syncobj = sync.handle;
+	draw.vertices[0].rgba &= ~0xffU;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_TRIANGLE, &draw) || errno != EINVAL)
+		fail("transparent triangle should return EINVAL");
+	draw.vertices[0].rgba |= 0xff;
+	draw.vertices[1].x = TEST_WIDTH + 1;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_TRIANGLE, &draw) || errno != EINVAL)
+		fail("out-of-bounds triangle should return EINVAL");
+	draw.vertices[1].x = 224;
+	draw.pad[0] = 1;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_TRIANGLE, &draw) || errno != EINVAL)
+		fail("padded triangle should return EINVAL");
+	draw.pad[0] = 0;
+	draw.vertices[2] = draw.vertices[0];
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_TRIANGLE, &draw) || errno != EINVAL)
+		fail("degenerate triangle should return EINVAL");
+	draw.vertices[2] = (struct drm_gcn_color_vertex) {
+		112, 224, DRM_GCN_RGBA8(0xff, 0, 0, 0xff),
+	};
+
+	if (ioctl(fd, DRM_IOCTL_GCN_DRAW_TRIANGLE, &draw)) {
+		fail("draw solid RGB565 triangle");
+		goto out_sync;
+	}
+	{
+		uint32_t sync_handle = sync.handle;
+
+		sync_wait.handles = (uintptr_t)&sync_handle;
+		sync_wait.timeout_nsec = (int64_t)(monotonic_ns() +
+							  1000000000ULL);
+		sync_wait.count_handles = 1;
+		if (ioctl(fd, DRM_IOCTL_SYNCOBJ_WAIT, &sync_wait)) {
+			fail("wait for triangle syncobj");
+			goto out_sync;
+		}
+	}
+
+	area = triangle_edge(&draw.vertices[0], &draw.vertices[1],
+			     draw.vertices[2].x, draw.vertices[2].y);
+	for (unsigned int y = 0; y < TEST_HEIGHT; y++) {
+		for (unsigned int x = 0; x < TEST_WIDTH; x++) {
+			int64_t edge0 = triangle_edge(&draw.vertices[0],
+						      &draw.vertices[1], x, y);
+			int64_t edge1 = triangle_edge(&draw.vertices[1],
+						      &draw.vertices[2], x, y);
+			int64_t edge2 = triangle_edge(&draw.vertices[2],
+						      &draw.vertices[0], x, y);
+			uint16_t expected;
+			size_t pixel;
+
+			if (area < 0) {
+				edge0 = -edge0;
+				edge1 = -edge1;
+				edge2 = -edge2;
+			}
+			if (edge0 > edge_margin && edge1 > edge_margin &&
+			    edge2 > edge_margin) {
+				expected = 0xf800;
+				checked_inside++;
+			} else if (edge0 < -edge_margin || edge1 < -edge_margin ||
+				   edge2 < -edge_margin) {
+				expected = 0x07e0;
+				checked_outside++;
+			} else {
+				continue;
+			}
+
+			pixel = tiled_rgb565_index(x, y, TEST_WIDTH);
+			if (map[pixel] != expected) {
+				fprintf(stderr,
+					"FAIL: triangle mismatch at (%u,%u): got=0x%04x expected=0x%04x\n",
+					x, y, map[pixel], expected);
+				failures++;
+				goto out_sync;
+			}
+		}
+	}
+	if (!checked_inside || !checked_outside)
+		fail("triangle oracle did not classify pixels");
+	else
+		printf("DRAW: triangle matched %u interior and %u exterior RGB565 pixels\n",
+		       checked_inside, checked_outside);
+
+out_sync:
+	destroy.handle = sync.handle;
+	if (ioctl(fd, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy))
+		fail("destroy triangle syncobj");
+out_ctx:
+	free_ctx.id = ctx.id;
+	if (ioctl(fd, DRM_IOCTL_GCN_CTX_FREE, &free_ctx))
+		fail("free triangle context");
+out:
+	if (map != MAP_FAILED && munmap(map, dst.size))
+		fail("unmap triangle destination");
+	if (dst.handle && close_bo(fd, dst.handle))
+		fail("close triangle destination");
+}
+
 static void test_wide_scaled_blit(int fd)
 {
 	struct drm_gcn_ctx_create ctx = {};
@@ -1689,6 +1857,11 @@ int main(int argc, char **argv)
 				   DRM_GCN_FEATURE_BLIT_RECT_RGB565_UNEQUAL_DIMS |
 				   DRM_GCN_FEATURE_BLIT_RECT_RGB565_SAME_OBJECT |
 				   DRM_GCN_FEATURE_BLIT_SCALED_RGB565);
+		if (features & DRM_GCN_FEATURE_DRAW_TRIANGLE_RGB565)
+			test_draw_triangle(fd);
+		else
+			fail_value("triangle render feature", features,
+				   DRM_GCN_FEATURE_DRAW_TRIANGLE_RGB565);
 		if (features & DRM_GCN_FEATURE_BLIT_SCALED_RGB565)
 			test_wide_scaled_blit(fd);
 		if (features & DRM_GCN_FEATURE_BLIT_SCALED_RGB565)

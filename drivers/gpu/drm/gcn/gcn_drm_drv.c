@@ -345,6 +345,22 @@ int gcn_drm_provider_fill_rect(const struct gcn_drm_accel_ops *provider,
 	return ret;
 }
 
+int gcn_drm_provider_draw_triangle(const struct gcn_drm_accel_ops *provider,
+				   void *dst_allocation,
+				   u16 width, u16 height,
+				   const struct gcn_drm_color_vertex vertices[3])
+{
+	int ret = -ENODEV;
+
+	mutex_lock(&gcn_drm_accel_lock);
+	if (gcn_drm_accel == provider && provider->draw_triangle_rgb565)
+		ret = provider->draw_triangle_rgb565(dst_allocation, width,
+						      height, vertices);
+	mutex_unlock(&gcn_drm_accel_lock);
+
+	return ret;
+}
+
 int gcn_drm_provider_blit_rect(const struct gcn_drm_accel_ops *provider,
 			       void *src_allocation, void *dst_allocation,
 			       u16 src_width, u16 src_height, u16 dst_width,

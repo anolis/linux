@@ -43,6 +43,7 @@ enum drm_gcn_param {
 #define DRM_GCN_FEATURE_BLIT_SCALED_SYSTEM_RGB565	(1ULL << 12)
 #define DRM_GCN_FEATURE_SYSTEM_GEM_LINEAR	(1ULL << 13)
 #define DRM_GCN_FEATURE_BLIT_SCALED_SYSTEM_XRGB8888_TO_RGB565	(1ULL << 14)
+#define DRM_GCN_FEATURE_DRAW_TRIANGLE_RGB565	(1ULL << 15)
 
 struct drm_gcn_get_param {
 	__u32 param;
@@ -204,6 +205,35 @@ struct drm_gcn_blit_scaled {
 	__u32 pad;
 };
 
+/* Colors are encoded as 0xRRGGBBAA. Alpha must currently be 0xff. */
+struct drm_gcn_color_vertex {
+	__u16 x;
+	__u16 y;
+	__u32 rgba;
+};
+
+#define DRM_GCN_RGBA8(r, g, b, a) \
+	(((__u32)(r) << 24) | ((__u32)(g) << 16) | \
+	 ((__u32)(b) << 8) | (__u32)(a))
+
+/*
+ * Draw one untextured, Gouraud-shaded triangle into a tiled RGB565 object.
+ * Coordinates are in destination pixel space and may lie on its right or
+ * bottom edge. Raw commands, registers, and physical addresses are never
+ * accepted.
+ */
+struct drm_gcn_draw_triangle {
+	__u32 ctx_id;
+	__u32 dst_handle;
+	/* Optional binary syncobj replaced with the completion fence. */
+	__u32 out_syncobj;
+	/* Must be zero. */
+	__u32 flags;
+	struct drm_gcn_color_vertex vertices[3];
+	/* Must be zero. */
+	__u32 pad[2];
+};
+
 #define DRM_GCN_GET_PARAM	0x00
 #define DRM_GCN_GEM_CREATE	0x01
 #define DRM_GCN_GEM_MMAP	0x02
@@ -212,7 +242,8 @@ struct drm_gcn_blit_scaled {
 #define DRM_GCN_WAIT		0x05
 #define DRM_GCN_SUBMIT		0x06
 #define DRM_GCN_BLIT_SCALED	0x07
-#define DRM_GCN_NUM_IOCTLS	0x08
+#define DRM_GCN_DRAW_TRIANGLE	0x08
+#define DRM_GCN_NUM_IOCTLS	0x09
 
 #define DRM_IOCTL_GCN_GET_PARAM \
 	DRM_IOWR(DRM_COMMAND_BASE + DRM_GCN_GET_PARAM, \
@@ -235,7 +266,10 @@ struct drm_gcn_blit_scaled {
 	DRM_IOW(DRM_COMMAND_BASE + DRM_GCN_SUBMIT, struct drm_gcn_submit)
 #define DRM_IOCTL_GCN_BLIT_SCALED \
 	DRM_IOW(DRM_COMMAND_BASE + DRM_GCN_BLIT_SCALED, \
-		struct drm_gcn_blit_scaled)
+		 struct drm_gcn_blit_scaled)
+#define DRM_IOCTL_GCN_DRAW_TRIANGLE \
+	DRM_IOW(DRM_COMMAND_BASE + DRM_GCN_DRAW_TRIANGLE, \
+		 struct drm_gcn_draw_triangle)
 
 #if defined(__cplusplus)
 }

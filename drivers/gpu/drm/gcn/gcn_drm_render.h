@@ -65,6 +65,32 @@ gcn_drm_render_validate_scaled(const struct drm_gcn_blit_scaled *args,
 }
 
 static inline int
+gcn_drm_render_validate_triangle(const struct drm_gcn_draw_triangle *args,
+				 u16 dst_width, u16 dst_height)
+{
+	s64 area;
+	unsigned int i;
+
+	if (!args || !args->ctx_id || !args->dst_handle || args->flags ||
+	    args->pad[0] || args->pad[1])
+		return -EINVAL;
+
+	for (i = 0; i < 3; i++) {
+		const struct drm_gcn_color_vertex *vertex = &args->vertices[i];
+
+		if (vertex->x > dst_width || vertex->y > dst_height ||
+		    (vertex->rgba & 0xff) != 0xff)
+			return -EINVAL;
+	}
+
+	area = (s64)(args->vertices[1].x - args->vertices[0].x) *
+		(args->vertices[2].y - args->vertices[0].y) -
+		(s64)(args->vertices[2].x - args->vertices[0].x) *
+		(args->vertices[1].y - args->vertices[0].y);
+	return area ? 0 : -EINVAL;
+}
+
+static inline int
 gcn_drm_valid_system_formats(u32 src_format, u32 src_layout,
 			     u32 dst_format, u32 dst_layout,
 			     bool same_object)
