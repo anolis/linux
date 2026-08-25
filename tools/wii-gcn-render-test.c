@@ -1062,6 +1062,295 @@ static int triangle_classify(const struct drm_gcn_color_triangle *triangle,
 	return 0;
 }
 
+static int submit_triangle_state(int fd,
+				 struct drm_gcn_draw_triangles_state *draw,
+				 uint32_t sync_handle)
+{
+	struct drm_syncobj_wait wait = {
+		.handles = (uintptr_t)&sync_handle,
+		.timeout_nsec = (int64_t)(monotonic_ns() + 1000000000ULL),
+		.count_handles = 1,
+	};
+
+	if (ioctl(fd, DRM_IOCTL_GCN_DRAW_TRIANGLES_STATE, draw))
+		return -1;
+	return ioctl(fd, DRM_IOCTL_SYNCOBJ_WAIT, &wait);
+}
+
+static void test_draw_triangles_state(int fd)
+{
+	struct drm_syncobj_create sync = {};
+	struct drm_syncobj_destroy destroy = {};
+	struct drm_gcn_ctx_create ctx = {};
+	struct drm_gcn_ctx_free free_ctx = {};
+	struct drm_gcn_gem_create dst = {};
+	struct drm_gcn_submit fill = {
+		.op = DRM_GCN_RENDER_OP_FILL_RGB565,
+		.data = 0x07e0,
+	};
+	struct drm_gcn_color_triangle triangle = {
+		.vertices = {
+			{ 32, 32, DRM_GCN_RGBA8(0xff, 0, 0, 0xff) },
+			{ 224, 48, DRM_GCN_RGBA8(0xff, 0, 0, 0xff) },
+			{ 112, 224, DRM_GCN_RGBA8(0xff, 0, 0, 0xff) },
+		},
+	};
+	struct drm_gcn_draw_triangles_state draw = {
+		.triangle_count = 1,
+		.triangles_ptr = (uintptr_t)&triangle,
+		.state = {
+			.viewport_width = TEST_WIDTH,
+			.viewport_height = TEST_HEIGHT,
+			.scissor_width = TEST_WIDTH,
+			.scissor_height = TEST_HEIGHT,
+			.blend_mode = DRM_GCN_BLEND_NONE,
+		},
+	};
+	struct drm_gcn_color_triangle transformed;
+	uint16_t *map = MAP_FAILED;
+	unsigned int disabled_inside = 0;
+	unsigned int viewport_inside = 0;
+	unsigned int scissor_inside = 0;
+	unsigned int blend_inside = 0;
+	uint16_t blend_sample = 0;
+	const int64_t margin = 1024;
+
+	if (create_bo(fd, &dst)) {
+		fail("create stateful-triangle destination");
+		return;
+	}
+	map = map_bo(fd, &dst);
+	if (map == MAP_FAILED) {
+		fail("map stateful-triangle destination");
+		goto out;
+	}
+	if (ioctl(fd, DRM_IOCTL_GCN_CTX_CREATE, &ctx)) {
+		fail("create stateful-triangle context");
+		goto out;
+	}
+	if (ioctl(fd, DRM_IOCTL_SYNCOBJ_CREATE, &sync)) {
+		fail("create stateful-triangle syncobj");
+		goto out_ctx;
+	}
+
+	fill.ctx_id = ctx.id;
+	fill.dst_handle = dst.handle;
+	draw.ctx_id = ctx.id;
+	draw.dst_handle = dst.handle;
+	draw.out_syncobj = sync.handle;
+
+	draw.state.blend_mode = DRM_GCN_BLEND_SRC_ALPHA + 1;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_TRIANGLES_STATE, &draw) ||
+	    errno != EINVAL)
+		fail("invalid stateful blend mode should return EINVAL");
+	draw.state.blend_mode = DRM_GCN_BLEND_NONE;
+	draw.state.viewport_width = 0;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_TRIANGLES_STATE, &draw) ||
+	    errno != EINVAL)
+		fail("empty viewport should return EINVAL");
+	draw.state.viewport_width = TEST_WIDTH;
+	draw.state.scissor_x = TEST_WIDTH - 1;
+	draw.state.scissor_width = 2;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_TRIANGLES_STATE, &draw) ||
+	    errno != EINVAL)
+		fail("overflowing scissor should return EINVAL");
+	draw.state.scissor_x = 0;
+	draw.state.scissor_width = TEST_WIDTH;
+	triangle.vertices[0].rgba &= ~0xffU;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_TRIANGLES_STATE, &draw) ||
+	    errno != EINVAL)
+		fail("transparent unblended triangle should return EINVAL");
+	triangle.vertices[0].rgba |= 0xff;
+
+	if (ioctl(fd, DRM_IOCTL_GCN_SUBMIT, &fill) ||
+	    submit_triangle_state(fd, &draw, sync.handle)) {
+		fail("draw disabled state-equivalence triangle");
+		goto out_sync;
+	}
+	for (unsigned int y = 0; y < TEST_HEIGHT; y++) {
+		for (unsigned int x = 0; x < TEST_WIDTH; x++) {
+			int classified = triangle_classify(&triangle, x, y, margin);
+			uint16_t expected;
+			size_t pixel;
+
+			if (classified > 0) {
+				expected = 0xf800;
+				disabled_inside++;
+			} else if (classified < 0) {
+				expected = 0x07e0;
+			} else {
+				continue;
+			}
+			pixel = tiled_rgb565_index(x, y, TEST_WIDTH);
+			if (map[pixel] != expected) {
+				fprintf(stderr,
+					"FAIL: disabled state mismatch at (%u,%u): got=0x%04x expected=0x%04x\n",
+					x, y, map[pixel], expected);
+				failures++;
+				goto out_sync;
+			}
+		}
+	}
+
+	triangle = (struct drm_gcn_color_triangle) {
+		.vertices = {
+			{ 0, 0, DRM_GCN_RGBA8(0xff, 0, 0, 0xff) },
+			{ TEST_WIDTH, 0, DRM_GCN_RGBA8(0xff, 0, 0, 0xff) },
+			{ 0, TEST_HEIGHT, DRM_GCN_RGBA8(0xff, 0, 0, 0xff) },
+		},
+	};
+	transformed = (struct drm_gcn_color_triangle) {
+		.vertices = {
+			{ 64, 64, 0 }, { 192, 64, 0 }, { 64, 192, 0 },
+		},
+	};
+	draw.state.viewport_x = 64;
+	draw.state.viewport_y = 64;
+	draw.state.viewport_width = 128;
+	draw.state.viewport_height = 128;
+	if (ioctl(fd, DRM_IOCTL_GCN_SUBMIT, &fill) ||
+	    submit_triangle_state(fd, &draw, sync.handle)) {
+		fail("draw viewport triangle");
+		goto out_sync;
+	}
+	for (unsigned int y = 0; y < TEST_HEIGHT; y++) {
+		for (unsigned int x = 0; x < TEST_WIDTH; x++) {
+			int classified = triangle_classify(&transformed, x, y,
+							   margin);
+			uint16_t expected;
+			size_t pixel;
+
+			if (classified > 0) {
+				expected = 0xf800;
+				viewport_inside++;
+			} else if (classified < 0) {
+				expected = 0x07e0;
+			} else {
+				continue;
+			}
+			pixel = tiled_rgb565_index(x, y, TEST_WIDTH);
+			if (map[pixel] != expected) {
+				fprintf(stderr,
+					"FAIL: viewport mismatch at (%u,%u): got=0x%04x expected=0x%04x\n",
+					x, y, map[pixel], expected);
+				failures++;
+				goto out_sync;
+			}
+		}
+	}
+
+	draw.state.viewport_x = 0;
+	draw.state.viewport_y = 0;
+	draw.state.viewport_width = TEST_WIDTH;
+	draw.state.viewport_height = TEST_HEIGHT;
+	draw.state.scissor_x = 80;
+	draw.state.scissor_y = 80;
+	draw.state.scissor_width = 64;
+	draw.state.scissor_height = 64;
+	if (ioctl(fd, DRM_IOCTL_GCN_SUBMIT, &fill) ||
+	    submit_triangle_state(fd, &draw, sync.handle)) {
+		fail("draw scissored triangle");
+		goto out_sync;
+	}
+	for (unsigned int y = 0; y < TEST_HEIGHT; y++) {
+		for (unsigned int x = 0; x < TEST_WIDTH; x++) {
+			int classified = triangle_classify(&triangle, x, y, margin);
+			bool inside_scissor = x >= 82 && x < 142 &&
+				y >= 82 && y < 142;
+			bool outside_scissor = x < 78 || x >= 146 ||
+				y < 78 || y >= 146;
+			uint16_t expected;
+			size_t pixel;
+
+			if (classified > 0 && inside_scissor) {
+				expected = 0xf800;
+				scissor_inside++;
+			} else if (outside_scissor || classified < 0) {
+				expected = 0x07e0;
+			} else {
+				continue;
+			}
+			pixel = tiled_rgb565_index(x, y, TEST_WIDTH);
+			if (map[pixel] != expected) {
+				fprintf(stderr,
+					"FAIL: scissor mismatch at (%u,%u): got=0x%04x expected=0x%04x\n",
+					x, y, map[pixel], expected);
+				failures++;
+				goto out_sync;
+			}
+		}
+	}
+
+	draw.state.scissor_x = 0;
+	draw.state.scissor_y = 0;
+	draw.state.scissor_width = TEST_WIDTH;
+	draw.state.scissor_height = TEST_HEIGHT;
+	draw.state.blend_mode = DRM_GCN_BLEND_SRC_ALPHA;
+	for (unsigned int i = 0; i < 3; i++)
+		triangle.vertices[i].rgba = DRM_GCN_RGBA8(0xff, 0, 0, 0x80);
+	fill.data = 0x001f;
+	if (ioctl(fd, DRM_IOCTL_GCN_SUBMIT, &fill) ||
+	    submit_triangle_state(fd, &draw, sync.handle)) {
+		fail("draw source-alpha triangle");
+		goto out_sync;
+	}
+	for (unsigned int y = 0; y < TEST_HEIGHT; y++) {
+		for (unsigned int x = 0; x < TEST_WIDTH; x++) {
+			int classified = triangle_classify(&triangle, x, y, margin);
+			size_t pixel = tiled_rgb565_index(x, y, TEST_WIDTH);
+			uint16_t value = map[pixel];
+
+			if (classified > 0) {
+				unsigned int r = value >> 11;
+				unsigned int g = (value >> 5) & 0x3f;
+				unsigned int b = value & 0x1f;
+
+				if (r < 14 || r > 17 || g > 1 || b < 14 || b > 17) {
+					fprintf(stderr,
+						"FAIL: blend mismatch at (%u,%u): got=0x%04x\n",
+						x, y, value);
+					failures++;
+					goto out_sync;
+				}
+				blend_sample = value;
+				blend_inside++;
+			} else if (classified < 0 && value != 0x001f) {
+				fprintf(stderr,
+					"FAIL: blend exterior mismatch at (%u,%u): got=0x%04x\n",
+					x, y, value);
+				failures++;
+				goto out_sync;
+			}
+		}
+	}
+
+	if (!disabled_inside || !viewport_inside || !scissor_inside ||
+	    !blend_inside)
+		fail("stateful triangle oracle did not classify pixels");
+	else
+		printf("DRAW state: disabled=%u viewport=%u scissor=%u blend=%u sample=%04x\n",
+		       disabled_inside, viewport_inside, scissor_inside,
+		       blend_inside, blend_sample);
+
+out_sync:
+	destroy.handle = sync.handle;
+	if (ioctl(fd, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy))
+		fail("destroy stateful-triangle syncobj");
+out_ctx:
+	free_ctx.id = ctx.id;
+	if (ioctl(fd, DRM_IOCTL_GCN_CTX_FREE, &free_ctx))
+		fail("free stateful-triangle context");
+out:
+	if (map != MAP_FAILED && munmap(map, dst.size))
+		fail("unmap stateful-triangle destination");
+	if (dst.handle && close_bo(fd, dst.handle))
+		fail("close stateful-triangle destination");
+}
+
 static void test_draw_triangle(int fd)
 {
 	struct drm_syncobj_create sync = {};
@@ -2061,6 +2350,11 @@ int main(int argc, char **argv)
 		else
 			fail_value("triangle-batch render feature", features,
 				   DRM_GCN_FEATURE_DRAW_TRIANGLES_RGB565);
+		if (features & DRM_GCN_FEATURE_DRAW_TRIANGLES_STATE_RGB565)
+			test_draw_triangles_state(fd);
+		else
+			fail_value("stateful triangle-batch render feature", features,
+				   DRM_GCN_FEATURE_DRAW_TRIANGLES_STATE_RGB565);
 		if (features & DRM_GCN_FEATURE_BLIT_SCALED_RGB565)
 			test_wide_scaled_blit(fd);
 		if (features & DRM_GCN_FEATURE_BLIT_SCALED_RGB565)

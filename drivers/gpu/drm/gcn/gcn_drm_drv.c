@@ -379,6 +379,24 @@ int gcn_drm_provider_draw_triangles(const struct gcn_drm_accel_ops *provider,
 	return ret;
 }
 
+int
+gcn_drm_provider_draw_triangles_state(const struct gcn_drm_accel_ops *provider,
+				      void *dst_allocation, u16 width, u16 height,
+				      const struct gcn_drm_color_vertex *vertices,
+				      u32 triangle_count,
+				      const struct gcn_drm_draw_state *state)
+{
+	int ret = -ENODEV;
+
+	mutex_lock(&gcn_drm_accel_lock);
+	if (gcn_drm_accel == provider && provider->draw_triangles_state_rgb565)
+		ret = provider->draw_triangles_state_rgb565(dst_allocation, width,
+				height, vertices, triangle_count, state);
+	mutex_unlock(&gcn_drm_accel_lock);
+
+	return ret;
+}
+
 int gcn_drm_provider_blit_rect(const struct gcn_drm_accel_ops *provider,
 			       void *src_allocation, void *dst_allocation,
 			       u16 src_width, u16 src_height, u16 dst_width,

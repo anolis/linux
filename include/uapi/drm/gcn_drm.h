@@ -45,6 +45,7 @@ enum drm_gcn_param {
 #define DRM_GCN_FEATURE_BLIT_SCALED_SYSTEM_XRGB8888_TO_RGB565	(1ULL << 14)
 #define DRM_GCN_FEATURE_DRAW_TRIANGLE_RGB565	(1ULL << 15)
 #define DRM_GCN_FEATURE_DRAW_TRIANGLES_RGB565	(1ULL << 16)
+#define DRM_GCN_FEATURE_DRAW_TRIANGLES_STATE_RGB565	(1ULL << 17)
 
 struct drm_gcn_get_param {
 	__u32 param;
@@ -264,6 +265,52 @@ struct drm_gcn_draw_triangles {
 	__u64 pad[2];
 };
 
+enum drm_gcn_blend_mode {
+	DRM_GCN_BLEND_NONE = 0,
+	DRM_GCN_BLEND_SRC_ALPHA = 1,
+};
+
+struct drm_gcn_draw_state {
+	/* Destination-space viewport. Width and height must be nonzero. */
+	__u16 viewport_x;
+	__u16 viewport_y;
+	__u16 viewport_width;
+	__u16 viewport_height;
+	/* Destination-space scissor. Width and height must be nonzero. */
+	__u16 scissor_x;
+	__u16 scissor_y;
+	__u16 scissor_width;
+	__u16 scissor_height;
+	/* One of drm_gcn_blend_mode. */
+	__u32 blend_mode;
+	/* Must be zero. */
+	__u32 pad;
+};
+
+/*
+ * Draw a bounded triangle array with semantic raster state. Coordinates remain
+ * in destination pixel space; the viewport maps that coordinate space into
+ * its destination rectangle. Source-alpha blending permits non-opaque vertex
+ * alpha. No raw GX register values are accepted.
+ */
+struct drm_gcn_draw_triangles_state {
+	__u32 ctx_id;
+	__u32 dst_handle;
+	/* Optional binary syncobj replaced with the completion fence. */
+	__u32 out_syncobj;
+	/* Must be zero. */
+	__u32 flags;
+	/* Inclusive range 1..DRM_GCN_MAX_TRIANGLES. */
+	__u32 triangle_count;
+	/* Must be zero. */
+	__u32 pad0;
+	/* Userspace pointer to drm_gcn_color_triangle[triangle_count]. */
+	__u64 triangles_ptr;
+	struct drm_gcn_draw_state state;
+	/* Must be zero. */
+	__u64 pad1;
+};
+
 #define DRM_GCN_GET_PARAM	0x00
 #define DRM_GCN_GEM_CREATE	0x01
 #define DRM_GCN_GEM_MMAP	0x02
@@ -274,7 +321,8 @@ struct drm_gcn_draw_triangles {
 #define DRM_GCN_BLIT_SCALED	0x07
 #define DRM_GCN_DRAW_TRIANGLE	0x08
 #define DRM_GCN_DRAW_TRIANGLES	0x09
-#define DRM_GCN_NUM_IOCTLS	0x0a
+#define DRM_GCN_DRAW_TRIANGLES_STATE	0x0a
+#define DRM_GCN_NUM_IOCTLS	0x0b
 
 #define DRM_IOCTL_GCN_GET_PARAM \
 	DRM_IOWR(DRM_COMMAND_BASE + DRM_GCN_GET_PARAM, \
@@ -304,6 +352,9 @@ struct drm_gcn_draw_triangles {
 #define DRM_IOCTL_GCN_DRAW_TRIANGLES \
 	DRM_IOW(DRM_COMMAND_BASE + DRM_GCN_DRAW_TRIANGLES, \
 		 struct drm_gcn_draw_triangles)
+#define DRM_IOCTL_GCN_DRAW_TRIANGLES_STATE \
+	DRM_IOW(DRM_COMMAND_BASE + DRM_GCN_DRAW_TRIANGLES_STATE, \
+		 struct drm_gcn_draw_triangles_state)
 
 #if defined(__cplusplus)
 }

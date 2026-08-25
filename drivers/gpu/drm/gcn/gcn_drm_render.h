@@ -65,8 +65,9 @@ gcn_drm_render_validate_scaled(const struct drm_gcn_blit_scaled *args,
 }
 
 static inline int
-gcn_drm_render_validate_color_triangle(const struct drm_gcn_color_vertex vertices[3],
-				       u16 dst_width, u16 dst_height)
+gcn_drm_render_validate_color_triangle_alpha(const struct drm_gcn_color_vertex vertices[3],
+					     u16 dst_width, u16 dst_height,
+					     bool require_opaque)
 {
 	s64 area;
 	unsigned int i;
@@ -78,7 +79,7 @@ gcn_drm_render_validate_color_triangle(const struct drm_gcn_color_vertex vertice
 		const struct drm_gcn_color_vertex *vertex = &vertices[i];
 
 		if (vertex->x > dst_width || vertex->y > dst_height ||
-		    (vertex->rgba & 0xff) != 0xff)
+		    (require_opaque && (vertex->rgba & 0xff) != 0xff))
 			return -EINVAL;
 	}
 
@@ -87,6 +88,14 @@ gcn_drm_render_validate_color_triangle(const struct drm_gcn_color_vertex vertice
 		(s64)(vertices[2].x - vertices[0].x) *
 		(vertices[1].y - vertices[0].y);
 	return area ? 0 : -EINVAL;
+}
+
+static inline int
+gcn_drm_render_validate_color_triangle(const struct drm_gcn_color_vertex vertices[3],
+				       u16 dst_width, u16 dst_height)
+{
+	return gcn_drm_render_validate_color_triangle_alpha(vertices, dst_width,
+							    dst_height, true);
 }
 
 static inline int
@@ -108,6 +117,36 @@ gcn_drm_render_validate_triangle_batch(const struct drm_gcn_draw_triangles *args
 	    !args->triangle_count ||
 	    args->triangle_count > DRM_GCN_MAX_TRIANGLES || args->pad0 ||
 	    !args->triangles_ptr || args->pad[0] || args->pad[1])
+		return -EINVAL;
+
+	return 0;
+}
+
+static inline int
+gcn_drm_render_validate_triangle_state_batch(const struct drm_gcn_draw_triangles_state *args)
+{
+	if (!args || !args->ctx_id || !args->dst_handle || args->flags ||
+	    !args->triangle_count ||
+	    args->triangle_count > DRM_GCN_MAX_TRIANGLES || args->pad0 ||
+	    !args->triangles_ptr || args->state.pad || args->pad1 ||
+	    args->state.blend_mode > DRM_GCN_BLEND_SRC_ALPHA)
+		return -EINVAL;
+
+	return 0;
+}
+
+static inline int
+gcn_drm_render_validate_draw_state(const struct drm_gcn_draw_state *state,
+				   u16 dst_width, u16 dst_height)
+{
+	if (!state || !state->viewport_width || !state->viewport_height ||
+	    state->viewport_x >= dst_width || state->viewport_y >= dst_height ||
+	    state->viewport_width > dst_width - state->viewport_x ||
+	    state->viewport_height > dst_height - state->viewport_y ||
+	    !state->scissor_width || !state->scissor_height ||
+	    state->scissor_x >= dst_width || state->scissor_y >= dst_height ||
+	    state->scissor_width > dst_width - state->scissor_x ||
+	    state->scissor_height > dst_height - state->scissor_y)
 		return -EINVAL;
 
 	return 0;

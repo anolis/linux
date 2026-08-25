@@ -27,6 +27,18 @@ struct gcn_drm_color_vertex {
 	u8 a;
 };
 
+struct gcn_drm_draw_state {
+	u16 viewport_x;
+	u16 viewport_y;
+	u16 viewport_width;
+	u16 viewport_height;
+	u16 scissor_x;
+	u16 scissor_y;
+	u16 scissor_width;
+	u16 scissor_height;
+	u32 blend_mode;
+};
+
 struct gcn_drm_accel_ops {
 	const char *name;
 	struct module *owner;
@@ -50,6 +62,10 @@ struct gcn_drm_accel_ops {
 	int (*draw_triangles_rgb565)(void *dst_allocation, u16 width, u16 height,
 				     const struct gcn_drm_color_vertex *vertices,
 				     u32 triangle_count);
+	int (*draw_triangles_state_rgb565)(void *dst_allocation, u16 width, u16 height,
+					   const struct gcn_drm_color_vertex *vertices,
+					   u32 triangle_count,
+					   const struct gcn_drm_draw_state *state);
 	int (*blit_rect_rgb565)(void *src_allocation, void *dst_allocation,
 				u16 src_width, u16 src_height, u16 dst_width,
 				u16 dst_height, u16 src_x, u16 src_y, u16 dst_x,

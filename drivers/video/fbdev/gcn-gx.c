@@ -1303,6 +1303,11 @@ static void __maybe_unused gx_setup_constant_white_state(u16 width, u16 height)
 	gx_load_cp_reg(0x90, 0x00000000);
 }
 
+#if IS_ENABLED(CONFIG_DRM_GCN_GX)
+static void gx_set_viewport(u16 x, u16 y, u16 width, u16 height);
+#endif
+static void gx_set_scissor(u16 x, u16 y, u16 width, u16 height);
+
 static void gx_setup_vertex_color_state(u16 width, u16 height)
 {
 	u32 xo = 0x156;
@@ -1379,6 +1384,21 @@ static void gx_setup_vertex_color_state(u16 width, u16 height)
 	gx_load_cp_reg(0x80, 0x80000000);
 	gx_load_cp_reg(0x90, 0x00000000);
 }
+
+#if IS_ENABLED(CONFIG_DRM_GCN_GX)
+static void
+gx_setup_vertex_color_state_semantic(u16 width, u16 height,
+				     const struct gcn_drm_draw_state *state)
+{
+	gx_setup_vertex_color_state(width, height);
+	gx_set_viewport(state->viewport_x, state->viewport_y,
+			state->viewport_width, state->viewport_height);
+	gx_set_scissor(state->scissor_x, state->scissor_y,
+		       state->scissor_width, state->scissor_height);
+	if (state->blend_mode == DRM_GCN_BLEND_SRC_ALPHA)
+		gx_load_bp_reg(0x410034BD);
+}
+#endif
 
 /* Add one position-derived texcoord and make TEV stage 0 sample texmap 0. */
 static void gx_setup_rgb565_texture_state_mode(u16 width, u16 height,
@@ -1602,8 +1622,6 @@ static void gx_draw_color_quad(u16 width, u16 height, u8 r, u8 g, u8 b)
 	gx_draw_color_rect(0, 0, width, height, r, g, b);
 }
 
-static void gx_set_scissor(u16 x, u16 y, u16 width, u16 height);
-
 static void gx_draw_nearest_horizontal_runs(u16 src_width,
 					    u16 texture_width, u16 height,
 					    u16 texture_height,
@@ -1673,6 +1691,20 @@ static void gx_set_scissor(u16 x, u16 y, u16 width, u16 height)
 	gx_load_bp_reg(0x20000000 | ((x0 & 0x7ff) << 12) | (y0 & 0xfff));
 	gx_load_bp_reg(0x21000000 | ((x1 & 0x7ff) << 12) | (y1 & 0xfff));
 }
+
+#if IS_ENABLED(CONFIG_DRM_GCN_GX)
+static void gx_set_viewport(u16 x, u16 y, u16 width, u16 height)
+{
+	/* GX_SetViewport with near=0 and far=1, including the 342 EFB bias. */
+	gx_load_xf_regs_n(0x101a, 6);
+	wg_f32_bits(f32_div_u32(width, 2));
+	wg_f32_bits(F32_NEG(f32_div_u32(height, 2)));
+	wg_f32_bits(F32_16M);
+	wg_f32_bits(f32_div_u32(2 * (u32)x + width + 684, 2));
+	wg_f32_bits(f32_div_u32(2 * (u32)y + height + 684, 2));
+	wg_f32_bits(F32_16M);
+}
+#endif
 
 static void gx_draw_textured_color_quad(u16 width, u16 height,
 					u8 r, u8 g, u8 b)
@@ -2971,7 +3003,8 @@ static int gcn_gx_drm_mem1_info(struct gcn_drm_mem1_info *info)
 			 DRM_GCN_FEATURE_SYSTEM_GEM_LINEAR |
 			 DRM_GCN_FEATURE_BLIT_SCALED_SYSTEM_XRGB8888_TO_RGB565 |
 			 DRM_GCN_FEATURE_DRAW_TRIANGLE_RGB565 |
-			 DRM_GCN_FEATURE_DRAW_TRIANGLES_RGB565;
+			 DRM_GCN_FEATURE_DRAW_TRIANGLES_RGB565 |
+			 DRM_GCN_FEATURE_DRAW_TRIANGLES_STATE_RGB565;
 	mutex_unlock(&gx_mem1_lock);
 	return 0;
 }
@@ -3316,6 +3349,92 @@ gcn_gx_drm_draw_triangles_rgb565(void *dst_allocation, u16 width, u16 height,
 	completed = gx_wait_for_pe_finishes(finish_count, 1);
 	if (!completed) {
 		pr_warn_ratelimited("gcn-gx: triangle batch timed out waiting for final PE finish\n");
+		ret = -ETIMEDOUT;
+		goto out_unlock;
+	}
+
+	invalidate_dcache_range((unsigned long)dst->cpu_addr,
+				(unsigned long)dst->cpu_addr + bytes);
+
+out_unlock:
+	mutex_unlock(&gx_submit_lock);
+	return ret;
+}
+
+static int
+gcn_gx_drm_draw_triangles_state_rgb565(void *dst_allocation, u16 width,
+				       u16 height,
+				       const struct gcn_drm_color_vertex *vertices,
+				       u32 triangle_count,
+				       const struct gcn_drm_draw_state *state)
+{
+	struct gx_mem1_allocation *dst = dst_allocation;
+	u32 finish_count;
+	size_t bytes;
+	long completed;
+	unsigned int vertex_count;
+	unsigned int i;
+	int ret;
+
+	if (!dst || !vertices || !state || !triangle_count ||
+	    triangle_count > DRM_GCN_MAX_TRIANGLES || !width || !height ||
+	    (width & 3) || (height & 3) || !state->viewport_width ||
+	    !state->viewport_height || state->viewport_x >= width ||
+	    state->viewport_y >= height ||
+	    state->viewport_width > width - state->viewport_x ||
+	    state->viewport_height > height - state->viewport_y ||
+	    !state->scissor_width || !state->scissor_height ||
+	    state->scissor_x >= width || state->scissor_y >= height ||
+	    state->scissor_width > width - state->scissor_x ||
+	    state->scissor_height > height - state->scissor_y ||
+	    state->blend_mode > DRM_GCN_BLEND_SRC_ALPHA)
+		return -EINVAL;
+	vertex_count = triangle_count * 3;
+	for (i = 0; i < vertex_count; i++) {
+		if (vertices[i].x > width || vertices[i].y > height ||
+		    (state->blend_mode == DRM_GCN_BLEND_NONE &&
+		     vertices[i].a != 0xff))
+			return -EINVAL;
+	}
+
+	bytes = (size_t)width * height * sizeof(u16);
+	if (bytes > dst->size)
+		return -E2BIG;
+	if (!READ_ONCE(gx_accel_ready))
+		return -ENODEV;
+
+	mutex_lock(&gx_submit_lock);
+	flush_dcache_range((unsigned long)dst->cpu_addr,
+			   (unsigned long)dst->cpu_addr + bytes);
+
+	finish_count = READ_ONCE(gx_pe_finish_count);
+	fifo_pos = 0;
+	gx_load_libogc_init_preamble();
+	gx_setup_display_copy_state();
+
+	/* Restore the destination before applying the requested raster state. */
+	gx_setup_rgb565_texture_state(width, height);
+	gx_setup_texture_rgb565(dst->cpu_addr, width, height);
+	gx_draw_color_quad(width, height, 0xff, 0xff, 0xff);
+	gx_load_bp_reg(0x45000002);
+	for (i = 0; i < 32; i++)
+		gx_wr8(0);
+
+	gx_setup_vertex_color_state_semantic(width, height, state);
+	gx_draw_color_triangles(vertices, triangle_count);
+	gx_load_bp_reg(0x45000002);
+	for (i = 0; i < 32; i++)
+		gx_wr8(0);
+
+	gx_set_copy_clear_rgb(0x00, 0x00, 0x00);
+	gx_copy_efb_to_rgb565_texture(dst->cpu_addr, width, height, true);
+	ret = gx_submit_cmds("render-draw-state");
+	if (ret)
+		goto out_unlock;
+
+	completed = gx_wait_for_pe_finishes(finish_count, 1);
+	if (!completed) {
+		pr_warn_ratelimited("gcn-gx: stateful triangle batch timed out waiting for final PE finish\n");
 		ret = -ETIMEDOUT;
 		goto out_unlock;
 	}
@@ -3800,6 +3919,8 @@ static const struct gcn_drm_accel_ops gcn_gx_drm_accel_ops = {
 	.fill_rect_rgb565 = gcn_gx_drm_fill_rect_rgb565,
 	.draw_triangle_rgb565 = gcn_gx_drm_draw_triangle_rgb565,
 	.draw_triangles_rgb565 = gcn_gx_drm_draw_triangles_rgb565,
+	.draw_triangles_state_rgb565 =
+		gcn_gx_drm_draw_triangles_state_rgb565,
 	.blit_rect_rgb565 = gcn_gx_drm_blit_rect_rgb565,
 	.blit_scaled_rgb565 = gcn_gx_drm_blit_scaled_rgb565,
 	.blit_scaled_system_rgb565 = gcn_gx_drm_blit_scaled_system_rgb565,
