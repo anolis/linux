@@ -40,6 +40,10 @@ struct gcn_drm_draw_state {
 };
 
 struct gcn_drm_accel_ops {
+	/*
+	 * This layout is a private core/provider ABI. Add new callbacks only at
+	 * the end and bump the registration symbol suffix for any layout change.
+	 */
 	const char *name;
 	struct module *owner;
 	int (*blit_rgb565)(const void *src, u32 src_pitch, u32 xfb_phys,
@@ -95,7 +99,7 @@ struct gcn_drm_accel_ops {
 					   u16 dst_rect_height);
 };
 
-int gcn_drm_register_accel(const struct gcn_drm_accel_ops *ops);
-void gcn_drm_unregister_accel(const struct gcn_drm_accel_ops *ops);
+int gcn_drm_register_accel_v2(const struct gcn_drm_accel_ops *ops);
+void gcn_drm_unregister_accel_v2(const struct gcn_drm_accel_ops *ops);
 
 #endif /* _LINUX_GCN_DRM_ACCEL_H */

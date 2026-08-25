@@ -4422,7 +4422,7 @@ static int gcn_gx_probe(struct platform_device *pdev)
 		return ret;
 
 #if IS_ENABLED(CONFIG_DRM_GCN_GX)
-	ret = gcn_drm_register_accel(&gcn_gx_drm_accel_ops);
+	ret = gcn_drm_register_accel_v2(&gcn_gx_drm_accel_ops);
 #else
 	ret = gcnfb_register_accel(&gcn_gx_accel_ops);
 #endif
@@ -4448,7 +4448,7 @@ static void gcn_gx_remove(struct platform_device *pdev)
 	cancel_work_sync(&gx_frame_work.work);
 	gcnfb_unregister_accel(&gcn_gx_accel_ops);
 #else
-	gcn_drm_unregister_accel(&gcn_gx_drm_accel_ops);
+	gcn_drm_unregister_accel_v2(&gcn_gx_drm_accel_ops);
 #endif
 	gcn_gx_exit();
 }
