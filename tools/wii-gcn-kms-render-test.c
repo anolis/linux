@@ -75,6 +75,13 @@ static unsigned int scaled_source(unsigned int dst, unsigned int src_extent,
 	return source < src_extent ? source : src_extent - 1;
 }
 
+static size_t tiled_rgb565_index(unsigned int x, unsigned int y,
+				 unsigned int width)
+{
+	return ((size_t)(y >> 2) * (width >> 2) + (x >> 2)) * 16 +
+	       (y & 3) * 4 + (x & 3);
+}
+
 static int create_linear_bo(int fd, struct drm_gcn_gem_create *bo,
 			    unsigned int width, unsigned int height, void **map)
 {
@@ -315,7 +322,21 @@ int main(int argc, char **argv)
 		.dst_width = DST_WIDTH,
 		.dst_height = DST_HEIGHT,
 	};
-	if (xioctl(fd, DRM_IOCTL_GCN_BLIT_SCALED, &blit) < 0) {
+	if (triangle_scene) {
+		/* Private tiled objects have no standard KMS modifier yet. */
+		for (y = 0; y < DST_HEIGHT; y++) {
+			for (x = 0; x < DST_WIDTH; x++) {
+				unsigned int sx = scaled_source(x, SRC_WIDTH,
+							DST_WIDTH);
+				unsigned int sy = scaled_source(y, SRC_HEIGHT,
+							DST_HEIGHT);
+
+				dst_map[(size_t)y * DST_WIDTH + x] =
+					src_map[tiled_rgb565_index(sx, sy,
+								    SRC_WIDTH)];
+			}
+		}
+	} else if (xioctl(fd, DRM_IOCTL_GCN_BLIT_SCALED, &blit) < 0) {
 		perror("DRM_IOCTL_GCN_BLIT_SCALED");
 		goto out;
 	}
