@@ -11578,3 +11578,33 @@ Then display an interpolated RGB triangle through standard KMS and require
 correct full-frame output. Unload the provider and require normal CPU console
 restoration. Reject the candidate on any mismatch, timeout, FIFO stall,
 fallback, oops, panic, machine check, stale region, or display corruption.
+
+Hardware result: accepted for the strict render oracle. The checksum-verified
+triangle operation passed twice. Each run classified and matched 17024
+interior red pixels and 46960 exterior green pixels, with edge-adjacent pixels
+deliberately excluded from the oracle. Invalid alpha, coordinates, padding,
+and degenerate geometry were rejected before the valid draw.
+
+The first complete-suite run reported one non-triangle mismatch in the
+established 640-wide scaling reduction at `(234,46)`: `0xea15` rather than
+`0xea55`, a one-bit RGB565 green-channel difference. Every preceding test,
+the triangle oracle, and every later test completed. An immediate rerun used
+the identical checksum-matched remote module and client and passed the entire
+suite, including byte-exact copy, four fills, bounded fill and blit cases, all
+alias directions, every scale case, both system-object layouts, and all
+307200 XRGB8888 conversion pixels. Preserve the first result as a transient
+scaling observation; it did not reproduce and is not evidence of a triangle
+regression.
+
+The passing run loaded and registered the candidate provider, completed the
+strict test, unloaded and unregistered the provider, selected CPU AVE scanout,
+and restored the console. Its interval contains no GX/DRM timeout, FIFO stall,
+fallback, oops, panic, or machine check. Two scanout timeout/fallback messages
+occurred earlier during boot under the pre-existing rootfs module, before the
+candidate module was uploaded; they are outside both candidate test intervals.
+
+This validates bounded primitive submission, direct vertex color, EFB
+destination preservation and copyback, destination reservation fencing, and
+syncobj completion on Wii hardware. Visual interpolated-color presentation is
+still pending and remains the positive control before exposing broader blend,
+depth, viewport, scissor, texture, or batch state to Mesa.
