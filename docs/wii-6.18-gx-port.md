@@ -11722,3 +11722,13 @@ timeout, FIFO stall, fallback, oops, panic, machine check, or capacity leak
 occurred in either interval. One scanout finish timeout at 23.052 seconds came
 from the older rootfs-installed module during boot, before the candidate was
 uploaded; it is outside both acceptance intervals.
+
+After acceptance, replace that stale rootfs module with the checksum-pinned
+candidate at
+`/lib/modules/6.18.40-wii+/kernel/drivers/video/fbdev/gcn-gx.ko`, run
+`depmod`, and verify SHA-256
+`84900554f7c4233e57f75b97525bc57708e6d09fd40112b885c0850a0f7b9412`.
+Preserve the prior module as
+`gcn-gx.ko.backup.f5745a452793ecec12be422555718b6ffca7356e84de5461a57f887753dcd487`.
+The next boot will therefore auto-load the accepted provider rather than the
+older build that produced the out-of-interval timeout.
