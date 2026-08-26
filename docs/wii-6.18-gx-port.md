@@ -11877,3 +11877,32 @@ symbol rejection and continued CPU scanout. Finally, load the matching v2
 module, run the complete checksum-pinned strict suite, unload it, and require
 normal CPU console restoration with no timeout, stall, fallback, oops, panic,
 or machine check.
+
+Hardware result: accepted. Under v1-core boot ID
+`29baf788-2446-4cc4-b38a-cf4a3a16985b`, the pinned v2 module failed to load
+with unresolved `gcn_drm_register_accel_v2` and
+`gcn_drm_unregister_accel_v2`. It never registered a provider and no GX module
+remained loaded.
+
+The checksum-pinned v2 kernel then booted with ID
+`d9a045fd-8322-4693-8aff-3918fd1f70d0`. Its normal rootfs autoload attempted
+the installed v1 module, which failed at 8.282 and 8.422 seconds with
+unresolved `gcn_drm_unregister_accel` and `gcn_drm_register_accel`. No
+provider registered, CPU scanout and networking remained operational, and the
+matching v2 module could subsequently load without rebooting.
+
+Live SHA-256 verification matched the v2 kernel, module, and unchanged strict
+client listed above. The matching provider registered at 72.778 seconds, the
+entire strict render suite passed, it unregistered at 75.428 seconds, and the
+CPU console was restored at 75.558 seconds. Every semantic-state count matched
+the accepted baseline (`17024`, `7381`, `3165`, and `31878`, with blended
+sample `0x800f`), and every retained allocator, mapping, context, syncobj,
+copy, fill, rectangle, alias, scale, system-object, XRGB8888, triangle, and
+batch oracle passed. The matching interval contains no timeout, FIFO stall,
+fallback, oops, panic, or machine check.
+
+After acceptance, the rootfs module was replaced with the pinned v2 candidate
+and `depmod` completed. The installed module SHA-256 is
+`86f4e92e516ebd8b255d07a968167073969a89a332459b60ef17177712dde702`.
+The prior semantic-state module remains available as
+`gcn-gx.ko.backup.317b87bd4a53c2b628b3b6ddf1df68392a7dfcc577df7d74db9ea70c44fddbf3`.
