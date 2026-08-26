@@ -11968,3 +11968,29 @@ viewport, scissor, and blend oracle to remain exact. Accept only with normal
 CPU console restoration and a clean candidate interval containing no timeout,
 FIFO stall, fallback, oops, panic, machine check, capacity leak, or display
 corruption.
+
+Hardware result for candidate `8439f42c8`: rejected. The pinned v3 kernel
+booted with ID `c7d6e47e-b31f-4247-a361-0d1bb3a1013d` and matched the image
+hash above. Its rootfs-installed v2 module failed closed at 10.693 and 10.862
+seconds with unresolved v2 registration symbols; no provider registered and
+CPU scanout plus networking remained operational.
+
+The matching v3 module registered at 94.289 seconds. Every retained operation
+through the complete semantic-state suite passed, including the accepted
+triangle, batch, viewport, scissor, and blend pixel counts. The first depth
+submission then timed out at 95.930 seconds: the validated PE token remained
+`0x0064` while the submission expected `0x0065`, and the pipeline remained
+busy with CP status `0x0004`. Subsequent wide and system scale controls timed
+out because they inherited that stalled backend; they are not independent
+scale regressions. The test rejected the candidate, unregistered the provider
+at 99.326 seconds, restored CPU AVE scanout, and left the CPU console live.
+There was no oops, panic, machine check, or reboot in the candidate interval.
+
+The new path contains two previously unvalidated primitive stages: an XYZ
+full-screen quad used to clear depth without changing colour, followed by the
+requested XYZ depth-tested triangle stream. The next candidate must isolate
+them. Replace the primitive clear with the established EFB copy-clear command,
+which already clears Z to `0x00ffffff`, then restore destination colour with
+the accepted Z-disabled texture path before drawing the depth triangles. If
+that candidate still stalls, the fault is in the XYZ/depth draw itself; if it
+passes, the colour-disabled primitive clear was the rejected stage.
