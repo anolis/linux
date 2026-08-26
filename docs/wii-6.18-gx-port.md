@@ -11906,3 +11906,65 @@ and `depmod` completed. The installed module SHA-256 is
 `86f4e92e516ebd8b255d07a968167073969a89a332459b60ef17177712dde702`.
 The prior semantic-state module remains available as
 `gcn-gx.ko.backup.317b87bd4a53c2b628b3b6ddf1df68392a7dfcc577df7d74db9ea70c44fddbf3`.
+
+### Stage bounded semantic depth triangles
+
+- Candidate commit: `8439f42c8`
+- `zImage` / `dtbImage.wii` SHA-256:
+  `6b8aede135a9fc9cb5a6f23163a32344c58dab3bd4eaa55e8e51bcc6cc19b8e9`
+- `gcn-gx.ko` SHA-256:
+  `7408a5282316ab16ae258438d23de1d1b7e22763ab66cd2910e2df7661172a71`
+- static `wii-gcn-render-test` SHA-256:
+  `a5b11d4e3700439af9143192ce38967e0ce963fb6c1e5e790fd5b016f11dadf9`
+- detached UML KUnit JSON SHA-256:
+  `64ce0d48f727d9c4f8648ce0686a8def8355a3fe10580fd8601397ac6a16f76b`
+
+Add feature-gated `DRM_IOCTL_GCN_DRAW_TRIANGLES_DEPTH` as the first semantic
+depth operation. The fixed 80-byte request retains the accepted bounded array,
+viewport, scissor, blend, reservation-fence, and optional-syncobj contracts.
+Each vertex adds a 24-bit screen-space Z coordinate, where zero is near and
+`0x00ffffff` is far. Depth state contains only validated enable, compare, and
+write semantics; the compare enum deliberately matches GX's eight comparison
+functions. Existing single-triangle, stateless-batch, and stateful-batch ioctl
+layouts remain byte-for-byte unchanged.
+
+The DRM core copies at most 64 complete triangles before execution and rejects
+invalid counts, pointers, flags, padding, booleans, comparison functions,
+coordinates, depth values, alpha, object types, layouts, contexts, and
+degenerate geometry. No FIFO byte, raw register value, physical address, or
+unbounded allocation crosses the UAPI.
+
+The GX provider restores destination colour with depth disabled, then clears
+the relevant EFB depth extent to far using an XYZ quad with depth forced to
+`ALWAYS` plus write and both colour-update bits disabled. It restores semantic
+raster state, converts `0..0x00ffffff` Z into the existing orthographic
+camera-space `0..-1` convention, emits direct XYZ/RGBA8 triangles, and copies
+the final colour back through the accepted token, PE-finish, reservation-fence,
+and syncobj path. The callback was appended at the end of the private provider
+table, and the fail-closed registration exports advance from v2 to v3.
+
+Host validation passed `git diff --check`, strict full-patch checkpatch with
+zero errors, warnings, or checks, warning-enabled PowerPC compilation of both
+changed DRM objects and the GX module, warning-clean native and static
+PowerPC clients, and a complete `zImage modules -j16` build. A detached exact
+candidate diff with `CONFIG_KUNIT_UML_PCI=y` passed all 16 `gcn_drm_render`
+tests and all 3 `gcn_gx_mem1` tests. Symbol inspection confirms that the module
+imports only `gcn_drm_register_accel_v3` and
+`gcn_drm_unregister_accel_v3`, both exported by the candidate kernel.
+
+Hardware acceptance is pending. Deploy and boot the matching candidate kernel
+before loading the v3 module. First require provider-absent discovery under the
+booted candidate. The strict positive control seeds green, submits two fully
+overlapping triangles with near blue first and far red second, and requires
+`LESS` plus depth writes to preserve blue at every confidently interior pixel.
+An otherwise identical depth-disabled control must end red by painter order.
+Every confidently exterior pixel must remain exact green, and malformed depth,
+boolean, enum, and padding controls must return `EINVAL` without partial work.
+
+Run the complete checksum-pinned strict suite twice across a clean provider
+unload/reload. Require every retained allocator, mapping, context, syncobj,
+copy, fill, rectangle, alias, scale, system-object, XRGB8888, triangle, batch,
+viewport, scissor, and blend oracle to remain exact. Accept only with normal
+CPU console restoration and a clean candidate interval containing no timeout,
+FIFO stall, fallback, oops, panic, machine check, capacity leak, or display
+corruption.
