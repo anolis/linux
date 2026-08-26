@@ -46,6 +46,7 @@ enum drm_gcn_param {
 #define DRM_GCN_FEATURE_DRAW_TRIANGLE_RGB565	(1ULL << 15)
 #define DRM_GCN_FEATURE_DRAW_TRIANGLES_RGB565	(1ULL << 16)
 #define DRM_GCN_FEATURE_DRAW_TRIANGLES_STATE_RGB565	(1ULL << 17)
+#define DRM_GCN_FEATURE_DRAW_TRIANGLES_DEPTH_RGB565	(1ULL << 18)
 
 struct drm_gcn_get_param {
 	__u32 param;
@@ -311,6 +312,66 @@ struct drm_gcn_draw_triangles_state {
 	__u64 pad1;
 };
 
+#define DRM_GCN_DEPTH_MAX	0x00ffffffU
+
+struct drm_gcn_color_depth_vertex {
+	__u16 x;
+	__u16 y;
+	/* Screen-space depth: zero is near and DRM_GCN_DEPTH_MAX is far. */
+	__u32 z;
+	__u32 rgba;
+};
+
+struct drm_gcn_color_depth_triangle {
+	struct drm_gcn_color_depth_vertex vertices[3];
+};
+
+enum drm_gcn_depth_compare {
+	DRM_GCN_DEPTH_NEVER = 0,
+	DRM_GCN_DEPTH_LESS = 1,
+	DRM_GCN_DEPTH_EQUAL = 2,
+	DRM_GCN_DEPTH_LEQUAL = 3,
+	DRM_GCN_DEPTH_GREATER = 4,
+	DRM_GCN_DEPTH_NEQUAL = 5,
+	DRM_GCN_DEPTH_GEQUAL = 6,
+	DRM_GCN_DEPTH_ALWAYS = 7,
+};
+
+struct drm_gcn_depth_state {
+	/* Boolean: enable depth comparison. */
+	__u32 test_enable;
+	/* One of drm_gcn_depth_compare. */
+	__u32 compare;
+	/* Boolean: update depth for fragments that pass. */
+	__u32 write_enable;
+	/* Must be zero. */
+	__u32 pad;
+};
+
+/*
+ * Draw a bounded triangle array with semantic raster and depth state. The EFB
+ * depth buffer is initialized to DRM_GCN_DEPTH_MAX for every request. Existing
+ * colour-only draw ioctls remain independent and byte-for-byte unchanged.
+ */
+struct drm_gcn_draw_triangles_depth {
+	__u32 ctx_id;
+	__u32 dst_handle;
+	/* Optional binary syncobj replaced with the completion fence. */
+	__u32 out_syncobj;
+	/* Must be zero. */
+	__u32 flags;
+	/* Inclusive range 1..DRM_GCN_MAX_TRIANGLES. */
+	__u32 triangle_count;
+	/* Must be zero. */
+	__u32 pad0;
+	/* Userspace pointer to drm_gcn_color_depth_triangle[triangle_count]. */
+	__u64 triangles_ptr;
+	struct drm_gcn_draw_state state;
+	struct drm_gcn_depth_state depth;
+	/* Must be zero. */
+	__u64 pad1;
+};
+
 #define DRM_GCN_GET_PARAM	0x00
 #define DRM_GCN_GEM_CREATE	0x01
 #define DRM_GCN_GEM_MMAP	0x02
@@ -322,7 +383,8 @@ struct drm_gcn_draw_triangles_state {
 #define DRM_GCN_DRAW_TRIANGLE	0x08
 #define DRM_GCN_DRAW_TRIANGLES	0x09
 #define DRM_GCN_DRAW_TRIANGLES_STATE	0x0a
-#define DRM_GCN_NUM_IOCTLS	0x0b
+#define DRM_GCN_DRAW_TRIANGLES_DEPTH	0x0b
+#define DRM_GCN_NUM_IOCTLS	0x0c
 
 #define DRM_IOCTL_GCN_GET_PARAM \
 	DRM_IOWR(DRM_COMMAND_BASE + DRM_GCN_GET_PARAM, \
@@ -355,6 +417,9 @@ struct drm_gcn_draw_triangles_state {
 #define DRM_IOCTL_GCN_DRAW_TRIANGLES_STATE \
 	DRM_IOW(DRM_COMMAND_BASE + DRM_GCN_DRAW_TRIANGLES_STATE, \
 		 struct drm_gcn_draw_triangles_state)
+#define DRM_IOCTL_GCN_DRAW_TRIANGLES_DEPTH \
+	DRM_IOW(DRM_COMMAND_BASE + DRM_GCN_DRAW_TRIANGLES_DEPTH, \
+		 struct drm_gcn_draw_triangles_depth)
 
 #if defined(__cplusplus)
 }

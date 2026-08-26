@@ -1398,6 +1398,32 @@ gx_setup_vertex_color_state_semantic(u16 width, u16 height,
 	if (state->blend_mode == DRM_GCN_BLEND_SRC_ALPHA)
 		gx_load_bp_reg(0x410034BD);
 }
+
+static void
+gx_setup_vertex_color_depth_state(u16 width, u16 height,
+				  const struct gcn_drm_draw_state *state,
+				  const struct gcn_drm_depth_state *depth)
+{
+	u32 z_mode;
+
+	gx_setup_vertex_color_state_semantic(width, height, state);
+	z_mode = (depth->test_enable ? BIT(0) : 0) |
+		 ((depth->compare & 7) << 1) |
+		 (depth->write_enable ? BIT(4) : 0);
+	gx_load_bp_reg(0x40000000 | z_mode);
+
+	/* VTXFMT0: direct XYZ/F32 position followed by direct RGBA8 colour. */
+	gx_load_cp_reg(0x70, 0x40016009);
+}
+
+static void gx_setup_depth_clear_state(u16 width, u16 height)
+{
+	gx_setup_vertex_color_state(width, height);
+	/* Always write far depth while leaving destination colour untouched. */
+	gx_load_bp_reg(0x4000001F);
+	gx_load_bp_reg(0x41003104);
+	gx_load_cp_reg(0x70, 0x40016009);
+}
 #endif
 
 /* Add one position-derived texcoord and make TEV stage 0 sample texmap 0. */
@@ -1613,6 +1639,50 @@ gx_draw_color_triangles(const struct gcn_drm_color_vertex *vertices,
 		gx_wr8(vertices[i].b);
 		gx_wr8(vertices[i].a);
 	}
+}
+
+static void
+gx_draw_color_depth_triangles(const struct gcn_drm_color_depth_vertex *vertices,
+			      unsigned int triangle_count)
+{
+	unsigned int vertex_count = triangle_count * 3;
+	unsigned int i;
+	u32 z;
+
+	gx_wr8(0x90); /* GX_TRIANGLES | vtxfmt 0 */
+	gx_wr16be(vertex_count);
+
+	for (i = 0; i < vertex_count; i++) {
+		wg_f32_bits(f32_from_u16(vertices[i].x));
+		wg_f32_bits(f32_from_u16(vertices[i].y));
+		z = f32_div_u32(vertices[i].z, DRM_GCN_DEPTH_MAX);
+		wg_f32_bits(F32_NEG(z));
+		gx_wr8(vertices[i].r);
+		gx_wr8(vertices[i].g);
+		gx_wr8(vertices[i].b);
+		gx_wr8(vertices[i].a);
+	}
+}
+
+static void gx_draw_depth_clear_quad(u16 width, u16 height)
+{
+	u32 fw = f32_from_u16(width);
+	u32 fh = f32_from_u16(height);
+
+	gx_wr8(0x80); /* GX_QUADS | vtxfmt 0 */
+	gx_wr16be(4);
+
+	wg_f32_bits(F32_ZERO); wg_f32_bits(F32_ZERO);
+	wg_f32_bits(F32_NEG_ONE); gx_wr32be(0xffffffff);
+
+	wg_f32_bits(fw); wg_f32_bits(F32_ZERO);
+	wg_f32_bits(F32_NEG_ONE); gx_wr32be(0xffffffff);
+
+	wg_f32_bits(fw); wg_f32_bits(fh);
+	wg_f32_bits(F32_NEG_ONE); gx_wr32be(0xffffffff);
+
+	wg_f32_bits(F32_ZERO); wg_f32_bits(fh);
+	wg_f32_bits(F32_NEG_ONE); gx_wr32be(0xffffffff);
 }
 
 #endif
@@ -3004,7 +3074,8 @@ static int gcn_gx_drm_mem1_info(struct gcn_drm_mem1_info *info)
 			 DRM_GCN_FEATURE_BLIT_SCALED_SYSTEM_XRGB8888_TO_RGB565 |
 			 DRM_GCN_FEATURE_DRAW_TRIANGLE_RGB565 |
 			 DRM_GCN_FEATURE_DRAW_TRIANGLES_RGB565 |
-			 DRM_GCN_FEATURE_DRAW_TRIANGLES_STATE_RGB565;
+			 DRM_GCN_FEATURE_DRAW_TRIANGLES_STATE_RGB565 |
+			 DRM_GCN_FEATURE_DRAW_TRIANGLES_DEPTH_RGB565;
 	mutex_unlock(&gx_mem1_lock);
 	return 0;
 }
@@ -3435,6 +3506,101 @@ gcn_gx_drm_draw_triangles_state_rgb565(void *dst_allocation, u16 width,
 	completed = gx_wait_for_pe_finishes(finish_count, 1);
 	if (!completed) {
 		pr_warn_ratelimited("gcn-gx: stateful triangle batch timed out waiting for final PE finish\n");
+		ret = -ETIMEDOUT;
+		goto out_unlock;
+	}
+
+	invalidate_dcache_range((unsigned long)dst->cpu_addr,
+				(unsigned long)dst->cpu_addr + bytes);
+
+out_unlock:
+	mutex_unlock(&gx_submit_lock);
+	return ret;
+}
+
+static int gcn_gx_drm_draw_depth_rgb565(void *dst_allocation, u16 width,
+					u16 height,
+					const struct gcn_drm_color_depth_vertex *vertices,
+					u32 triangle_count,
+					const struct gcn_drm_draw_state *state,
+					const struct gcn_drm_depth_state *depth)
+{
+	struct gx_mem1_allocation *dst = dst_allocation;
+	u32 finish_count;
+	size_t bytes;
+	long completed;
+	unsigned int vertex_count;
+	unsigned int i;
+	int ret;
+
+	if (!dst || !vertices || !state || !depth || !triangle_count ||
+	    triangle_count > DRM_GCN_MAX_TRIANGLES || !width || !height ||
+	    (width & 3) || (height & 3) || !state->viewport_width ||
+	    !state->viewport_height || state->viewport_x >= width ||
+	    state->viewport_y >= height ||
+	    state->viewport_width > width - state->viewport_x ||
+	    state->viewport_height > height - state->viewport_y ||
+	    !state->scissor_width || !state->scissor_height ||
+	    state->scissor_x >= width || state->scissor_y >= height ||
+	    state->scissor_width > width - state->scissor_x ||
+	    state->scissor_height > height - state->scissor_y ||
+	    state->blend_mode > DRM_GCN_BLEND_SRC_ALPHA ||
+	    depth->compare > DRM_GCN_DEPTH_ALWAYS)
+		return -EINVAL;
+	vertex_count = triangle_count * 3;
+	for (i = 0; i < vertex_count; i++) {
+		if (vertices[i].x > width || vertices[i].y > height ||
+		    vertices[i].z > DRM_GCN_DEPTH_MAX ||
+		    (state->blend_mode == DRM_GCN_BLEND_NONE &&
+		     vertices[i].a != 0xff))
+			return -EINVAL;
+	}
+
+	bytes = (size_t)width * height * sizeof(u16);
+	if (bytes > dst->size)
+		return -E2BIG;
+	if (!READ_ONCE(gx_accel_ready))
+		return -ENODEV;
+
+	mutex_lock(&gx_submit_lock);
+	flush_dcache_range((unsigned long)dst->cpu_addr,
+			   (unsigned long)dst->cpu_addr + bytes);
+
+	finish_count = READ_ONCE(gx_pe_finish_count);
+	fifo_pos = 0;
+	gx_load_libogc_init_preamble();
+	gx_setup_display_copy_state();
+
+	/* Restore destination colour without modifying the depth buffer. */
+	gx_setup_rgb565_texture_state(width, height);
+	gx_setup_texture_rgb565(dst->cpu_addr, width, height);
+	gx_draw_color_quad(width, height, 0xff, 0xff, 0xff);
+	gx_load_bp_reg(0x45000002);
+	for (i = 0; i < 32; i++)
+		gx_wr8(0);
+
+	/* Make every request independent of inherited or previous EFB depth. */
+	gx_setup_depth_clear_state(width, height);
+	gx_draw_depth_clear_quad(width, height);
+	gx_load_bp_reg(0x45000002);
+	for (i = 0; i < 32; i++)
+		gx_wr8(0);
+
+	gx_setup_vertex_color_depth_state(width, height, state, depth);
+	gx_draw_color_depth_triangles(vertices, triangle_count);
+	gx_load_bp_reg(0x45000002);
+	for (i = 0; i < 32; i++)
+		gx_wr8(0);
+
+	gx_set_copy_clear_rgb(0x00, 0x00, 0x00);
+	gx_copy_efb_to_rgb565_texture(dst->cpu_addr, width, height, true);
+	ret = gx_submit_cmds("render-draw-depth");
+	if (ret)
+		goto out_unlock;
+
+	completed = gx_wait_for_pe_finishes(finish_count, 1);
+	if (!completed) {
+		pr_warn_ratelimited("gcn-gx: depth triangle batch timed out waiting for final PE finish\n");
 		ret = -ETIMEDOUT;
 		goto out_unlock;
 	}
@@ -3925,6 +4091,8 @@ static const struct gcn_drm_accel_ops gcn_gx_drm_accel_ops = {
 	.blit_scaled_rgb565 = gcn_gx_drm_blit_scaled_rgb565,
 	.blit_scaled_system_rgb565 = gcn_gx_drm_blit_scaled_system_rgb565,
 	.blit_scaled_system_xrgb8888 = gcn_gx_drm_blit_scaled_system_xrgb8888,
+	.draw_triangles_depth_rgb565 =
+		gcn_gx_drm_draw_depth_rgb565,
 };
 #endif
 
@@ -4422,7 +4590,7 @@ static int gcn_gx_probe(struct platform_device *pdev)
 		return ret;
 
 #if IS_ENABLED(CONFIG_DRM_GCN_GX)
-	ret = gcn_drm_register_accel_v2(&gcn_gx_drm_accel_ops);
+	ret = gcn_drm_register_accel_v3(&gcn_gx_drm_accel_ops);
 #else
 	ret = gcnfb_register_accel(&gcn_gx_accel_ops);
 #endif
@@ -4448,7 +4616,7 @@ static void gcn_gx_remove(struct platform_device *pdev)
 	cancel_work_sync(&gx_frame_work.work);
 	gcnfb_unregister_accel(&gcn_gx_accel_ops);
 #else
-	gcn_drm_unregister_accel_v2(&gcn_gx_drm_accel_ops);
+	gcn_drm_unregister_accel_v3(&gcn_gx_drm_accel_ops);
 #endif
 	gcn_gx_exit();
 }

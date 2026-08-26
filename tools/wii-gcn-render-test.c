@@ -1077,6 +1077,21 @@ static int submit_triangle_state(int fd,
 	return ioctl(fd, DRM_IOCTL_SYNCOBJ_WAIT, &wait);
 }
 
+static int submit_triangle_depth(int fd,
+				 struct drm_gcn_draw_triangles_depth *draw,
+				 uint32_t sync_handle)
+{
+	struct drm_syncobj_wait wait = {
+		.handles = (uintptr_t)&sync_handle,
+		.timeout_nsec = (int64_t)(monotonic_ns() + 1000000000ULL),
+		.count_handles = 1,
+	};
+
+	if (ioctl(fd, DRM_IOCTL_GCN_DRAW_TRIANGLES_DEPTH, draw))
+		return -1;
+	return ioctl(fd, DRM_IOCTL_SYNCOBJ_WAIT, &wait);
+}
+
 static void test_draw_triangles_state(int fd)
 {
 	struct drm_syncobj_create sync = {};
@@ -1349,6 +1364,204 @@ out:
 		fail("unmap stateful-triangle destination");
 	if (dst.handle && close_bo(fd, dst.handle))
 		fail("close stateful-triangle destination");
+}
+
+static void test_draw_triangles_depth(int fd)
+{
+	struct drm_syncobj_create sync = {};
+	struct drm_syncobj_destroy destroy = {};
+	struct drm_gcn_ctx_create ctx = {};
+	struct drm_gcn_ctx_free free_ctx = {};
+	struct drm_gcn_gem_create dst = {};
+	struct drm_gcn_submit fill = {
+		.op = DRM_GCN_RENDER_OP_FILL_RGB565,
+		.data = 0x07e0,
+	};
+	struct drm_gcn_color_triangle coverage = {
+		.vertices = {
+			{ 32, 32, 0 }, { 224, 48, 0 }, { 112, 224, 0 },
+		},
+	};
+	struct drm_gcn_color_depth_triangle triangles[2] = {
+		{
+			.vertices = {
+				{ 32, 32, DRM_GCN_DEPTH_MAX / 4,
+				  DRM_GCN_RGBA8(0, 0, 0xff, 0xff) },
+				{ 224, 48, DRM_GCN_DEPTH_MAX / 4,
+				  DRM_GCN_RGBA8(0, 0, 0xff, 0xff) },
+				{ 112, 224, DRM_GCN_DEPTH_MAX / 4,
+				  DRM_GCN_RGBA8(0, 0, 0xff, 0xff) },
+			},
+		},
+		{
+			.vertices = {
+				{ 32, 32, DRM_GCN_DEPTH_MAX * 3 / 4,
+				  DRM_GCN_RGBA8(0xff, 0, 0, 0xff) },
+				{ 224, 48, DRM_GCN_DEPTH_MAX * 3 / 4,
+				  DRM_GCN_RGBA8(0xff, 0, 0, 0xff) },
+				{ 112, 224, DRM_GCN_DEPTH_MAX * 3 / 4,
+				  DRM_GCN_RGBA8(0xff, 0, 0, 0xff) },
+			},
+		},
+	};
+	struct drm_gcn_draw_triangles_depth draw = {
+		.triangle_count = ARRAY_SIZE(triangles),
+		.triangles_ptr = (uintptr_t)triangles,
+		.state = {
+			.viewport_width = TEST_WIDTH,
+			.viewport_height = TEST_HEIGHT,
+			.scissor_width = TEST_WIDTH,
+			.scissor_height = TEST_HEIGHT,
+			.blend_mode = DRM_GCN_BLEND_NONE,
+		},
+		.depth = {
+			.test_enable = 1,
+			.compare = DRM_GCN_DEPTH_LESS,
+			.write_enable = 1,
+		},
+	};
+	uint16_t *map = MAP_FAILED;
+	unsigned int depth_inside = 0;
+	unsigned int painter_inside = 0;
+	const int64_t margin = 1024;
+
+	if (create_bo(fd, &dst)) {
+		fail("create depth-triangle destination");
+		return;
+	}
+	map = map_bo(fd, &dst);
+	if (map == MAP_FAILED) {
+		fail("map depth-triangle destination");
+		goto out;
+	}
+	if (ioctl(fd, DRM_IOCTL_GCN_CTX_CREATE, &ctx)) {
+		fail("create depth-triangle context");
+		goto out;
+	}
+	if (ioctl(fd, DRM_IOCTL_SYNCOBJ_CREATE, &sync)) {
+		fail("create depth-triangle syncobj");
+		goto out_ctx;
+	}
+
+	fill.ctx_id = ctx.id;
+	fill.dst_handle = dst.handle;
+	draw.ctx_id = ctx.id;
+	draw.dst_handle = dst.handle;
+	draw.out_syncobj = sync.handle;
+
+	triangles[0].vertices[0].z = DRM_GCN_DEPTH_MAX + 1;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_TRIANGLES_DEPTH, &draw) ||
+	    errno != EINVAL)
+		fail("out-of-range triangle depth should return EINVAL");
+	triangles[0].vertices[0].z = DRM_GCN_DEPTH_MAX / 4;
+	draw.depth.compare = DRM_GCN_DEPTH_ALWAYS + 1;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_TRIANGLES_DEPTH, &draw) ||
+	    errno != EINVAL)
+		fail("invalid depth compare should return EINVAL");
+	draw.depth.compare = DRM_GCN_DEPTH_LESS;
+	draw.depth.test_enable = 2;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_TRIANGLES_DEPTH, &draw) ||
+	    errno != EINVAL)
+		fail("nonboolean depth enable should return EINVAL");
+	draw.depth.test_enable = 1;
+	draw.depth.write_enable = 2;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_TRIANGLES_DEPTH, &draw) ||
+	    errno != EINVAL)
+		fail("nonboolean depth write should return EINVAL");
+	draw.depth.write_enable = 1;
+	draw.depth.pad = 1;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_TRIANGLES_DEPTH, &draw) ||
+	    errno != EINVAL)
+		fail("nonzero depth padding should return EINVAL");
+	draw.depth.pad = 0;
+
+	if (ioctl(fd, DRM_IOCTL_GCN_SUBMIT, &fill) ||
+	    submit_triangle_depth(fd, &draw, sync.handle)) {
+		fail("draw depth-tested overlapping triangles");
+		goto out_sync;
+	}
+	for (unsigned int y = 0; y < TEST_HEIGHT; y++) {
+		for (unsigned int x = 0; x < TEST_WIDTH; x++) {
+			int classified = triangle_classify(&coverage, x, y, margin);
+			uint16_t expected;
+			size_t pixel;
+
+			if (classified > 0) {
+				expected = 0x001f;
+				depth_inside++;
+			} else if (classified < 0) {
+				expected = 0x07e0;
+			} else {
+				continue;
+			}
+			pixel = tiled_rgb565_index(x, y, TEST_WIDTH);
+			if (map[pixel] != expected) {
+				fprintf(stderr,
+					"FAIL: depth mismatch at (%u,%u): got=0x%04x expected=0x%04x\n",
+					x, y, map[pixel], expected);
+				failures++;
+				goto out_sync;
+			}
+		}
+	}
+
+	draw.depth.test_enable = 0;
+	draw.depth.compare = DRM_GCN_DEPTH_ALWAYS;
+	draw.depth.write_enable = 0;
+	if (ioctl(fd, DRM_IOCTL_GCN_SUBMIT, &fill) ||
+	    submit_triangle_depth(fd, &draw, sync.handle)) {
+		fail("draw depth-disabled painter-order control");
+		goto out_sync;
+	}
+	for (unsigned int y = 0; y < TEST_HEIGHT; y++) {
+		for (unsigned int x = 0; x < TEST_WIDTH; x++) {
+			int classified = triangle_classify(&coverage, x, y, margin);
+			uint16_t expected;
+			size_t pixel;
+
+			if (classified > 0) {
+				expected = 0xf800;
+				painter_inside++;
+			} else if (classified < 0) {
+				expected = 0x07e0;
+			} else {
+				continue;
+			}
+			pixel = tiled_rgb565_index(x, y, TEST_WIDTH);
+			if (map[pixel] != expected) {
+				fprintf(stderr,
+					"FAIL: painter-order mismatch at (%u,%u): got=0x%04x expected=0x%04x\n",
+					x, y, map[pixel], expected);
+				failures++;
+				goto out_sync;
+			}
+		}
+	}
+
+	if (!depth_inside || !painter_inside)
+		fail("depth triangle oracle did not classify pixels");
+	else
+		printf("DRAW depth: blue-near=%u red-painter=%u\n",
+		       depth_inside, painter_inside);
+
+out_sync:
+	destroy.handle = sync.handle;
+	if (ioctl(fd, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy))
+		fail("destroy depth-triangle syncobj");
+out_ctx:
+	free_ctx.id = ctx.id;
+	if (ioctl(fd, DRM_IOCTL_GCN_CTX_FREE, &free_ctx))
+		fail("free depth-triangle context");
+out:
+	if (map != MAP_FAILED && munmap(map, dst.size))
+		fail("unmap depth-triangle destination");
+	if (dst.handle && close_bo(fd, dst.handle))
+		fail("close depth-triangle destination");
 }
 
 static void test_draw_triangle(int fd)
@@ -2355,6 +2568,11 @@ int main(int argc, char **argv)
 		else
 			fail_value("stateful triangle-batch render feature", features,
 				   DRM_GCN_FEATURE_DRAW_TRIANGLES_STATE_RGB565);
+		if (features & DRM_GCN_FEATURE_DRAW_TRIANGLES_DEPTH_RGB565)
+			test_draw_triangles_depth(fd);
+		else
+			fail_value("depth triangle-batch render feature", features,
+				   DRM_GCN_FEATURE_DRAW_TRIANGLES_DEPTH_RGB565);
 		if (features & DRM_GCN_FEATURE_BLIT_SCALED_RGB565)
 			test_wide_scaled_blit(fd);
 		if (features & DRM_GCN_FEATURE_BLIT_SCALED_RGB565)

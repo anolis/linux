@@ -39,6 +39,22 @@ struct gcn_drm_draw_state {
 	u32 blend_mode;
 };
 
+struct gcn_drm_color_depth_vertex {
+	u16 x;
+	u16 y;
+	u32 z;
+	u8 r;
+	u8 g;
+	u8 b;
+	u8 a;
+};
+
+struct gcn_drm_depth_state {
+	bool test_enable;
+	u32 compare;
+	bool write_enable;
+};
+
 struct gcn_drm_accel_ops {
 	/*
 	 * This layout is a private core/provider ABI. Add new callbacks only at
@@ -97,9 +113,15 @@ struct gcn_drm_accel_ops {
 					   u16 src_rect_height, u16 dst_x,
 					   u16 dst_y, u16 dst_rect_width,
 					   u16 dst_rect_height);
+	int (*draw_triangles_depth_rgb565)(void *dst_allocation, u16 width,
+					   u16 height,
+					   const struct gcn_drm_color_depth_vertex *vertices,
+					   u32 triangle_count,
+					   const struct gcn_drm_draw_state *state,
+					   const struct gcn_drm_depth_state *depth);
 };
 
-int gcn_drm_register_accel_v2(const struct gcn_drm_accel_ops *ops);
-void gcn_drm_unregister_accel_v2(const struct gcn_drm_accel_ops *ops);
+int gcn_drm_register_accel_v3(const struct gcn_drm_accel_ops *ops);
+void gcn_drm_unregister_accel_v3(const struct gcn_drm_accel_ops *ops);
 
 #endif /* _LINUX_GCN_DRM_ACCEL_H */

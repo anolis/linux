@@ -22,7 +22,11 @@ static void gcn_drm_render_uapi_layout(struct kunit *test)
 	KUNIT_EXPECT_EQ(test, sizeof(struct drm_gcn_draw_triangles), 48U);
 	KUNIT_EXPECT_EQ(test, sizeof(struct drm_gcn_draw_state), 24U);
 	KUNIT_EXPECT_EQ(test, sizeof(struct drm_gcn_draw_triangles_state), 64U);
-	KUNIT_EXPECT_EQ(test, DRM_GCN_NUM_IOCTLS, 11);
+	KUNIT_EXPECT_EQ(test, sizeof(struct drm_gcn_color_depth_vertex), 12U);
+	KUNIT_EXPECT_EQ(test, sizeof(struct drm_gcn_color_depth_triangle), 36U);
+	KUNIT_EXPECT_EQ(test, sizeof(struct drm_gcn_depth_state), 16U);
+	KUNIT_EXPECT_EQ(test, sizeof(struct drm_gcn_draw_triangles_depth), 80U);
+	KUNIT_EXPECT_EQ(test, DRM_GCN_NUM_IOCTLS, 12);
 	KUNIT_EXPECT_EQ(test, DRM_GCN_PARAM_FEATURES, 9);
 	KUNIT_EXPECT_EQ(test,
 			DRM_GCN_FEATURE_BLIT_RECT_RGB565_UNEQUAL_DIMS,
@@ -44,6 +48,8 @@ static void gcn_drm_render_uapi_layout(struct kunit *test)
 			1ULL << 16);
 	KUNIT_EXPECT_EQ(test, DRM_GCN_FEATURE_DRAW_TRIANGLES_STATE_RGB565,
 			1ULL << 17);
+	KUNIT_EXPECT_EQ(test, DRM_GCN_FEATURE_DRAW_TRIANGLES_DEPTH_RGB565,
+			1ULL << 18);
 }
 
 static void gcn_drm_render_validates_color_triangle(struct kunit *test)
@@ -194,6 +200,79 @@ static void gcn_drm_render_validates_triangle_state_batch(struct kunit *test)
 	args.state.pad = 0;
 	args.pad1 = 1;
 	ret = gcn_drm_render_validate_triangle_state_batch(&args);
+	KUNIT_EXPECT_EQ(test, ret, -EINVAL);
+}
+
+static void gcn_drm_render_validates_triangle_depth_batch(struct kunit *test)
+{
+	struct drm_gcn_draw_triangles_depth args = {
+		.ctx_id = 1,
+		.dst_handle = 2,
+		.triangle_count = 1,
+		.triangles_ptr = 0x1000,
+		.state = {
+			.viewport_width = 640,
+			.viewport_height = 480,
+			.scissor_width = 640,
+			.scissor_height = 480,
+			.blend_mode = DRM_GCN_BLEND_NONE,
+		},
+		.depth = {
+			.test_enable = 1,
+			.compare = DRM_GCN_DEPTH_LESS,
+			.write_enable = 1,
+		},
+	};
+	struct drm_gcn_color_depth_triangle triangle = {
+		.vertices = {
+			{ 32, 32, 0, DRM_GCN_RGBA8(0xff, 0, 0, 0xff) },
+			{ 608, 32, DRM_GCN_DEPTH_MAX / 2,
+			  DRM_GCN_RGBA8(0, 0xff, 0, 0xff) },
+			{ 320, 448, DRM_GCN_DEPTH_MAX,
+			  DRM_GCN_RGBA8(0, 0, 0xff, 0xff) },
+		},
+	};
+	int ret;
+
+	ret = gcn_drm_render_validate_triangle_depth_batch(&args);
+	KUNIT_EXPECT_EQ(test, ret, 0);
+	ret = gcn_drm_render_validate_draw_state(&args.state, 640, 480);
+	KUNIT_EXPECT_EQ(test, ret, 0);
+	ret = gcn_drm_validate_z(triangle.vertices, 640, 480, true);
+	KUNIT_EXPECT_EQ(test, ret, 0);
+
+	triangle.vertices[0].z = DRM_GCN_DEPTH_MAX + 1;
+	ret = gcn_drm_validate_z(triangle.vertices, 640, 480, true);
+	KUNIT_EXPECT_EQ(test, ret, -EINVAL);
+	triangle.vertices[0].z = 0;
+	triangle.vertices[0].rgba &= ~0xffU;
+	ret = gcn_drm_validate_z(triangle.vertices, 640, 480, true);
+	KUNIT_EXPECT_EQ(test, ret, -EINVAL);
+	ret = gcn_drm_validate_z(triangle.vertices, 640, 480, false);
+	KUNIT_EXPECT_EQ(test, ret, 0);
+	triangle.vertices[0].rgba |= 0xff;
+	triangle.vertices[2] = triangle.vertices[0];
+	ret = gcn_drm_validate_z(triangle.vertices, 640, 480, true);
+	KUNIT_EXPECT_EQ(test, ret, -EINVAL);
+
+	args.depth.test_enable = 2;
+	ret = gcn_drm_render_validate_triangle_depth_batch(&args);
+	KUNIT_EXPECT_EQ(test, ret, -EINVAL);
+	args.depth.test_enable = 1;
+	args.depth.write_enable = 2;
+	ret = gcn_drm_render_validate_triangle_depth_batch(&args);
+	KUNIT_EXPECT_EQ(test, ret, -EINVAL);
+	args.depth.write_enable = 1;
+	args.depth.compare = DRM_GCN_DEPTH_ALWAYS + 1;
+	ret = gcn_drm_render_validate_triangle_depth_batch(&args);
+	KUNIT_EXPECT_EQ(test, ret, -EINVAL);
+	args.depth.compare = DRM_GCN_DEPTH_LESS;
+	args.depth.pad = 1;
+	ret = gcn_drm_render_validate_triangle_depth_batch(&args);
+	KUNIT_EXPECT_EQ(test, ret, -EINVAL);
+	args.depth.pad = 0;
+	args.pad1 = 1;
+	ret = gcn_drm_render_validate_triangle_depth_batch(&args);
 	KUNIT_EXPECT_EQ(test, ret, -EINVAL);
 }
 
@@ -541,6 +620,7 @@ static struct kunit_case gcn_drm_render_test_cases[] = {
 	KUNIT_CASE(gcn_drm_render_validates_color_triangle),
 	KUNIT_CASE(gcn_drm_render_validates_triangle_batch),
 	KUNIT_CASE(gcn_drm_render_validates_triangle_state_batch),
+	KUNIT_CASE(gcn_drm_render_validates_triangle_depth_batch),
 	{}
 };
 
