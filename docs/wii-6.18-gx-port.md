@@ -12163,3 +12163,27 @@ diagnostic module as a depth implementation: it deliberately ignores semantic
 Z and cannot pass the depth oracle. The next candidate must be derived from an
 exact comparison with a known-working libogc XYZ setup, including CP VAT/VCD
 and relevant XF position/projection state.
+
+#### Direct XYZ/S16 scalar-format control
+
+- Candidate commit: `2416a6721`
+- unchanged booted v3 `zImage` SHA-256:
+  `831e89aab3e871588bbc05c680964850cc90cd94c44d1aca7fb795faaf5ea122`
+- `gcn-gx.ko` SHA-256:
+  `7f86c472604d858fe30535867dd6cba6db13e5aef72a27d9c5fded39a216e061`
+- unchanged static `wii-gcn-render-test` SHA-256:
+  `a5b11d4e3700439af9143192ce38967e0ce963fb6c1e5e790fd5b016f11dadf9`
+
+The exact local libogc audit confirms VAT0 bit zero selects `GX_POS_XYZ`,
+but the known-working Wii triangle example uses indexed XYZ/S16 rather than
+the rejected direct XYZ/F32 stream. This control takes the smallest scalar
+split first: preserve the validated depth ioctl path and forced-disabled Z,
+select direct XYZ/S16 plus RGBA8, and emit integer X/Y with constant zero Z.
+All retained non-depth triangle bytes remain unchanged.
+
+A completed red painter-order mismatch proves direct XYZ itself works and
+isolates the stall to the F32 XYZ loader. Another PE-token timeout implicates
+direct XYZ independent of scalar format and makes libogc's indexed-array path
+the next positive control. Host validation passed `git diff --check`, strict
+checkpatch with zero errors, warnings, or checks, and focused PowerPC `W=1`
+GX compilation.
