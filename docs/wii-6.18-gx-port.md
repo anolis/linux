@@ -12144,3 +12144,22 @@ XYZ or its XF position state. Another PE-token timeout would instead implicate
 some other state unique to the depth ioctl. Host validation passed
 `git diff --check`, strict checkpatch with zero errors, warnings, or checks,
 and focused PowerPC `W=1` GX compilation.
+
+Hardware result for candidate `bf24d0441` on clean boot ID
+`8f998f3f-58a7-454e-b8bc-8d59fdd620f9`: positive control passed. The exact
+kernel, module, and static-client hashes matched the staged values. Every
+retained test passed, and the first depth request completed normally instead
+of stalling. At the first confidently interior sample `(34,34)`, the client
+read painter-order red `0xf800` rather than the semantic depth result blue
+`0x001f`, which is the control's expected diagnostic mismatch. All scale,
+system-object, and XRGB8888 tests that followed also passed.
+
+The provider unregistered and restored the CPU console without a timeout,
+fallback, oops, panic, machine check, reboot, or display corruption. This
+validates the complete depth ioctl path surrounding the position stream and
+isolates the hang to changing the accepted direct-XY vertex format into direct
+XYZ or to XF state required specifically by that transition. Do not treat this
+diagnostic module as a depth implementation: it deliberately ignores semantic
+Z and cannot pass the depth oracle. The next candidate must be derived from an
+exact comparison with a known-working libogc XYZ setup, including CP VAT/VCD
+and relevant XF position/projection state.
