@@ -1405,12 +1405,9 @@ gx_setup_vertex_color_depth_state(u16 width, u16 height,
 				  const struct gcn_drm_depth_state *depth)
 {
 	gx_setup_vertex_color_state_semantic(width, height, state);
-	/* Diagnostic: isolate direct XYZ parsing from enabled Z processing. */
+	/* Diagnostic: retain the proven direct-XY stream with Z disabled. */
 	(void)depth;
 	gx_load_bp_reg(0x40000000);
-
-	/* VTXFMT0: direct XYZ/F32 position followed by direct RGBA8 colour. */
-	gx_load_cp_reg(0x70, 0x40016009);
 }
 
 #endif
@@ -1643,8 +1640,6 @@ gx_draw_color_depth_triangles(const struct gcn_drm_color_depth_vertex *vertices,
 	for (i = 0; i < vertex_count; i++) {
 		wg_f32_bits(f32_from_u16(vertices[i].x));
 		wg_f32_bits(f32_from_u16(vertices[i].y));
-		/* Diagnostic: validate XYZ parsing at the established near plane. */
-		wg_f32_bits(F32_ZERO);
 		gx_wr8(vertices[i].r);
 		gx_wr8(vertices[i].g);
 		gx_wr8(vertices[i].b);
