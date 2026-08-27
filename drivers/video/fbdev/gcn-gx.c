@@ -1636,7 +1636,6 @@ gx_draw_color_depth_triangles(const struct gcn_drm_color_depth_vertex *vertices,
 {
 	unsigned int vertex_count = triangle_count * 3;
 	unsigned int i;
-	u32 z;
 
 	gx_wr8(0x90); /* GX_TRIANGLES | vtxfmt 0 */
 	gx_wr16be(vertex_count);
@@ -1644,8 +1643,8 @@ gx_draw_color_depth_triangles(const struct gcn_drm_color_depth_vertex *vertices,
 	for (i = 0; i < vertex_count; i++) {
 		wg_f32_bits(f32_from_u16(vertices[i].x));
 		wg_f32_bits(f32_from_u16(vertices[i].y));
-		z = f32_div_u32(vertices[i].z, DRM_GCN_DEPTH_MAX);
-		wg_f32_bits(F32_NEG(z));
+		/* Diagnostic: validate XYZ parsing at the established near plane. */
+		wg_f32_bits(F32_ZERO);
 		gx_wr8(vertices[i].r);
 		gx_wr8(vertices[i].g);
 		gx_wr8(vertices[i].b);
