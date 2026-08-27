@@ -12036,3 +12036,28 @@ retain direct XYZ VAT and payload encoding while forcing Z compare and writes
 off. Completion with the expected painter-order red mismatch proves XYZ parse
 and localizes the stall to enabled Z processing; another token timeout instead
 implicates XYZ parsing or its transformed position path.
+
+#### Direct XYZ with Z disabled control
+
+- Candidate commit: `607c3754b`
+- unchanged booted v3 `zImage` SHA-256:
+  `831e89aab3e871588bbc05c680964850cc90cd94c44d1aca7fb795faaf5ea122`
+- `gcn-gx.ko` SHA-256:
+  `a7577833c2eb1b0f9b31a3059131a60014d6bfa478fb4a69d1c201fe8f8cba1b`
+- unchanged static `wii-gcn-render-test` SHA-256:
+  `a5b11d4e3700439af9143192ce38967e0ce963fb6c1e5e790fd5b016f11dadf9`
+
+Retain the exact direct XYZ VAT, 12-byte XYZ/RGBA8 vertex payload, projection,
+copy-clear, destination restore, and overlapping triangle stream from the
+rejected candidate, but force BP Z mode fully disabled. This module-only
+diagnostic does not change the v3 core ABI or ioctl table, so it reuses the
+checksum-verified v3 kernel already booted for the preceding isolate.
+
+This control intentionally cannot pass the depth pixel oracle. Its positive
+result is a completed request that produces red by painter order and reports a
+pixel mismatch rather than a PE timeout. That outcome proves XYZ command
+parsing and transformation complete and localizes the rejected stage to
+enabled Z processing. Another token timeout instead localizes the fault to the
+XYZ attribute path. Host validation passed `git diff --check`, strict
+checkpatch with zero errors, warnings, or checks, and focused PowerPC `W=1`
+GX compilation.
