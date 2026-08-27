@@ -12314,3 +12314,35 @@ superseding its originally staged unchanged-kernel hash with the accepted
 `182d747be50d6e6fea0d757821a9c713cb8835f2d2b469b7f2683d8237aecf96`;
 its module and static-client hashes remain unchanged. The current boot is
 healthy because no PE-stalling depth request has run since startup.
+
+Hardware result for indexed-XYZ/S16 candidate `1ac80dacb`: positive control
+passed on the same healthy boot ID
+`074d4013-5533-4058-8874-379fcf893a01`. Kernel, module, and static-client
+SHA-256 values matched the staged values. Every retained allocator, copy,
+fill, blit, scale, system-object, XRGB8888, triangle, batch, viewport,
+scissor, and blend operation passed. The indexed depth request completed
+without a PE-token or FIFO stall and reached its pixel oracle.
+
+At the confidently interior sample `(34,34)`, the destination contained
+painter-order red `0xf800` rather than semantic-depth blue `0x001f`. This is
+the diagnostic's intended mismatch: depth was forced off, so completion with
+the later red triangle visible proves that index8 XYZ/S16 positions and
+index8 RGBA8 colours were fetched, transformed, rasterized, and copied back.
+It also resolves the preceding direct-XYZ/S16 green result as a property of
+that direct integer control rather than evidence that all XYZ geometry was
+being rejected.
+
+The module unregistered normally, native AVE `0x62=0x00` remained selected,
+WiiDesk returned physically blue, and there was no timeout, fallback, oops,
+panic, machine check, or reboot. The bounded hardware log is preserved at
+`/tmp/wii-dmesg-indexed-xyz-s16-074d4013.txt`, SHA-256
+`e42328b9c805ef3659e2d24e0dc8d1bb5ac7e2b832b6217df03bc38ccf7bd9f9`.
+
+This accepts indexed vertex-array transport as the production direction. The
+next control must change only the indexed position array from XYZ/S16 with
+six-byte stride to XYZ/F32 with twelve-byte stride. Keep index8 VCD, indexed
+RGBA8 colours, triangle indices, geometry, projection, forced-disabled Z,
+copy-clear, and all completion/copy-back state unchanged. A completed red
+mismatch validates indexed F32 loading and permits restoring semantic Z;
+another PE-token timeout localizes the defect to the F32 position loader even
+when data comes from a vertex array.
