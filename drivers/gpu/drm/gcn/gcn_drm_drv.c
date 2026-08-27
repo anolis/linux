@@ -45,7 +45,6 @@
 
 #define AVE_CHROMA_EXCHANGE_REG	0x62
 #define AVE_CHROMA_EXCHANGE_OFF	0x00
-#define AVE_CHROMA_EXCHANGE_ON	0x02
 
 #define VI_VTR			0x00
 #define VI_DCR			0x02
@@ -174,19 +173,18 @@ static int gcn_drm_ave_write_verify(struct gcn_drm *gcn, u8 value);
 static int gcn_drm_set_accel_ave_locked(bool accel_active)
 {
 	struct gcn_drm *gcn = gcn_drm_active;
-	u8 value = accel_active ? AVE_CHROMA_EXCHANGE_OFF :
-				 AVE_CHROMA_EXCHANGE_ON;
 	int ret;
 
 	if (!gcn || !gcn->ave)
 		return 0;
 
-	ret = gcn_drm_ave_write_verify(gcn, value);
+	ret = gcn_drm_ave_write_verify(gcn, AVE_CHROMA_EXCHANGE_OFF);
 	if (ret)
 		return ret;
 
-	drm_info(&gcn->drm, "set AVE chroma exchange for %s scanout: 62=%02x\n",
-		 accel_active ? "GX" : "CPU", value);
+	drm_info(&gcn->drm,
+		 "set native AVE chroma order for %s scanout: 62=00\n",
+		 accel_active ? "GX" : "CPU");
 	return 0;
 }
 
@@ -686,11 +684,11 @@ static int gcn_drm_enable_ave(struct gcn_drm *gcn)
 
 	/* Cleanup must restore zero even if this transfer fails partway. */
 	gcn->ave_restore_needed = true;
-	ret = gcn_drm_ave_write_verify(gcn, AVE_CHROMA_EXCHANGE_ON);
+	ret = gcn_drm_ave_write_verify(gcn, AVE_CHROMA_EXCHANGE_OFF);
 	if (ret)
 		return ret;
 
-	drm_info(&gcn->drm, "enabled AVE chroma exchange: 62=02\n");
+	drm_info(&gcn->drm, "selected native AVE chroma order: 62=00\n");
 	return 0;
 }
 
@@ -739,7 +737,8 @@ static u32 gcn_drm_pack_yuyv(unsigned int r0, unsigned int g0,
 		      RGB2YUV_VB * b) >> RGB2YUV_SHIFT) + 128,
 		    (int)chroma_min, 240);
 
-	return y0 << 24 | cr << 16 | y1 << 8 | cb;
+	/* Match GX EFB-copy and the legacy framebuffer's native Y-Cb-Y-Cr. */
+	return y0 << 24 | cb << 16 | y1 << 8 | cr;
 }
 
 static u32 gcn_drm_rgb565_pair(u16 pixel0, u16 pixel1)
