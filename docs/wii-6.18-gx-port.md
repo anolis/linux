@@ -12062,6 +12062,28 @@ XYZ attribute path. Host validation passed `git diff --check`, strict
 checkpatch with zero errors, warnings, or checks, and focused PowerPC `W=1`
 GX compilation.
 
+Hardware result for candidate `2416a6721` on boot ID
+`8f998f3f-58a7-454e-b8bc-8d59fdd620f9`: direct XYZ/S16 completed twice
+without a PE-token or FIFO timeout. Both runs reached the depth oracle and
+read unchanged green `0x07e0` at `(34,34)` instead of blue `0x001f`, showing
+that this integer diagnostic did not rasterize the expected geometry, but the
+critical command stream completed and all tests after it continued normally.
+The provider unloaded and restored CPU scanout cleanly after both runs.
+
+The first run also reported two isolated one-pixel scale mismatches. Neither
+recurred in the immediate checksum-identical repeat, whose only failure was the
+expected depth mismatch, so they remain part of the separately tracked
+transient scale-sampling issue rather than evidence of an XYZ regression.
+There was no timeout, fallback, oops, panic, machine check, reboot, or display
+corruption in either interval.
+
+This result proves that direct XYZ parsing is not sufficient to cause the
+stall: the rejected condition is specifically the direct XYZ/F32 scalar path.
+The next positive control should reproduce the local known-working libogc Wii
+triangle transport more closely by fetching XYZ/S16 positions through an
+indexed vertex array. Once indexed XYZ is proven, change only that array's
+scalar format to F32 before restoring semantic Z.
+
 The first attempt at this control was invalid because it ran immediately after
 the preceding PE stall without rebooting. The stalled GX backend survives
 module unload, so that attempt timed out on the first retained copy before it
