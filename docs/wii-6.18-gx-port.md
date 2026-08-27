@@ -12081,3 +12081,22 @@ but emit constant floating-point `Z=0` for every vertex. Painter-order
 completion then implicates the negative fractional Z values or their clip-space
 mapping; another timeout implicates XYZ parsing or the XF path independent of
 the specific Z values.
+
+#### Direct XYZ at constant zero Z control
+
+- Candidate commit: `f378549dc`
+- unchanged booted v3 `zImage` SHA-256:
+  `831e89aab3e871588bbc05c680964850cc90cd94c44d1aca7fb795faaf5ea122`
+- `gcn-gx.ko` SHA-256:
+  `b7ac938b51f72b34e63be06033a080980d662e754e64c10837398a32e698d77d`
+- unchanged static `wii-gcn-render-test` SHA-256:
+  `a5b11d4e3700439af9143192ce38967e0ce963fb6c1e5e790fd5b016f11dadf9`
+
+Preserve the direct XYZ VAT, complete three-F32 position payload, projection,
+copy-clear, destination restore, and forced-disabled Z state from the preceding
+control, but emit constant established near-plane `Z=0` for every vertex. A
+completed red painter-order mismatch proves the FIFO stride and XYZ VAT parse
+are valid and implicates negative fractional Z or its clip-space transform.
+Another token timeout implicates XYZ parsing independent of Z value. Host
+validation passed `git diff --check`, strict checkpatch with zero errors,
+warnings, or checks, and focused PowerPC `W=1` GX compilation.
