@@ -12234,3 +12234,50 @@ direct XYZ independent of scalar format and makes libogc's indexed-array path
 the next positive control. Host validation passed `git diff --check`, strict
 checkpatch with zero errors, warnings, or checks, and focused PowerPC `W=1`
 GX compilation.
+
+### Unify CPU and GX native XFB chroma order
+
+- Candidate commit: `10695ecf3`
+- `zImage`/`dtbImage.wii` SHA-256:
+  `182d747be50d6e6fea0d757821a9c713cb8835f2d2b469b7f2683d8237aecf96`
+- unchanged indexed-XYZ `gcn-gx.ko` SHA-256:
+  `6473165d92ecf68c0067079b1bd8ec2303fce1181d2f0314afa9cd94dbfa9e39`
+
+A controlled live-frame test isolated the current sky-blue-to-tan failure to
+the CPU XFB conversion/AVE boundary. WiiDesk remained active and continued to
+page-flip. Its VNC server exposed the source dumb buffer as the expected blue;
+an independent VNC screenshot sampled the uniform background as
+`srgb(123,190,230)`, while the physical CPU scanout was tan. Loading the
+checksum-known direct-XYZ/S16 GX provider without changing WiiDesk immediately
+made the physical display blue. The provider selected AVE `0x62=0x00`; no
+render client or depth request was run. This proves that WiiDesk, DRM source
+buffers, and GX conversion are not the source of the tan frame.
+
+The CPU converter emitted `Y-Cr-Y-Cb` and depended on changing the AVE's
+command-style register to `0x62=0x02`; GX EFB copy and legacy `gcnfb` instead
+emit native `Y-Cb-Y-Cr` under `0x62=0x00`. On this AVE revision register
+`0x62` reads as `0xff`. The kernel accepted acknowledged writes by validating
+ordinary control register `0x01=0x20`, but the logged CPU restore did not
+produce correct physical colour. Explicit post-failure userspace writes of
+both `0x00` and `0x02` also left the physical frame tan. An acknowledged
+write-only command is therefore not adequate evidence that the live encoder
+transition took effect.
+
+Candidate `10695ecf3` removes that transition entirely. CPU conversion now
+emits the same native `Y-Cb-Y-Cr` byte order as GX and the legacy framebuffer,
+and DRM selects `0x62=0x00` for initial ownership, CPU fallback, GX
+registration, GX unregistration, and cleanup. The indexed-depth provider code
+and UAPI are unchanged.
+
+Hardware acceptance requires checksum-verifying and booting the candidate
+kernel, then observing the same live blue WiiDesk source through three states:
+CPU-only startup, indexed-candidate GX registration without issuing a depth
+request, and CPU fallback after GX unload. All three must remain blue. Repeat
+one GX load/unload transition to reject accidental initial state, require VNC
+to remain blue throughout, and audit for AVE, GX, DRM, I2C, timeout, oops,
+panic, machine-check, and reboot faults. Only after this scanout prerequisite
+passes should the staged indexed-XYZ/S16 depth request be executed.
+
+Host validation passed `git diff --check`, strict checkpatch with zero errors,
+warnings, or checks, focused PowerPC `W=1` DRM compilation, and a complete
+`make -j16 zImage modules` build.
