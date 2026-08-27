@@ -12020,3 +12020,19 @@ fault lies in the remaining XYZ/depth raster stage. Host validation passed
 `git diff --check`, strict checkpatch with zero errors, warnings, or checks,
 focused PowerPC `W=1` GX compilation, and a complete `zImage modules -j16`
 build. Deploy the matching kernel and module hashes above before testing.
+
+Hardware result for candidate `b8f5807e7`: rejected. The exact kernel booted
+with ID `87fd2020-10c0-4eb4-b2af-ccb8ecd9c7b0`, and all three deployed hashes
+matched the staged values. The provider registered at 83.191 seconds. Every
+retained operation through semantic triangle state passed, then the first
+depth submission again left the PE token at `0x0064` instead of expected
+`0x0065` and timed out at 84.809 seconds with CP status `0x0004`. The test
+failed, unregistered the provider at 85.673 seconds, and restored the CPU
+console at 85.780 seconds without an oops, panic, machine check, or reboot.
+
+This identical result rules out the removed colour-disabled depth-clear quad.
+The stall lies in the remaining XYZ/depth raster stage. The next control must
+retain direct XYZ VAT and payload encoding while forcing Z compare and writes
+off. Completion with the expected painter-order red mismatch proves XYZ parse
+and localizes the stall to enabled Z processing; another token timeout instead
+implicates XYZ parsing or its transformed position path.
