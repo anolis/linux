@@ -12100,3 +12100,23 @@ are valid and implicates negative fractional Z or its clip-space transform.
 Another token timeout implicates XYZ parsing independent of Z value. Host
 validation passed `git diff --check`, strict checkpatch with zero errors,
 warnings, or checks, and focused PowerPC `W=1` GX compilation.
+
+Hardware result for candidate `f378549dc` on clean boot ID
+`a71111bb-96a7-4162-aab1-3ca4432ad75e`: rejected. The booted kernel, module,
+and static client matched the staged SHA-256 values. Every retained allocator,
+copy, fill, blit, scale, system-object, XRGB8888, triangle, batch, viewport,
+scissor, and blend test passed before the first constant-zero, Z-disabled XYZ
+request stalled. The validated PE token remained `0x0066` instead of reaching
+`0x0067`, and CP status remained `0x0004`. Later scale requests inherited the
+stalled backend and are not independent regressions. The module unregistered,
+CPU scanout returned, and there was no oops, panic, machine check, or reboot.
+
+Constant `Z=0` therefore rules out the negative fractional semantic-Z mapping
+as the immediate cause. Together with the preceding forced-disabled Z control,
+the failure is isolated to direct XYZ parsing or its XF position state. The
+next positive control must keep the depth ioctl's copy-clear, colour restore,
+triangle geometry, and disabled-Z state, but return VAT0 to direct XY and omit
+the Z word from each vertex. A completed red painter-order mismatch validates
+the surrounding path and leaves the XYZ/XF transition as the only changed
+stage; a timeout would instead show that some other depth-ioctl state is at
+fault.
