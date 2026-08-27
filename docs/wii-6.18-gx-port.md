@@ -12120,3 +12120,27 @@ the Z word from each vertex. A completed red painter-order mismatch validates
 the surrounding path and leaves the XYZ/XF transition as the only changed
 stage; a timeout would instead show that some other depth-ioctl state is at
 fault.
+
+#### Depth ioctl direct-XY positive control
+
+- Candidate commit: `bf24d0441`
+- unchanged booted v3 `zImage` SHA-256:
+  `831e89aab3e871588bbc05c680964850cc90cd94c44d1aca7fb795faaf5ea122`
+- `gcn-gx.ko` SHA-256:
+  `8acd82a700ba6a4ea261a1ba3bac96b0b8d89b0f284511d3192dd77cb13cc120`
+- unchanged static `wii-gcn-render-test` SHA-256:
+  `a5b11d4e3700439af9143192ce38967e0ce963fb6c1e5e790fd5b016f11dadf9`
+
+Keep the depth ioctl's accepted copy-clear, destination-colour restore,
+semantic state, overlapping triangle geometry, colours, forced-disabled Z,
+completion, and copy-back paths. Change only VTXFMT0 from direct XYZ/F32 to
+the already-accepted direct XY/F32 format and remove the Z word from every
+vertex payload.
+
+This control intentionally cannot satisfy the depth pixel oracle. Its positive
+result is a completed request and red painter-order mismatch, proving that the
+surrounding depth ioctl pipeline is sound and isolating the stall to enabling
+XYZ or its XF position state. Another PE-token timeout would instead implicate
+some other state unique to the depth ioctl. Host validation passed
+`git diff --check`, strict checkpatch with zero errors, warnings, or checks,
+and focused PowerPC `W=1` GX compilation.
