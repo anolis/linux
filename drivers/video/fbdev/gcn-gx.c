@@ -1416,14 +1416,6 @@ gx_setup_vertex_color_depth_state(u16 width, u16 height,
 	gx_load_cp_reg(0x70, 0x40016009);
 }
 
-static void gx_setup_depth_clear_state(u16 width, u16 height)
-{
-	gx_setup_vertex_color_state(width, height);
-	/* Always write far depth while leaving destination colour untouched. */
-	gx_load_bp_reg(0x4000001F);
-	gx_load_bp_reg(0x41003104);
-	gx_load_cp_reg(0x70, 0x40016009);
-}
 #endif
 
 /* Add one position-derived texcoord and make TEV stage 0 sample texmap 0. */
@@ -1662,27 +1654,6 @@ gx_draw_color_depth_triangles(const struct gcn_drm_color_depth_vertex *vertices,
 		gx_wr8(vertices[i].b);
 		gx_wr8(vertices[i].a);
 	}
-}
-
-static void gx_draw_depth_clear_quad(u16 width, u16 height)
-{
-	u32 fw = f32_from_u16(width);
-	u32 fh = f32_from_u16(height);
-
-	gx_wr8(0x80); /* GX_QUADS | vtxfmt 0 */
-	gx_wr16be(4);
-
-	wg_f32_bits(F32_ZERO); wg_f32_bits(F32_ZERO);
-	wg_f32_bits(F32_NEG_ONE); gx_wr32be(0xffffffff);
-
-	wg_f32_bits(fw); wg_f32_bits(F32_ZERO);
-	wg_f32_bits(F32_NEG_ONE); gx_wr32be(0xffffffff);
-
-	wg_f32_bits(fw); wg_f32_bits(fh);
-	wg_f32_bits(F32_NEG_ONE); gx_wr32be(0xffffffff);
-
-	wg_f32_bits(F32_ZERO); wg_f32_bits(fh);
-	wg_f32_bits(F32_NEG_ONE); gx_wr32be(0xffffffff);
 }
 
 #endif
@@ -3571,17 +3542,16 @@ static int gcn_gx_drm_draw_depth_rgb565(void *dst_allocation, u16 width,
 	gx_load_libogc_init_preamble();
 	gx_setup_display_copy_state();
 
-	/* Restore destination colour without modifying the depth buffer. */
-	gx_setup_rgb565_texture_state(width, height);
-	gx_setup_texture_rgb565(dst->cpu_addr, width, height);
-	gx_draw_color_quad(width, height, 0xff, 0xff, 0xff);
-	gx_load_bp_reg(0x45000002);
+	/* Use the established copy engine to initialize EFB depth to far. */
+	gx_set_copy_clear_rgb(0x00, 0x00, 0x00);
+	gx_copy_efb_to_rgb565_texture(gx_tex_buf, width, height, true);
 	for (i = 0; i < 32; i++)
 		gx_wr8(0);
 
-	/* Make every request independent of inherited or previous EFB depth. */
-	gx_setup_depth_clear_state(width, height);
-	gx_draw_depth_clear_quad(width, height);
+	/* Restore destination colour after copy-clear initialized depth. */
+	gx_setup_rgb565_texture_state(width, height);
+	gx_setup_texture_rgb565(dst->cpu_addr, width, height);
+	gx_draw_color_quad(width, height, 0xff, 0xff, 0xff);
 	gx_load_bp_reg(0x45000002);
 	for (i = 0; i < 32; i++)
 		gx_wr8(0);
