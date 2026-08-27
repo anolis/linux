@@ -1404,13 +1404,10 @@ gx_setup_vertex_color_depth_state(u16 width, u16 height,
 				  const struct gcn_drm_draw_state *state,
 				  const struct gcn_drm_depth_state *depth)
 {
-	u32 z_mode;
-
 	gx_setup_vertex_color_state_semantic(width, height, state);
-	z_mode = (depth->test_enable ? BIT(0) : 0) |
-		 ((depth->compare & 7) << 1) |
-		 (depth->write_enable ? BIT(4) : 0);
-	gx_load_bp_reg(0x40000000 | z_mode);
+	/* Diagnostic: isolate direct XYZ parsing from enabled Z processing. */
+	(void)depth;
+	gx_load_bp_reg(0x40000000);
 
 	/* VTXFMT0: direct XYZ/F32 position followed by direct RGBA8 colour. */
 	gx_load_cp_reg(0x70, 0x40016009);
