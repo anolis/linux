@@ -11994,3 +11994,29 @@ which already clears Z to `0x00ffffff`, then restore destination colour with
 the accepted Z-disabled texture path before drawing the depth triangles. If
 that candidate still stalls, the fault is in the XYZ/depth draw itself; if it
 passes, the colour-disabled primitive clear was the rejected stage.
+
+#### Copy-clear depth initialization isolate
+
+- Candidate commit: `b8f5807e7`
+- `zImage` / `dtbImage.wii` SHA-256:
+  `831e89aab3e871588bbc05c680964850cc90cd94c44d1aca7fb795faaf5ea122`
+- `gcn-gx.ko` SHA-256:
+  `b2c9aafec150f7d9abebc3828e6306c4a32cb24bcb161927fa60a5adc0a8af3e`
+- unchanged static `wii-gcn-render-test` SHA-256:
+  `a5b11d4e3700439af9143192ce38967e0ce963fb6c1e5e790fd5b016f11dadf9`
+- unchanged detached UML KUnit JSON SHA-256:
+  `64ce0d48f727d9c4f8648ce0686a8def8355a3fe10580fd8601397ac6a16f76b`
+
+Remove the unvalidated colour-disabled XYZ clear primitive. Instead, issue the
+established EFB-to-private-texture copy with `clear=true`, which initializes
+EFB colour and depth through the accepted copy engine, then restore destination
+colour with the established Z-disabled texture path. Leave the requested
+XYZ/RGBA8 depth triangle stream and every UAPI/core/client contract unchanged.
+
+This is an isolation candidate with a binary outcome. If the first depth
+positive control completes and matches blue-near over red-far, the rejected
+stage was the primitive depth-clear quad. If the PE token stalls again, the
+fault lies in the remaining XYZ/depth raster stage. Host validation passed
+`git diff --check`, strict checkpatch with zero errors, warnings, or checks,
+focused PowerPC `W=1` GX compilation, and a complete `zImage modules -j16`
+build. Deploy the matching kernel and module hashes above before testing.
