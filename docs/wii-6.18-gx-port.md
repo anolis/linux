@@ -12084,6 +12084,31 @@ triangle transport more closely by fetching XYZ/S16 positions through an
 indexed vertex array. Once indexed XYZ is proven, change only that array's
 scalar format to F32 before restoring semantic Z.
 
+#### Indexed XYZ/S16 transport control
+
+- Candidate commit: `1ac80dacb`
+- unchanged booted v3 `zImage` SHA-256:
+  `831e89aab3e871588bbc05c680964850cc90cd94c44d1aca7fb795faaf5ea122`
+- `gcn-gx.ko` SHA-256:
+  `6473165d92ecf68c0067079b1bd8ec2303fce1181d2f0314afa9cd94dbfa9e39`
+- unchanged static `wii-gcn-render-test` SHA-256:
+  `a5b11d4e3700439af9143192ce38967e0ce963fb6c1e5e790fd5b016f11dadf9`
+
+Reproduce the known-working libogc Wii triangle's vertex transport while
+retaining the validated depth-ioctl control state: index8 XYZ/S16 positions,
+index8 RGBA8 colours, and constant zero Z with depth disabled. At most 192
+vertices occupy less than 2 KiB in the otherwise-unused reserved alternate
+texture workspace. The provider cache-flushes the exact array extent, programs
+bounded CP position/colour bases and strides, and emits paired indices. No
+address or index is exposed through the UAPI.
+
+Red painter-order completion validates indexed XYZ rasterization and makes
+indexed XYZ/F32 the direct production precursor. Green completion still proves
+transport parsing but requires reconciling the integer geometry/projection.
+A PE-token timeout rejects indexed XYZ itself. Host validation passed
+`git diff --check`, strict checkpatch with zero errors, warnings, or checks,
+and focused PowerPC `W=1` GX compilation.
+
 The first attempt at this control was invalid because it ran immediately after
 the preceding PE stall without rebooting. The stalled GX backend survives
 module unload, so that attempt timed out on the first retained copy before it
