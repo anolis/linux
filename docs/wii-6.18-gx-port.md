@@ -12281,3 +12281,36 @@ passes should the staged indexed-XYZ/S16 depth request be executed.
 Host validation passed `git diff --check`, strict checkpatch with zero errors,
 warnings, or checks, focused PowerPC `W=1` DRM compilation, and a complete
 `make -j16 zImage modules` build.
+
+Hardware result for candidate `10695ecf3`: accepted on boot ID
+`074d4013-5533-4058-8874-379fcf893a01`. The booted card image matched staged
+SHA-256 `182d747be50d6e6fea0d757821a9c713cb8835f2d2b469b7f2683d8237aecf96`.
+Probe selected native AVE order `0x62=0x00` before DRM registration, and the
+user confirmed that the CPU-rendered WiiDesk background was blue. This is the
+same source that had remained blue over VNC but appeared tan through the
+preceding CPU converter.
+
+The exact indexed candidate module matched staged SHA-256
+`6473165d92ecf68c0067079b1bd8ec2303fce1181d2f0314afa9cd94dbfa9e39`.
+Registering it selected the same native AVE state and activated GX RGB565
+scanout; the physical background remained blue. Unloading it restored CPU
+scanout without changing AVE byte order, and the background remained blue.
+One complete checksum-identical load/hold/unload repeat also remained blue
+throughout, with no tan flash or sustained colour change. WiiDesk remained
+active after the sequence.
+
+The candidate interval contains no AVE transfer failure, GX/DRM timeout,
+FIFO stall, fallback, oops, panic, machine check, or reboot. The boot log does
+contain the known rootfs-installed v2 GX module failing its automatic load on
+missing v2 registration symbols at 8.6 seconds; that stale module predates the
+candidate transfer and is outside both successful v3 provider intervals. The
+bounded hardware log is preserved at
+`/tmp/wii-dmesg-native-chroma-074d4013.txt`, SHA-256
+`86cd908b42d97e2312b4b7d9574e78dc6955a85c3f7a314fac704528824927b8`.
+
+This closes converter/encoder ownership as a prerequisite for depth testing.
+Run the pending indexed-XYZ/S16 transport control on this accepted kernel,
+superseding its originally staged unchanged-kernel hash with the accepted
+`182d747be50d6e6fea0d757821a9c713cb8835f2d2b469b7f2683d8237aecf96`;
+its module and static-client hashes remain unchanged. The current boot is
+healthy because no PE-stalling depth request has run since startup.
