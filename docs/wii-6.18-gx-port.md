@@ -12061,3 +12061,23 @@ enabled Z processing. Another token timeout instead localizes the fault to the
 XYZ attribute path. Host validation passed `git diff --check`, strict
 checkpatch with zero errors, warnings, or checks, and focused PowerPC `W=1`
 GX compilation.
+
+The first attempt at this control was invalid because it ran immediately after
+the preceding PE stall without rebooting. The stalled GX backend survives
+module unload, so that attempt timed out on the first retained copy before it
+could reach XYZ and carries no diagnostic weight.
+
+Hardware result for candidate `607c3754b` on clean boot ID
+`55601efa-b44f-4210-9ea9-33943f66434e`: rejected. The kernel and module hashes
+matched the staged values. Every retained operation through semantic triangle
+state passed, then the first Z-disabled XYZ request still left the final token
+unreached and timed out exactly as before. This rules out enabled Z compare and
+Z writes as the immediate cause.
+
+Libogc source independently confirms that VAT0 bit zero is the
+`GX_POS_XYZ` component-count selector, so `0x40016009` is the intended XYZ/F32
+plus RGBA8 format. The next control must preserve that VAT and payload stride
+but emit constant floating-point `Z=0` for every vertex. Painter-order
+completion then implicates the negative fractional Z values or their clip-space
+mapping; another timeout implicates XYZ parsing or the XF path independent of
+the specific Z values.
