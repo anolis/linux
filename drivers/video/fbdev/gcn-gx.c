@@ -1405,10 +1405,11 @@ gx_setup_vertex_color_depth_state(u16 width, u16 height,
 				  const struct gcn_drm_depth_state *depth)
 {
 	gx_setup_vertex_color_state_semantic(width, height, state);
-	/* Diagnostic: isolate direct XYZ from its rejected F32 scalar format. */
+	/* Diagnostic: reproduce libogc's indexed XYZ/S16 vertex transport. */
 	(void)depth;
 	gx_load_bp_reg(0x40000000);
-	/* VTXFMT0: direct XYZ/S16 position followed by direct RGBA8 colour. */
+	/* VTXFMT0: indexed8 XYZ/S16 position and indexed8 RGBA8 colour. */
+	gx_load_cp_reg(0x50, 0x00004400);
 	gx_load_cp_reg(0x70, 0x40016007);
 }
 
@@ -1634,19 +1635,37 @@ gx_draw_color_depth_triangles(const struct gcn_drm_color_depth_vertex *vertices,
 			      unsigned int triangle_count)
 {
 	unsigned int vertex_count = triangle_count * 3;
+	u8 *positions = gx_tex_buf_alt;
+	u8 *colours = positions + ALIGN(vertex_count * 6, 32);
 	unsigned int i;
+
+	for (i = 0; i < vertex_count; i++) {
+		positions[i * 6] = vertices[i].x >> 8;
+		positions[i * 6 + 1] = vertices[i].x;
+		positions[i * 6 + 2] = vertices[i].y >> 8;
+		positions[i * 6 + 3] = vertices[i].y;
+		positions[i * 6 + 4] = 0;
+		positions[i * 6 + 5] = 0;
+		colours[i * 4] = vertices[i].r;
+		colours[i * 4 + 1] = vertices[i].g;
+		colours[i * 4 + 2] = vertices[i].b;
+		colours[i * 4 + 3] = vertices[i].a;
+	}
+	flush_dcache_range((unsigned long)positions,
+			   (unsigned long)colours + vertex_count * 4);
+
+	/* GX_SetArray(GX_VA_POS/CLR0) with bounded index8 arrays. */
+	gx_load_cp_reg(0xa0, (u32)virt_to_phys(positions));
+	gx_load_cp_reg(0xb0, 6);
+	gx_load_cp_reg(0xa2, (u32)virt_to_phys(colours));
+	gx_load_cp_reg(0xb2, 4);
 
 	gx_wr8(0x90); /* GX_TRIANGLES | vtxfmt 0 */
 	gx_wr16be(vertex_count);
 
 	for (i = 0; i < vertex_count; i++) {
-		gx_wr16be(vertices[i].x);
-		gx_wr16be(vertices[i].y);
-		gx_wr16be(0);
-		gx_wr8(vertices[i].r);
-		gx_wr8(vertices[i].g);
-		gx_wr8(vertices[i].b);
-		gx_wr8(vertices[i].a);
+		gx_wr8(i);
+		gx_wr8(i);
 	}
 }
 
