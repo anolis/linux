@@ -12374,6 +12374,36 @@ the GX F32 position loader independently of direct versus indexed transport.
 
 Host validation passed `git diff --check`, patch-level strict checkpatch with
 zero errors, warnings, or checks, and focused PowerPC `W=1` module compilation.
+
+Hardware result for candidate `5746f3f2d`: completed without a PE-token or
+FIFO stall on boot ID `074d4013-5533-4058-8874-379fcf893a01`, but the interior
+sample again remained copy-clear green `0x07e0`. Every retained operation
+passed. Removing F32 Z therefore does not recover rasterization, localizing
+the immediate failure to setup shared by indexed XY/F32 and XYZ/F32 rather
+than the third component or XYZ clip path.
+
+The provider unloaded normally, WiiDesk returned physically blue, and there
+was no timeout, fallback, oops, panic, machine check, or reboot. The bounded
+hardware log is preserved at `/tmp/wii-dmesg-indexed-xy-f32-074d4013.txt`,
+SHA-256
+`3e731d6ff264eabe5a0799289fca1a972cf02cadb00ae153bb38201c054fda3b`.
+
+Source review after this failed positive control identified a missing required
+command. Every indexed candidate rewrites the same physical position and
+colour workspaces, but the driver never invalidates GX's vertex cache.
+Libogc implements `GX_InvVtxCache()` as standalone FIFO opcode `0x48`; its API
+contract explicitly requires the command whenever data read or potentially
+cached by index8/index16 attributes is modified or relocated. Direct
+attributes bypass the cache. Dolphin independently decodes opcode `0x48` as
+`GX_CMD_INVL_VC`.
+
+This exactly fits the sequence on the current boot: the first indexed S16
+control populated the cache and rendered red, then both F32 candidates reused
+the same addresses and indices after changing the backing bytes and VAT. The
+next control must retain the current indexed XY/F32 candidate byte-for-byte
+and add only opcode `0x48` after CPU cache flush and before indexed array/draw
+commands. Painter-order red validates the stale-vertex-cache diagnosis. Green
+rejects it and requires direct inspection of the live array bytes.
 The current accepted boot has not run a stalling request and remains suitable
 for this one hardware test.
 
