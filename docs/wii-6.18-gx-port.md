@@ -12475,6 +12475,26 @@ the production transport for semantic depth. Green `0x07e0` isolates a real
 Z/XYZ interpretation difference. Host validation passed `git diff --check`,
 patch-level strict checkpatch with zero errors, warnings, or checks, and
 focused PowerPC `W=1` module compilation.
+
+Hardware result for candidate `23c3ed3b3`: accepted on boot ID
+`074d4013-5533-4058-8874-379fcf893a01`. Kernel, module, and static-client
+hashes matched the staged values. Every retained operation passed, and the
+cache-correct indexed XYZ/F32 request completed with painter-order red
+`0xf800` at `(34,34)`. Constant F32 Z therefore parses, transforms, and
+rasterizes correctly when indexed vertex-cache tags are invalidated.
+
+The provider unloaded normally, WiiDesk returned physically blue, and no
+PE/FIFO timeout, fallback, oops, panic, machine check, or reboot occurred. The
+bounded hardware log is preserved at
+`/tmp/wii-dmesg-indexed-xyz-f32-cache-074d4013.txt`, SHA-256
+`30da9c49392b0ccbb0cb2a37d585eae59210c22f5e7a51344863b795458acbdc`.
+
+This accepts indexed XYZ/F32 plus opcode `0x48` as the production position
+transport. The next candidate should restore semantic per-vertex Z encoding
+and requested Z compare/write state while retaining indexed arrays and cache
+invalidation. Passing blue `0x001f` over red at `(34,34)` completes semantic
+depth rendering; a timeout or wrong pixel must be classified without reverting
+to the rejected direct loader.
 The current accepted boot has not run a stalling request and remains suitable
 for this one hardware test.
 
