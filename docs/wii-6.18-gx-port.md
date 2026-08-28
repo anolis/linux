@@ -12451,6 +12451,30 @@ XYZ/F32 and twelve-byte stride with constant zero Z while retaining this
 invalidation. Red completion proves the earlier XYZ/F32 green result was also
 entirely stale-cache state and permits restoring semantic Z/depth. Green then
 isolates a real F32 Z/XYZ interpretation issue.
+
+#### Indexed XYZ/F32 with cache invalidation
+
+- Candidate commit: `23c3ed3b3`
+- unchanged accepted `zImage` SHA-256:
+  `182d747be50d6e6fea0d757821a9c713cb8835f2d2b469b7f2683d8237aecf96`
+- `gcn-gx.ko` SHA-256:
+  `436553f8061aff7a1932a8b0ab5cf4050aacf08c5d2327f0f8067a1bfd704804`
+- unchanged static `wii-gcn-render-test` SHA-256:
+  `a5b11d4e3700439af9143192ce38967e0ce963fb6c1e5e790fd5b016f11dadf9`
+
+Retain the twice-positive indexed XY/F32 cache-fix candidate, including opcode
+`0x48` after CPU data-cache flush. Add only constant big-endian F32 `Z=0`,
+select XYZ/F32 with VAT0 `0x40016009`, increase position stride from eight to
+twelve bytes, and move the aligned colour array accordingly. All indices,
+X/Y words, colours, geometry, projection, disabled-depth state, completion,
+and copy-back commands remain unchanged.
+
+Painter-order red `0xf800` at `(34,34)` proves the previous indexed-XYZ/F32
+green result was also stale vertex-cache data and accepts indexed XYZ/F32 as
+the production transport for semantic depth. Green `0x07e0` isolates a real
+Z/XYZ interpretation difference. Host validation passed `git diff --check`,
+patch-level strict checkpatch with zero errors, warnings, or checks, and
+focused PowerPC `W=1` module compilation.
 The current accepted boot has not run a stalling request and remains suitable
 for this one hardware test.
 
