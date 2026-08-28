@@ -1407,8 +1407,9 @@ gx_setup_vertex_color_depth_state(u16 width, u16 height,
 	u32 z_mode;
 
 	gx_setup_vertex_color_state_semantic(width, height, state);
+	/* Positive control: isolate enabled Z/write from the requested compare. */
 	z_mode = (depth->test_enable ? BIT(0) : 0) |
-		 ((depth->compare & 7) << 1) |
+		 ((DRM_GCN_DEPTH_ALWAYS & 7) << 1) |
 		 (depth->write_enable ? BIT(4) : 0);
 	gx_load_bp_reg(0x40000000 | z_mode);
 	/* VTXFMT0: indexed8 XYZ/F32 position and indexed8 RGBA8 colour. */
