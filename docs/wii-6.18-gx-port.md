@@ -12427,6 +12427,30 @@ cause and establishes invalidation as mandatory production behavior for every
 rewritten indexed workspace. Green `0x07e0` rejects the hypothesis. Host
 validation passed `git diff --check`, patch-level strict checkpatch with zero
 errors, warnings, or checks, and focused PowerPC `W=1` module compilation.
+
+Hardware result for candidate `b1f6defef`: accepted twice on boot ID
+`074d4013-5533-4058-8874-379fcf893a01`. Both checksum-identical indexed
+XY/F32 requests completed and produced the intended painter-order red
+`0xf800` at `(34,34)` instead of the previous green clear. This single-byte
+delta conclusively validates stale GX vertex-cache tags as the cause of both
+non-rasterizing indexed-F32 results.
+
+The first run reported one isolated opposed-prime scale mismatch at
+`(171,82)`, `0x18eb` versus `0x18e3`. It did not recur in the immediate exact
+repeat, whose only failure was the expected depth mismatch, matching the
+separately tracked transient one-pixel scale issue. Every other retained
+operation passed in both runs. Both providers unloaded normally, WiiDesk
+returned physically blue, and no PE/FIFO timeout, fallback, oops, panic,
+machine check, or reboot occurred. The bounded hardware log is preserved at
+`/tmp/wii-dmesg-vtxcache-invalidate-074d4013.txt`, SHA-256
+`0c544113acc64aa3580bd0894b0c1fe56551da8c145dc9f35be1836bb2b65080`.
+
+Keep opcode `0x48` as a production requirement whenever the driver rewrites
+indexed attribute backing storage. The next control should restore indexed
+XYZ/F32 and twelve-byte stride with constant zero Z while retaining this
+invalidation. Red completion proves the earlier XYZ/F32 green result was also
+entirely stale-cache state and permits restoring semantic Z/depth. Green then
+isolates a real F32 Z/XYZ interpretation issue.
 The current accepted boot has not run a stalling request and remains suitable
 for this one hardware test.
 
