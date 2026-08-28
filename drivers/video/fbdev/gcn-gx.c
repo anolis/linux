@@ -1649,6 +1649,7 @@ gx_draw_color_depth_triangles(const struct gcn_drm_color_depth_vertex *vertices,
 	}
 	flush_dcache_range((unsigned long)positions,
 			   (unsigned long)colours + vertex_count * 4);
+	gx_wr8(0x48); /* GX_InvVtxCache after modifying indexed arrays. */
 
 	/* GX_SetArray(GX_VA_POS/CLR0) with bounded index8 arrays. */
 	gx_load_cp_reg(0xa0, (u32)virt_to_phys(positions));
