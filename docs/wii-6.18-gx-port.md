@@ -12400,3 +12400,28 @@ state, but select indexed XY/F32 and reduce position stride to eight bytes.
 Painter-order red then validates the F32 array base, encoding, and stride and
 isolates rejection to adding F32 Z. Green instead localizes the defect to the
 indexed-F32 array setup shared by XY and XYZ.
+
+#### Indexed XY/F32 array positive control
+
+- Candidate commit: `5746f3f2d`
+- unchanged accepted `zImage` SHA-256:
+  `182d747be50d6e6fea0d757821a9c713cb8835f2d2b469b7f2683d8237aecf96`
+- `gcn-gx.ko` SHA-256:
+  `8209db8eefe1c8136e1594b38e5d61218604e323b68bdd4f4504025619d9eea4`
+- unchanged static `wii-gcn-render-test` SHA-256:
+  `a5b11d4e3700439af9143192ce38967e0ce963fb6c1e5e790fd5b016f11dadf9`
+
+Keep the non-stalling indexed-F32 candidate's index8 descriptors, big-endian
+F32 X/Y words, indexed RGBA8 colours, indices, geometry, orthographic
+projection, forced-disabled depth, completion, and copy-back state. Remove
+only the Z word, select XY/F32 with VAT0 `0x40016008`, reduce position stride
+from twelve to eight bytes, and move the aligned colour array accordingly.
+
+Painter-order red `0xf800` at `(34,34)` validates the indexed F32 array base,
+byte representation, stride, scalar loading, and raster path, isolating the
+preceding green result to the additional F32 Z component. Green `0x07e0`
+instead implicates the shared indexed-F32 array setup. A timeout would be a
+new failure mode and requires reboot before any follow-up test.
+
+Host validation passed `git diff --check`, patch-level strict checkpatch with
+zero errors, warnings, or checks, and focused PowerPC `W=1` module compilation.
