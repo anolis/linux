@@ -12642,3 +12642,29 @@ documentation explicitly states that Z update controls whether copy operations
 clear the depth buffer. The local copy cleared colour but left stale EFB depth.
 The next candidate must use `0x1f` in both clear paths and restore the requested
 compare. Semantic `LESS` should then produce blue `0x001f`.
+
+#### Enable Z update during copy-clear
+
+- Candidate commit: `166aeb52f`
+- unchanged accepted `zImage` SHA-256:
+  `182d747be50d6e6fea0d757821a9c713cb8835f2d2b469b7f2683d8237aecf96`
+- `gcn-gx.ko` SHA-256:
+  `0ff817b4ec775dc09a3c96e181d0d64774099b364af5dc976ccd0aef97163ca8`
+- unchanged static `wii-gcn-render-test` SHA-256:
+  `a5b11d4e3700439af9143192ce38967e0ce963fb6c1e5e790fd5b016f11dadf9`
+
+Change both local clear paths from BP `0x40=0x0f` to `0x1f`, enabling the
+Z-update bit required for `GX_CopyDisp` and `GX_CopyTex` to write the configured
+far depth value. Remove the forced-`ALWAYS` diagnostic override and again encode
+the API-requested comparison. Keep indexed XYZ/F32, semantic per-vertex Z,
+vertex-cache invalidation, all raster state, completion, and copy-back behavior
+unchanged.
+
+The strict oracle expects blue `0x001f` at `(34,34)`: copy-clear initializes EFB
+depth to far, the near blue triangle passes `LESS` and writes near depth, and
+the later far red triangle fails. Red means depth initialized but compare/write
+ordering remains ineffective; green means the clear still did not establish a
+far destination depth. A backend timeout requires reboot before another test.
+
+Host validation passed `git diff --check`, patch-level strict checkpatch with
+zero errors, warnings, or checks, and focused PowerPC `W=1` module compilation.
