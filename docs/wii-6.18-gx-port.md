@@ -12619,3 +12619,26 @@ the later red triangle must overwrite the earlier blue triangle.
 
 Host validation passed `git diff --check`, patch-level strict checkpatch with
 zero errors, warnings, or checks, and focused PowerPC `W=1` module compilation.
+
+Hardware result for candidate `b37f3f8a5`: accepted as a positive control on
+boot ID `074d4013-5533-4058-8874-379fcf893a01`. Kernel, module, and static-client
+hashes matched the staged values. The strict sample became painter-order red
+`0xf800` at `(34,34)`, exactly as forced `ALWAYS` predicts. Every other retained
+operation passed, including the scale case that transiently differed in the
+preceding run.
+
+This proves enabled Z state, depth writes, semantic per-vertex F32 Z, indexed
+fetch, transform, and rasterization all remain functional. It localizes the
+green `LESS` result to the depth value present before the primitive batch. The
+provider unloaded normally, CPU scanout was restored, and no timeout, fallback,
+oops, panic, machine check, or reboot occurred. The hardware log is preserved
+at `/tmp/wii-dmesg-depth-always-074d4013.txt`, SHA-256
+`08501ff0d50786428092d675b2a53397c0d8f11eade09264cd09cd71dafbc192`.
+
+The subsequent libogc audit identified the initialization bug: both local copy
+helpers force BP `0x40=0x0f` for copy-clear, disabling bit 4. libogc instead
+preserves the Z-update bit while forcing only bits 0 through 3, and its API
+documentation explicitly states that Z update controls whether copy operations
+clear the depth buffer. The local copy cleared colour but left stale EFB depth.
+The next candidate must use `0x1f` in both clear paths and restore the requested
+compare. Semantic `LESS` should then produce blue `0x001f`.
