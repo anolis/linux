@@ -12594,3 +12594,28 @@ keep per-vertex semantic Z and depth writes enabled but force `ALWAYS` compare.
 Painter-order red then proves that enabling Z and writing depth do not suppress
 rasterization, localizing this green result to `LESS` versus the initialized
 depth value. Green would instead implicate the enabled-Z path or transformed Z.
+
+#### Enabled depth-write with forced ALWAYS compare
+
+- Candidate commit: `b37f3f8a5`
+- unchanged accepted `zImage` SHA-256:
+  `182d747be50d6e6fea0d757821a9c713cb8835f2d2b469b7f2683d8237aecf96`
+- `gcn-gx.ko` SHA-256:
+  `59f0a9a1b011cdf17e3c757e141f193847635b021c6c0012f46bd08404e02444`
+- unchanged static `wii-gcn-render-test` SHA-256:
+  `a5b11d4e3700439af9143192ce38967e0ce963fb6c1e5e790fd5b016f11dadf9`
+
+Keep candidate `44b851a24`'s cache-correct indexed XYZ/F32 arrays, semantic
+per-vertex Z values, depth-test enable, depth writes, geometry, completion, and
+copy-back path unchanged. Override only the requested compare field with GX
+`ALWAYS` for this positive control. The client's second depth-disabled control
+remains disabled and is otherwise unaffected.
+
+Painter-order red `0xf800` at `(34,34)` proves that enabled Z and depth writes
+do not suppress indexed rasterization, isolating the preceding green result to
+`LESS` against the initialized EFB depth. Green `0x07e0` implicates transformed
+Z or enabled PE depth state. Blue is not expected under forced `ALWAYS`, because
+the later red triangle must overwrite the earlier blue triangle.
+
+Host validation passed `git diff --check`, patch-level strict checkpatch with
+zero errors, warnings, or checks, and focused PowerPC `W=1` module compilation.
