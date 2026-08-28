@@ -12668,3 +12668,24 @@ far destination depth. A backend timeout requires reboot before another test.
 
 Host validation passed `git diff --check`, patch-level strict checkpatch with
 zero errors, warnings, or checks, and focused PowerPC `W=1` module compilation.
+
+Hardware result for candidate `166aeb52f`: accepted on boot ID
+`074d4013-5533-4058-8874-379fcf893a01`. Kernel, module, and static-client hashes
+matched the staged values. The complete retained suite passed, including
+`DRAW depth: blue-near=17024 red-painter=17024` and final
+`PASS: GCN render UAPI`. Semantic `LESS` now writes the near blue triangle and
+rejects the later farther red triangle, while the depth-disabled control still
+produces painter-order red.
+
+This confirms that BP `0x40` Z-update bit 4 was the missing requirement for EFB
+copy-clear depth initialization. The provider unloaded normally, CPU scanout
+was restored, and no timeout, fallback, mismatch, oops, panic, machine check,
+or reboot occurred. The full hardware log is preserved at
+`/tmp/wii-dmesg-depth-clear-fixed-074d4013.txt`, SHA-256
+`d93c712d7c8cb2346ed49238253d5962471b5e0f9171017ce56964594c4ed29d`.
+
+Accept cache-correct indexed XYZ/F32 transport, semantic U24-to-F32 Z mapping,
+requested compare/write state, and copy-clear depth initialization as the
+working depth-render path. The depth milestone is complete; subsequent work
+should move to production cleanup and broader ABI behavior rather than further
+depth-register diagnostics.
