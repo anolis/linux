@@ -12376,3 +12376,27 @@ Host validation passed `git diff --check`, patch-level strict checkpatch with
 zero errors, warnings, or checks, and focused PowerPC `W=1` module compilation.
 The current accepted boot has not run a stalling request and remains suitable
 for this one hardware test.
+
+Hardware result for candidate `728b5ee75`: completed without a PE-token or
+FIFO stall on boot ID `074d4013-5533-4058-8874-379fcf893a01`. Kernel, module,
+and static-client hashes matched the staged values. Every retained operation
+passed, and the indexed-F32 depth request reached its pixel oracle. The
+interior sample remained copy-clear green `0x07e0` instead of painter-order red
+or semantic-depth blue, so no primitive write was visible.
+
+This is not the direct-F32 failure mode: array-based F32 commands complete and
+leave the backend healthy. It does not yet prove that the array's F32 values
+were interpreted correctly, because completion with an unchanged clear can
+also result from an invalid stride, byte representation, or clipped geometry.
+The provider unloaded normally, WiiDesk returned physically blue, and there
+was no timeout, fallback, oops, panic, machine check, or reboot. The bounded
+hardware log is preserved at
+`/tmp/wii-dmesg-indexed-xyz-f32-074d4013.txt`, SHA-256
+`f5b4869422a7c20156d8dd27fb6158e0a5596dc843591fdc294a138f349d9704`.
+
+The next positive control must keep index8 transport, the same big-endian F32
+X/Y array words, colour array, indices, geometry, projection, and disabled-Z
+state, but select indexed XY/F32 and reduce position stride to eight bytes.
+Painter-order red then validates the F32 array base, encoding, and stride and
+isolates rejection to adding F32 Z. Green instead localizes the defect to the
+indexed-F32 array setup shared by XY and XYZ.
