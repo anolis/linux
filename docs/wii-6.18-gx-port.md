@@ -12546,3 +12546,29 @@ new failure mode and requires reboot before any follow-up test.
 
 Host validation passed `git diff --check`, patch-level strict checkpatch with
 zero errors, warnings, or checks, and focused PowerPC `W=1` module compilation.
+
+#### Semantic depth on cache-correct indexed XYZ/F32
+
+- Candidate commit: `44b851a24`
+- unchanged accepted `zImage` SHA-256:
+  `182d747be50d6e6fea0d757821a9c713cb8835f2d2b469b7f2683d8237aecf96`
+- `gcn-gx.ko` SHA-256:
+  `35a28fff96efec9c753c7dfd113440ed38b8cec7482cfbd57aa4fa4728df931d`
+- unchanged static `wii-gcn-render-test` SHA-256:
+  `a5b11d4e3700439af9143192ce38967e0ce963fb6c1e5e790fd5b016f11dadf9`
+
+Retain the accepted indexed8 XYZ/F32 and indexed8 RGBA8 transport, including
+the required standalone FIFO opcode `0x48` after the CPU data-cache flush.
+Restore only the requested BP `0x40` Z-test, compare, and write fields plus
+the original semantic conversion of each U24 API depth value to normalized,
+negative F32 Z for the established orthographic projection.
+
+The strict painter-order oracle expects blue `0x001f` at `(34,34)`: the first
+near blue triangle must update colour and depth, and the later farther red
+triangle must fail the requested depth comparison. Red `0xf800` means indexed
+geometry still rasterizes but depth compare/write is ineffective or reversed.
+Green `0x07e0` means no visible primitive write. A PE/FIFO timeout is a backend
+stall and requires reboot before any follow-up hardware test.
+
+Host validation passed `git diff --check`, patch-level strict checkpatch with
+zero errors, warnings, or checks, and focused PowerPC `W=1` module compilation.
