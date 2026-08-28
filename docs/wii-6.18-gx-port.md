@@ -12404,6 +12404,29 @@ next control must retain the current indexed XY/F32 candidate byte-for-byte
 and add only opcode `0x48` after CPU cache flush and before indexed array/draw
 commands. Painter-order red validates the stale-vertex-cache diagnosis. Green
 rejects it and requires direct inspection of the live array bytes.
+
+#### Indexed-array vertex-cache invalidation control
+
+- Candidate commit: `b1f6defef`
+- unchanged accepted `zImage` SHA-256:
+  `182d747be50d6e6fea0d757821a9c713cb8835f2d2b469b7f2683d8237aecf96`
+- `gcn-gx.ko` SHA-256:
+  `eda967d0db140d04e452be758916c4b97a022fc2126800db72cd1b10e0587a45`
+- unchanged static `wii-gcn-render-test` SHA-256:
+  `a5b11d4e3700439af9143192ce38967e0ce963fb6c1e5e790fd5b016f11dadf9`
+
+Keep candidate `5746f3f2d`'s indexed XY/F32 VAT, array bytes, bases, strides,
+indices, colours, geometry, projection, disabled depth, completion, and
+copy-back state unchanged. Add only standalone FIFO byte `0x48` after the CPU
+data-cache flush and before the indexed array/draw commands. This ordering
+makes the rewritten bytes visible in RAM first, then invalidates GX's indexed
+attribute cache tags before any new fetch.
+
+Painter-order red `0xf800` at `(34,34)` validates the stale-vertex-cache root
+cause and establishes invalidation as mandatory production behavior for every
+rewritten indexed workspace. Green `0x07e0` rejects the hypothesis. Host
+validation passed `git diff --check`, patch-level strict checkpatch with zero
+errors, warnings, or checks, and focused PowerPC `W=1` module compilation.
 The current accepted boot has not run a stalling request and remains suitable
 for this one hardware test.
 
