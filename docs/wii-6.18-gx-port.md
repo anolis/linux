@@ -12572,3 +12572,25 @@ stall and requires reboot before any follow-up hardware test.
 
 Host validation passed `git diff --check`, patch-level strict checkpatch with
 zero errors, warnings, or checks, and focused PowerPC `W=1` module compilation.
+
+Hardware result for candidate `44b851a24`: completed without a PE-token or
+FIFO stall on boot ID `074d4013-5533-4058-8874-379fcf893a01`. Kernel, module,
+and static-client hashes matched the staged values. The strict depth sample at
+`(34,34)` remained copy-clear green `0x07e0`, rather than semantic-depth blue
+or painter-order red. Enabling the requested `LESS` compare therefore rejected
+both primitives or otherwise prevented their visible colour writes.
+
+All retained operations completed. One unrelated opposed-prime scale sample
+was transiently `0x18e1` instead of `0x18e3`, matching the separately tracked
+one-pixel scaler issue. The provider unloaded normally, CPU scanout was
+restored, and no timeout, fallback, oops, panic, machine check, or reboot
+occurred. The hardware log is preserved at
+`/tmp/wii-dmesg-semantic-depth-074d4013.txt`, SHA-256
+`e51cddc53f812634bbd24ad97435f0c6840bd0d043af67a90442820b623ca40b`.
+
+The indexed XYZ/F32 transport remains accepted by the immediately preceding
+constant-Z, depth-disabled red control. The next depth positive control should
+keep per-vertex semantic Z and depth writes enabled but force `ALWAYS` compare.
+Painter-order red then proves that enabling Z and writing depth do not suppress
+rasterization, localizing this green result to `LESS` versus the initialized
+depth value. Green would instead implicate the enabled-Z path or transformed Z.
