@@ -1407,9 +1407,8 @@ gx_setup_vertex_color_depth_state(u16 width, u16 height,
 	u32 z_mode;
 
 	gx_setup_vertex_color_state_semantic(width, height, state);
-	/* Positive control: isolate enabled Z/write from the requested compare. */
 	z_mode = (depth->test_enable ? BIT(0) : 0) |
-		 ((DRM_GCN_DEPTH_ALWAYS & 7) << 1) |
+		 ((depth->compare & 7) << 1) |
 		 (depth->write_enable ? BIT(4) : 0);
 	gx_load_bp_reg(0x40000000 | z_mode);
 	/* VTXFMT0: indexed8 XYZ/F32 position and indexed8 RGBA8 colour. */
@@ -1912,10 +1911,10 @@ static void gx_copy_efb_to_xfb(u32 xfb_phys, u16 width, u16 height, bool clear)
 	if (clear) {
 		/*
 		 * Match libogc GX_CopyDisp(clear=GX_TRUE): temporarily force
-		 * Z/colour modes that allow the copy-clear operation, then set
-		 * the clear bit in copy control.
+		 * ALWAYS comparison and Z update so copy-clear writes depth, then
+		 * set the clear bit in copy control.
 		 */
-		gx_load_bp_reg(0x4000000F);
+		gx_load_bp_reg(0x4000001F);
 		gx_load_bp_reg(0x41000018);
 	}
 
@@ -1956,7 +1955,8 @@ static void gx_copy_efb_rect_to_rgb565_texture_stride(void *dest, u16 left,
 	u32 ctrl;
 
 	if (clear) {
-		gx_load_bp_reg(0x4000000F);
+		/* GX_CopyTex clears depth only while Z update is enabled. */
+		gx_load_bp_reg(0x4000001F);
 		gx_load_bp_reg(0x41000018);
 	}
 
