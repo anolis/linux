@@ -12346,3 +12346,33 @@ copy-clear, and all completion/copy-back state unchanged. A completed red
 mismatch validates indexed F32 loading and permits restoring semantic Z;
 another PE-token timeout localizes the defect to the F32 position loader even
 when data comes from a vertex array.
+
+#### Indexed XYZ/F32 scalar-format control
+
+- Candidate commit: `728b5ee75`
+- unchanged accepted `zImage` SHA-256:
+  `182d747be50d6e6fea0d757821a9c713cb8835f2d2b469b7f2683d8237aecf96`
+- `gcn-gx.ko` SHA-256:
+  `73b6a4754b156456ff69d14337327121d12855aca76c6ad2bb3dbcfa107973da`
+- unchanged static `wii-gcn-render-test` SHA-256:
+  `a5b11d4e3700439af9143192ce38967e0ce963fb6c1e5e790fd5b016f11dadf9`
+
+Change only the accepted indexed position array from XYZ/S16 to XYZ/F32.
+Index8 position and colour descriptors, indexed RGBA8 colours, triangle
+indices, X/Y geometry, constant zero Z, orthographic projection,
+forced-disabled depth, copy-clear, token completion, and copy-back state remain
+unchanged. VAT0 changes from `0x40016007` to `0x40016009`; position stride
+changes from six to twelve bytes; and each position becomes three big-endian
+IEEE-754 words. At the 192-vertex UAPI maximum, the bounded reserved workspace
+holds 2304 position bytes plus 768 colour bytes.
+
+This is the direct scalar-format split after accepted indexed XYZ/S16 and the
+rejected direct XYZ/F32 stream. A completed painter-order red `0xf800` mismatch
+at `(34,34)` validates indexed F32 fetching and permits restoring semantic Z
+without returning to the direct loader. A PE-token timeout instead implicates
+the GX F32 position loader independently of direct versus indexed transport.
+
+Host validation passed `git diff --check`, patch-level strict checkpatch with
+zero errors, warnings, or checks, and focused PowerPC `W=1` module compilation.
+The current accepted boot has not run a stalling request and remains suitable
+for this one hardware test.
