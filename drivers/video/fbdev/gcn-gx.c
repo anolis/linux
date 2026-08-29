@@ -413,6 +413,7 @@ static inline void wg_f32_bits(u32 bits)
 #define F32_NEG_ONE	0xBF800000U
 #define F32_16M		0x4B7FFFFFU	/* 16777215.0 */
 #define F32_NEG(b)	((b) ^ 0x80000000U)
+#define GX_RASTER_DEPTH_MAX	0x00FFFFFEU
 
 /* f32_from_u16 - encode a u16 integer as IEEE 754 single-precision bits */
 static u32 f32_from_u16(u16 n)
@@ -1997,20 +1998,6 @@ static void gx_copy_efb_to_rgb565_texture(void *dest, u16 width, u16 height,
 					   clear);
 }
 
-static int gx_peek_efb_depth(u16 x, u16 y, u32 *depth)
-{
-	phys_addr_t phys = 0x08000000 | ((u32)x << 2) | ((u32)y << 12) |
-			   BIT(22);
-	void __iomem *peek;
-
-	peek = ioremap(phys, sizeof(u32));
-	if (!peek)
-		return -ENOMEM;
-	*depth = ioread32be(peek) & 0x00ffffff;
-	iounmap(peek);
-	return 0;
-}
-
 static void __maybe_unused gcn_gx_copy_efb_to_xfb(u32 xfb_phys, u16 width,
 						  u16 height)
 {
@@ -3530,7 +3517,6 @@ static int gcn_gx_drm_draw_depth_rgb565(void *dst_allocation, u16 width,
 {
 	struct gx_mem1_allocation *dst = dst_allocation;
 	u32 finish_count;
-	u32 peek_depth;
 	size_t bytes;
 	long completed;
 	unsigned int vertex_count;
@@ -3577,6 +3563,8 @@ static int gcn_gx_drm_draw_depth_rgb565(void *dst_allocation, u16 width,
 
 	/* Use the established copy engine to initialize EFB depth to far. */
 	gx_set_copy_clear_rgb(0x00, 0x00, 0x00);
+	/* Match the largest rasterized normalized UAPI value. */
+	gx_load_bp_reg(0x51000000 | GX_RASTER_DEPTH_MAX);
 	gx_copy_efb_to_rgb565_texture(gx_tex_buf, width, height, true);
 	for (i = 0; i < 32; i++)
 		gx_wr8(0);
@@ -3594,22 +3582,6 @@ static int gcn_gx_drm_draw_depth_rgb565(void *dst_allocation, u16 width,
 	gx_load_bp_reg(0x45000002);
 	for (i = 0; i < 32; i++)
 		gx_wr8(0);
-	if (depth->compare == DRM_GCN_DEPTH_ALWAYS &&
-	    vertices[0].z == DRM_GCN_DEPTH_MAX) {
-		ret = gx_submit_cmds("render-draw-depth-peek");
-		if (ret)
-			goto out_unlock;
-		ret = gx_peek_efb_depth(34, 34, &peek_depth);
-		if (ret) {
-			pr_warn("gcn-gx: failed to map EFB depth peek: %d\n", ret);
-			goto out_unlock;
-		}
-		pr_info("gcn-gx: far-depth peek z=%06x efb=%06x\n",
-			vertices[0].z, peek_depth);
-
-		finish_count = READ_ONCE(gx_pe_finish_count);
-		fifo_pos = 0;
-	}
 
 	gx_set_copy_clear_rgb(0x00, 0x00, 0x00);
 	gx_copy_efb_to_rgb565_texture(dst->cpu_addr, width, height, true);
