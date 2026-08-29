@@ -12714,3 +12714,22 @@ or write behavior. A PE/FIFO timeout requires reboot before another test.
 Host validation passed `git diff --check`, patch-level strict checkpatch with
 zero errors, warnings, or checks, and a `-Wall -Wextra -Werror` static PowerPC
 client build against freshly installed UAPI headers.
+
+Hardware result for test client `34a94f686`: partially accepted on boot ID
+`074d4013-5533-4058-8874-379fcf893a01`. The unchanged accepted module passed the
+original strict `LESS` and depth-write ordering tests, then `NEVER` matched all
+17,024 classified interior pixels. The next `EQUAL` case left the surface green
+at `(34,34)` instead of the predicted red for API depth
+`DRM_GCN_DEPTH_MAX` against a far clear. The client stopped at that first
+mismatch, so later comparison modes were not exercised by this run.
+
+The module completed and unloaded normally; there was no PE/FIFO timeout,
+fallback, oops, panic, machine check, or reboot. The kernel log is preserved at
+`/tmp/wii-dmesg-depth-modes-first-074d4013.txt`, SHA-256
+`d082b2ae03956fcdb758efa0636db9cba92e96434bc844d816f9f1e0c5283d98`.
+
+`f32_div_u32(DRM_GCN_DEPTH_MAX, DRM_GCN_DEPTH_MAX)` produces exact IEEE 1.0,
+so CPU conversion precision does not explain the endpoint mismatch. The next
+client must retain all expectations but continue after per-mode pixel failures,
+allowing `LEQUAL`, `GEQUAL`, and the remaining functions to classify the far
+vertex relative to the clear before changing driver semantics.
