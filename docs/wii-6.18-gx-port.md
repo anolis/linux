@@ -12908,3 +12908,24 @@ and the suite must end with `PASS: GCN render UAPI`.
 Host validation passed `git diff --check`, patch-level strict checkpatch with
 zero errors, warnings, or checks, and focused PowerPC `W=1` module compilation
 with `-j16`.
+
+Hardware result for candidate `1f9dd947b`: partially accepted on boot ID
+`074d4013-5533-4058-8874-379fcf893a01`. The API-max enabled-`ALWAYS` positive
+control now rendered all 17,024 classified interior pixels red. This proves
+that mapping the maximum UAPI value below IEEE `1.0` fixes far-plane clipping.
+Every non-endpoint depth mode and the complete retained render regression suite
+also passed.
+
+`EQUAL` and `GEQUAL` remained green against the conventional `0xffffff` clear.
+The rasterized far value is therefore below the clear sentinel even though it
+is now inside the clip volume. Do not infer the exact value from that relation:
+restore the validated direct EFB peek around the API-max `ALWAYS` case while
+retaining the corrected `z / 0x01000000` conversion, then read the exact raw
+endpoint before selecting the semantic clear.
+
+The provider unloaded normally and restored CPU scanout. No PE/FIFO timeout,
+fallback, oops, panic, machine check, or reboot occurred. The complete client
+transcript is `/tmp/wii-depth-half-open-cycle-output.txt`, SHA-256
+`959a8e1bfa27244c9997701931f80652dd57467d93c2f4e925919ac9cfc1c6e8`.
+The full kernel log is `/tmp/wii-dmesg-depth-half-open-074d4013.txt`, SHA-256
+`388054fdb61046744831f70ea4ddd25f2d395e16521f5153f15264b02792e409`.
