@@ -413,6 +413,7 @@ static inline void wg_f32_bits(u32 bits)
 #define F32_NEG_ONE	0xBF800000U
 #define F32_16M		0x4B7FFFFFU	/* 16777215.0 */
 #define F32_NEG(b)	((b) ^ 0x80000000U)
+#define GX_RASTER_DEPTH_MAX	0x00FFFFFEU
 
 /* f32_from_u16 - encode a u16 integer as IEEE 754 single-precision bits */
 static u32 f32_from_u16(u16 n)
@@ -3561,6 +3562,8 @@ static int gcn_gx_drm_draw_depth_rgb565(void *dst_allocation, u16 width,
 
 	/* Use the established copy engine to initialize EFB depth to far. */
 	gx_set_copy_clear_rgb(0x00, 0x00, 0x00);
+	/* GX rasterized far is one below the conventional clear sentinel. */
+	gx_load_bp_reg(0x51000000 | GX_RASTER_DEPTH_MAX);
 	gx_copy_efb_to_rgb565_texture(gx_tex_buf, width, height, true);
 	for (i = 0; i < 32; i++)
 		gx_wr8(0);
