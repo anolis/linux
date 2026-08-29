@@ -12733,3 +12733,25 @@ so CPU conversion precision does not explain the endpoint mismatch. The next
 client must retain all expectations but continue after per-mode pixel failures,
 allowing `LEQUAL`, `GEQUAL`, and the remaining functions to classify the far
 vertex relative to the clear before changing driver semantics.
+
+#### Continue-after-mismatch depth-mode diagnostic
+
+- Test-client commit: `2f2a18ea5`
+- unchanged accepted `zImage` SHA-256:
+  `182d747be50d6e6fea0d757821a9c713cb8835f2d2b469b7f2683d8237aecf96`
+- unchanged accepted `gcn-gx.ko` SHA-256:
+  `0ff817b4ec775dc09a3c96e181d0d64774099b364af5dc976ccd0aef97163ca8`
+- diagnostic static `wii-gcn-render-test` SHA-256:
+  `58a330315de41be99aa279a7d0b5d945c07785ca7cf7c24bb6bb0213eed23ada`
+
+Keep every comparison, depth, and expected pixel from client `34a94f686`.
+Change only failure collection: record one mismatch for a mode and continue to
+the next mode, while submit or synchronization failures still abort. The final
+client status remains failed if any expectation differs.
+
+This run must reveal whether far vertices pass `LEQUAL`, `GEQUAL`, or neither,
+along with independent `NEQUAL`, `ALWAYS`, and write-disabled `LESS` results.
+That relation determines whether the `EQUAL` failure is a one-unit endpoint
+quantization issue or a wider comparison-register defect.
+Host validation passed `git diff --check`, patch-level strict checkpatch with
+zero errors, warnings, or checks, and a warning-clean static PowerPC build.
