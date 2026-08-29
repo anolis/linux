@@ -413,7 +413,7 @@ static inline void wg_f32_bits(u32 bits)
 #define F32_NEG_ONE	0xBF800000U
 #define F32_16M		0x4B7FFFFFU	/* 16777215.0 */
 #define F32_NEG(b)	((b) ^ 0x80000000U)
-#define GX_RASTER_DEPTH_MAX	0x00FFFFFEU
+#define GX_RASTER_DEPTH_MAX	0x00800000U
 
 /* f32_from_u16 - encode a u16 integer as IEEE 754 single-precision bits */
 static u32 f32_from_u16(u16 n)
