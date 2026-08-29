@@ -12979,3 +12979,28 @@ check, or reboot. The complete client transcript is
 The full kernel log is
 `/tmp/wii-dmesg-depth-corrected-peek-074d4013.txt`, SHA-256
 `ffb798251f35f174e7b14d4c5c4c109ceb75114a758af44892de1e0f559209b1`.
+
+#### Corrected normalization with raster far clear
+
+- Candidate commit: `65a6ca8cb`
+- unchanged accepted `zImage` SHA-256:
+  `182d747be50d6e6fea0d757821a9c713cb8835f2d2b469b7f2683d8237aecf96`
+- `gcn-gx.ko` SHA-256:
+  `fc4b13652a3001c4db70371e871839658726a41e73194064e0b1152ea8684f22`
+- unchanged all-mode `wii-gcn-render-test` SHA-256:
+  `7d1162b3dfb587b02971aafe8e9b422dc8eadb12501a01081a047ccc15072b3f`
+
+Retain the validated half-open `z / 0x01000000` conversion and initialize only
+the semantic depth request's EFB clear to `0xfffffe`. Remove the temporary EFB
+peek and split submission, restoring the production single-stream path. Leave
+all ordinary display, texture, and cleanup clears unchanged.
+
+The API-max `ALWAYS` control must remain red across all 17,024 classified
+interior pixels. `GEQUAL` must now become red because the fragment was proven
+to compare below `0xffffff`; `EQUAL` determines whether `0xfffffe` matches the
+comparator's internal endpoint exactly. Every retained non-endpoint depth case
+and render regression must remain unchanged.
+
+Host validation passed `git diff --check`, patch-level strict checkpatch with
+zero errors, warnings, or checks, and focused PowerPC `W=1` module compilation
+with `-j16`.
