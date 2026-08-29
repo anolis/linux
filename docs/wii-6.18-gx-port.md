@@ -12954,3 +12954,28 @@ failures against the unchanged `0xffffff` clear during this measurement.
 Host validation passed `git diff --check`, patch-level strict checkpatch with
 zero errors, warnings, or checks, and focused PowerPC `W=1` module compilation
 with `-j16`.
+
+Hardware result for candidate `9e24b0c80`: diagnostic accepted on boot ID
+`074d4013-5533-4058-8874-379fcf893a01`. The corrected API-max `ALWAYS` draw
+rendered all 17,024 classified interior pixels red and the direct EFB read at
+`(34,34)` returned exactly `0xffffff`. The primitive is therefore rasterized
+and its stored 24-bit depth rounds to the conventional far value.
+
+Nevertheless, `EQUAL` and `GEQUAL` still rejected the same API-max geometry
+against a `0xffffff` clear. The depth comparator therefore observes precision
+or state below what the 24-bit EFB peek exposes: the fragment behaves as
+slightly less than the clear while its stored/read value rounds to
+`0xffffff`. The next isolated candidate should keep the corrected conversion,
+remove the probe, and initialize semantic depth requests to `0xfffffe`.
+`GEQUAL` must pass; whether `EQUAL` passes distinguishes comparator
+quantization from a still-unmatched internal endpoint.
+
+Two unrelated one-bit scaler samples differed during this run, matching the
+separately tracked transient scaling issue. The provider unloaded normally and
+restored CPU scanout, with no PE/FIFO timeout, fallback, oops, panic, machine
+check, or reboot. The complete client transcript is
+`/tmp/wii-depth-corrected-peek-cycle-output.txt`, SHA-256
+`edbd37be0cddb27bdc506355a2b49f26464a409533f5cbfe2ecaaa51fcb533ff`.
+The full kernel log is
+`/tmp/wii-dmesg-depth-corrected-peek-074d4013.txt`, SHA-256
+`ffb798251f35f174e7b14d4c5c4c109ceb75114a758af44892de1e0f559209b1`.
