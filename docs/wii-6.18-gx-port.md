@@ -12847,3 +12847,37 @@ make the diagnostic client exit nonzero without invalidating the raw read.
 Host validation passed `git diff --check`, patch-level strict checkpatch with
 zero errors, warnings, or checks, focused PowerPC `W=1` module compilation, and
 a warning-clean static PowerPC client build.
+
+Hardware result for candidate `00374f9d0`: diagnostic accepted and endpoint
+hypothesis rejected on boot ID `074d4013-5533-4058-8874-379fcf893a01`. Two
+checksum-identical runs produced the same ten raw depth observations. The
+enabled-`ALWAYS` API-max case remained green and its EFB depth remained the
+clear value `0xffffff`; `EQUAL` and `GEQUAL` behaved identically. Therefore
+`0xffffff` is not a rasterized maximum-depth result: vertices converted to
+IEEE `1.0` are clipped before colour or depth rasterization, even when the
+depth comparison is `ALWAYS`.
+
+The non-endpoint controls were coherent. Strict `LESS` with quarter- and
+three-quarter-depth triangles produced raw interior depth `0xa00000`,
+`NEQUAL` produced `0xdfffff`, and disabled depth writes preserved the
+`0xffffff` clear. All retained depth modes other than the three API-max cases
+matched all 17,024 classified interior pixels. One rerun also observed the
+separately tracked transient one-bit scaler mismatch; it is unrelated to the
+repeatable depth result.
+
+The provider unloaded normally and restored CPU scanout after both runs. No
+PE/FIFO timeout, fallback, oops, panic, machine check, or reboot occurred. The
+second complete client transcript is preserved at
+`/tmp/wii-depth-peek-cycle-output.txt`, SHA-256
+`72dbfef82ea33540631a9c3489ef2a7290ce60b39c1a318e16b9deb1cf5a1372`.
+The corresponding full kernel log is
+`/tmp/wii-dmesg-depth-peek-074d4013.txt`, SHA-256
+`f50fbfe3b85f03b7448949349cc6464b1c4c8e408139999cb0bd6d402f4481a0`.
+
+The next isolated candidate must map the inclusive 24-bit UAPI range to the
+hardware's half-open normalized interval: convert depth code `z` as
+`z / 0x01000000`, making `DRM_GCN_DEPTH_MAX` the largest IEEE float below
+`1.0`. Keep the conventional `0xffffff` depth clear. Remove the EFB peek and
+split diagnostic, then rerun the complete all-mode client. `ALWAYS` must first
+prove that API-max primitives rasterize; `EQUAL` and `GEQUAL` must then prove
+that they compare as the far UAPI value against the far clear.
