@@ -1646,7 +1646,8 @@ gx_draw_color_depth_triangles(const struct gcn_drm_color_depth_vertex *vertices,
 	for (i = 0; i < vertex_count; i++) {
 		positions[i * 3] = cpu_to_be32(f32_from_u16(vertices[i].x));
 		positions[i * 3 + 1] = cpu_to_be32(f32_from_u16(vertices[i].y));
-		z = f32_div_u32(vertices[i].z, DRM_GCN_DEPTH_MAX);
+		/* GX clips z == 1.0; map the inclusive UAPI below that endpoint. */
+		z = f32_div_u32(vertices[i].z, DRM_GCN_DEPTH_MAX + 1U);
 		positions[i * 3 + 2] = cpu_to_be32(F32_NEG(z));
 		colours[i * 4] = vertices[i].r;
 		colours[i * 4 + 1] = vertices[i].g;
@@ -1994,20 +1995,6 @@ static void gx_copy_efb_to_rgb565_texture(void *dest, u16 width, u16 height,
 {
 	gx_copy_efb_rect_to_rgb565_texture(dest, 0, 0, width, height,
 					   clear);
-}
-
-static int gx_peek_efb_depth(u16 x, u16 y, u32 *depth)
-{
-	phys_addr_t phys = 0x08000000 | ((u32)x << 2) | ((u32)y << 12) |
-			   BIT(22);
-	void __iomem *peek;
-
-	peek = ioremap(phys, sizeof(u32));
-	if (!peek)
-		return -ENOMEM;
-	*depth = ioread32be(peek) & 0x00ffffff;
-	iounmap(peek);
-	return 0;
 }
 
 static void __maybe_unused gcn_gx_copy_efb_to_xfb(u32 xfb_phys, u16 width,
@@ -3529,7 +3516,6 @@ static int gcn_gx_drm_draw_depth_rgb565(void *dst_allocation, u16 width,
 {
 	struct gx_mem1_allocation *dst = dst_allocation;
 	u32 finish_count;
-	u32 peek_depth;
 	size_t bytes;
 	long completed;
 	unsigned int vertex_count;
@@ -3569,6 +3555,7 @@ static int gcn_gx_drm_draw_depth_rgb565(void *dst_allocation, u16 width,
 	flush_dcache_range((unsigned long)dst->cpu_addr,
 			   (unsigned long)dst->cpu_addr + bytes);
 
+	finish_count = READ_ONCE(gx_pe_finish_count);
 	fifo_pos = 0;
 	gx_load_libogc_init_preamble();
 	gx_setup_display_copy_state();
@@ -3592,21 +3579,7 @@ static int gcn_gx_drm_draw_depth_rgb565(void *dst_allocation, u16 width,
 	gx_load_bp_reg(0x45000002);
 	for (i = 0; i < 32; i++)
 		gx_wr8(0);
-	ret = gx_submit_cmds("render-draw-depth-peek");
-	if (ret)
-		goto out_unlock;
-	ret = gx_peek_efb_depth(34, 34, &peek_depth);
-	if (ret) {
-		pr_warn("gcn-gx: failed to map EFB depth peek: %d\n", ret);
-		goto out_unlock;
-	}
-	pr_info("gcn-gx: depth-peek compare=%u write=%u z0=%06x z3=%06x efb=%06x\n",
-		depth->compare, depth->write_enable, vertices[0].z,
-		vertices[min_t(unsigned int, 3, vertex_count - 1)].z,
-		peek_depth);
 
-	finish_count = READ_ONCE(gx_pe_finish_count);
-	fifo_pos = 0;
 	gx_set_copy_clear_rgb(0x00, 0x00, 0x00);
 	gx_copy_efb_to_rgb565_texture(dst->cpu_addr, width, height, true);
 	ret = gx_submit_cmds("render-draw-depth");
