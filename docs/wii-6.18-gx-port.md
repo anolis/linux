@@ -12821,3 +12821,29 @@ depth through the CPU EFB window. The next diagnostic should restore the
 accepted sentinel clear, split only the diagnostic depth draw before copy-back,
 peek `(34,34)` after an enabled-`ALWAYS` API-max draw, and report the exact
 24-bit raster endpoint.
+
+#### Direct raw EFB depth peek
+
+- Candidate commit: `00374f9d0`
+- unchanged accepted `zImage` SHA-256:
+  `182d747be50d6e6fea0d757821a9c713cb8835f2d2b469b7f2683d8237aecf96`
+- `gcn-gx.ko` SHA-256:
+  `0b5c54d30459e4aa538c46446d45c9eece39b144fe0db47ce058f41a77670985`
+- static `wii-gcn-render-test` SHA-256:
+  `7d1162b3dfb587b02971aafe8e9b422dc8eadb12501a01081a047ccc15072b3f`
+
+Restore the accepted conventional `0xffffff` copy clear. Split only depth draw
+requests after the primitive using the already validated per-submission PE token
+marker, then map the CPU EFB window exactly as libogc `GX_PeekZ` does and read
+raw 24-bit depth at interior pixel `(34,34)` before the ordinary RGB565
+copy-back. Log compare mode, write enable, both triangle depths, and EFB depth.
+
+Change the existing enabled-`ALWAYS` mode to draw API-max depth for both
+triangles. Its colour oracle remains painter-order red, while the corresponding
+kernel `depth-peek` line yields the exact hardware raster endpoint. Other mode
+expectations deliberately remain unchanged, so `EQUAL` and `GEQUAL` may still
+make the diagnostic client exit nonzero without invalidating the raw read.
+
+Host validation passed `git diff --check`, patch-level strict checkpatch with
+zero errors, warnings, or checks, focused PowerPC `W=1` module compilation, and
+a warning-clean static PowerPC client build.
