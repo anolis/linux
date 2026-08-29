@@ -12801,3 +12801,23 @@ and all existing controls retain their prior outcomes. Final status must be
 
 Host validation passed `git diff --check`, patch-level strict checkpatch with
 zero errors, warnings, or checks, and focused PowerPC `W=1` module compilation.
+
+Hardware result for candidate `793b5a869`: rejected on boot ID
+`074d4013-5533-4058-8874-379fcf893a01`. `EQUAL` and `GEQUAL` remained green for
+API-max vertices against the `0xfffffe` semantic clear, while every other depth
+mode retained its expected result. Therefore the largest rasterized depth is
+strictly below both `0xffffff` and `0xfffffe`; the one-unit hypothesis was
+incorrect.
+
+One unrelated XRGB8888 sample differed by one RGB565 bit at `(29,138)`, matching
+the separately tracked transient scaler issue. The provider unloaded normally,
+CPU scanout was restored, and no timeout, fallback, oops, panic, machine check,
+or reboot occurred. The hardware log is preserved at
+`/tmp/wii-dmesg-depth-endpoint-fffffe-074d4013.txt`, SHA-256
+`084375bc2a0ec55e13c66b2dd20405ad88bb852d727f1be88fdc47c30db7e050`.
+
+Do not guess another clear value. libogc's `GX_PeekZ` directly reads raw EFB
+depth through the CPU EFB window. The next diagnostic should restore the
+accepted sentinel clear, split only the diagnostic depth draw before copy-back,
+peek `(34,34)` after an enabled-`ALWAYS` API-max draw, and report the exact
+24-bit raster endpoint.
