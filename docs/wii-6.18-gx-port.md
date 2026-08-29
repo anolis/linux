@@ -12755,3 +12755,24 @@ That relation determines whether the `EQUAL` failure is a one-unit endpoint
 quantization issue or a wider comparison-register defect.
 Host validation passed `git diff --check`, patch-level strict checkpatch with
 zero errors, warnings, or checks, and a warning-clean static PowerPC build.
+
+Hardware result for client `2f2a18ea5`: completed on boot ID
+`074d4013-5533-4058-8874-379fcf893a01` with exactly two mode failures. `EQUAL`
+and `GEQUAL` both remained green for API-max vertices against the far clear.
+`NEVER`, `LEQUAL`, `GREATER`, `NEQUAL`, enabled `ALWAYS`, and write-disabled
+`LESS` each matched all 17,024 classified interior pixels; the original strict
+`LESS` and depth-disabled painter controls also passed.
+
+This proves all comparison encodings and the write-enable field behave as
+expected. The relation `far vertex < 0xffffff clear` explains both failures:
+`LEQUAL` succeeds while `EQUAL` and `GEQUAL` do not. The provider unloaded
+normally, CPU scanout was restored, and no timeout, fallback, oops, panic,
+machine check, or reboot occurred. The hardware log is preserved at
+`/tmp/wii-dmesg-depth-modes-all-074d4013.txt`, SHA-256
+`587986807341e1d6412125e7a72c8f2d96b07e97ea13a345ae7268f844a2cd17`.
+
+The likely hardware encoding of the largest rasterizable/API-max depth is
+`0xfffffe`, with `0xffffff` serving as the conventional clear sentinel above
+all fragments. The next isolated candidate should override only the semantic
+depth request's initial clear value to `0xfffffe` and rerun this exact client.
+Passing all modes validates the endpoint mapping before production cleanup.
