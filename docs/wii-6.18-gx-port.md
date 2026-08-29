@@ -13072,3 +13072,28 @@ panic, machine check, or reboot. The complete client transcript is
 The full kernel log is `/tmp/wii-dmesg-depth-clear-peek-074d4013.txt`,
 SHA-256
 `66bbdab0bf14e3c189167436540eec75da30fb7cee3f6e7ef358cafbba02b614`.
+
+#### Distinctive semantic depth-clear control
+
+- Candidate commit: `14eaa455d`
+- unchanged accepted `zImage` SHA-256:
+  `182d747be50d6e6fea0d757821a9c713cb8835f2d2b469b7f2683d8237aecf96`
+- `gcn-gx.ko` SHA-256:
+  `359e215575a88be5779758390be7c388136a7b5874bf5d940b0196145709de7c`
+- unchanged all-mode `wii-gcn-render-test` SHA-256:
+  `7d1162b3dfb587b02971aafe8e9b422dc8eadb12501a01081a047ccc15072b3f`
+
+Change only the diagnostic semantic clear from `0xfffffe` to the distinctive
+mid-range value `0x800000`. Keep the immediate post-clear PE fence and direct
+pre-draw EFB peek byte-for-byte unchanged.
+
+The required positive-control line is `depth-clear peek requested=800000
+efb=800000`. Other depth-mode colour expectations are not authoritative in
+this diagnostic because they were defined for a far clear. An unchanged
+`efb=ffffff` proves the copy-clear path is not updating depth as assumed;
+tracking `0x800000` proves the mechanism and returns the investigation to
+endpoint precision.
+
+Host validation passed `git diff --check`, patch-level strict checkpatch with
+zero errors, warnings, or checks, and focused PowerPC `W=1` module compilation
+with `-j16`.
