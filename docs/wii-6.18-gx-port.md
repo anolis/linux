@@ -12929,3 +12929,28 @@ transcript is `/tmp/wii-depth-half-open-cycle-output.txt`, SHA-256
 `959a8e1bfa27244c9997701931f80652dd57467d93c2f4e925919ac9cfc1c6e8`.
 The full kernel log is `/tmp/wii-dmesg-depth-half-open-074d4013.txt`, SHA-256
 `388054fdb61046744831f70ea4ddd25f2d395e16521f5153f15264b02792e409`.
+
+#### Corrected-normalization far-depth peek
+
+- Candidate commit: `9e24b0c80`
+- unchanged accepted `zImage` SHA-256:
+  `182d747be50d6e6fea0d757821a9c713cb8835f2d2b469b7f2683d8237aecf96`
+- `gcn-gx.ko` SHA-256:
+  `abd15d99ac7b522ed4f871314d6c9ba0948056719a090a6fe27846cb6e2f8ec5`
+- unchanged all-mode `wii-gcn-render-test` SHA-256:
+  `7d1162b3dfb587b02971aafe8e9b422dc8eadb12501a01081a047ccc15072b3f`
+
+Retain the validated `z / 0x01000000` mapping. For only an enabled-`ALWAYS`
+request beginning at `DRM_GCN_DEPTH_MAX`, split after the primitive with the
+validated PE token, read raw EFB depth at interior pixel `(34,34)`, and log it
+before the ordinary RGB565 copy-back. All other requests retain the production
+single-stream path.
+
+The API-max `ALWAYS` colour result must remain red across all 17,024 classified
+interior pixels. Its `far-depth peek` line is the authoritative raw endpoint
+for the corrected conversion. `EQUAL` and `GEQUAL` may remain expected client
+failures against the unchanged `0xffffff` clear during this measurement.
+
+Host validation passed `git diff --check`, patch-level strict checkpatch with
+zero errors, warnings, or checks, and focused PowerPC `W=1` module compilation
+with `-j16`.
