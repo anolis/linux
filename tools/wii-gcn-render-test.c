@@ -1420,6 +1420,37 @@ static void test_draw_triangles_depth(int fd)
 			.write_enable = 1,
 		},
 	};
+	static const struct {
+		const char *name;
+		uint32_t compare;
+		uint32_t blue_depth;
+		uint32_t red_depth;
+		uint32_t write_enable;
+		uint16_t expected;
+	} depth_cases[] = {
+		{ "never", DRM_GCN_DEPTH_NEVER,
+		  DRM_GCN_DEPTH_MAX / 4, DRM_GCN_DEPTH_MAX * 3 / 4, 1,
+		  0x07e0 },
+		{ "equal", DRM_GCN_DEPTH_EQUAL,
+		  DRM_GCN_DEPTH_MAX, DRM_GCN_DEPTH_MAX, 1, 0xf800 },
+		{ "lequal", DRM_GCN_DEPTH_LEQUAL,
+		  DRM_GCN_DEPTH_MAX / 4, DRM_GCN_DEPTH_MAX * 3 / 4, 1,
+		  0x001f },
+		{ "greater", DRM_GCN_DEPTH_GREATER,
+		  DRM_GCN_DEPTH_MAX / 4, DRM_GCN_DEPTH_MAX * 3 / 4, 1,
+		  0x07e0 },
+		{ "nequal", DRM_GCN_DEPTH_NEQUAL,
+		  DRM_GCN_DEPTH_MAX / 4, DRM_GCN_DEPTH_MAX * 3 / 4, 1,
+		  0xf800 },
+		{ "gequal", DRM_GCN_DEPTH_GEQUAL,
+		  DRM_GCN_DEPTH_MAX, DRM_GCN_DEPTH_MAX, 1, 0xf800 },
+		{ "always", DRM_GCN_DEPTH_ALWAYS,
+		  DRM_GCN_DEPTH_MAX / 4, DRM_GCN_DEPTH_MAX * 3 / 4, 1,
+		  0xf800 },
+		{ "less-no-write", DRM_GCN_DEPTH_LESS,
+		  DRM_GCN_DEPTH_MAX / 4, DRM_GCN_DEPTH_MAX * 3 / 4, 0,
+		  0xf800 },
+	};
 	uint16_t *map = MAP_FAILED;
 	unsigned int depth_inside = 0;
 	unsigned int painter_inside = 0;
@@ -1548,6 +1579,58 @@ static void test_draw_triangles_depth(int fd)
 	else
 		printf("DRAW depth: blue-near=%u red-painter=%u\n",
 		       depth_inside, painter_inside);
+
+	for (unsigned int test = 0; test < ARRAY_SIZE(depth_cases); test++) {
+		unsigned int mode_inside = 0;
+
+		for (unsigned int vertex = 0; vertex < 3; vertex++) {
+			triangles[0].vertices[vertex].z =
+				depth_cases[test].blue_depth;
+			triangles[1].vertices[vertex].z =
+				depth_cases[test].red_depth;
+		}
+		draw.depth.test_enable = 1;
+		draw.depth.compare = depth_cases[test].compare;
+		draw.depth.write_enable = depth_cases[test].write_enable;
+		if (ioctl(fd, DRM_IOCTL_GCN_SUBMIT, &fill) ||
+		    submit_triangle_depth(fd, &draw, sync.handle)) {
+			fail("draw depth compare-mode coverage");
+			goto out_sync;
+		}
+
+		for (unsigned int y = 0; y < TEST_HEIGHT; y++) {
+			for (unsigned int x = 0; x < TEST_WIDTH; x++) {
+				int classified = triangle_classify(&coverage, x, y,
+							   margin);
+				uint16_t expected;
+				size_t pixel;
+
+				if (classified > 0) {
+					expected = depth_cases[test].expected;
+					mode_inside++;
+				} else if (classified < 0) {
+					expected = 0x07e0;
+				} else {
+					continue;
+				}
+				pixel = tiled_rgb565_index(x, y, TEST_WIDTH);
+				if (map[pixel] != expected) {
+					fprintf(stderr,
+						"FAIL: depth %s mismatch at (%u,%u): got=0x%04x expected=0x%04x\n",
+						depth_cases[test].name, x, y,
+						map[pixel], expected);
+					failures++;
+					goto out_sync;
+				}
+			}
+		}
+		if (!mode_inside) {
+			fail("depth compare-mode oracle did not classify pixels");
+			goto out_sync;
+		}
+		printf("DRAW depth %s: matched %u interior pixels\n",
+		       depth_cases[test].name, mode_inside);
+	}
 
 out_sync:
 	destroy.handle = sync.handle;
