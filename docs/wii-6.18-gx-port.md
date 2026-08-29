@@ -13025,3 +13025,28 @@ transcript is `/tmp/wii-depth-raster-clear-cycle-output.txt`, SHA-256
 The full kernel log is `/tmp/wii-dmesg-depth-raster-clear-074d4013.txt`,
 SHA-256
 `4cb446604cc521dd37eb44fc3d007e5b96fe17e15e4577d025353b4fcd4bd765`.
+
+#### Semantic copy-clear depth positive control
+
+- Candidate commit: `91ed24081`
+- unchanged accepted `zImage` SHA-256:
+  `182d747be50d6e6fea0d757821a9c713cb8835f2d2b469b7f2683d8237aecf96`
+- `gcn-gx.ko` SHA-256:
+  `256834b30448751e3d102c0e9b00a92721fb30362b4c98bfee0b4c7dd32ccae3`
+- unchanged all-mode `wii-gcn-render-test` SHA-256:
+  `7d1162b3dfb587b02971aafe8e9b422dc8eadb12501a01081a047ccc15072b3f`
+
+Retain corrected half-open vertex normalization and the isolated semantic
+`0xfffffe` clear. For only the API-max enabled-`ALWAYS` request, submit and
+fence immediately after the initial copy-clear, then read raw EFB depth at
+`(34,34)` before destination restoration or primitive drawing. Resume the
+ordinary draw and copy-back in a fresh stream.
+
+The required positive-control line is `depth-clear peek requested=fffffe
+efb=fffffe`. Any other EFB value rejects the assumption that BP `0x51` reaches
+the clear operation as programmed. The later API-max `ALWAYS` draw must remain
+red; `EQUAL` and `GEQUAL` remain secondary until clear programming is proven.
+
+Host validation passed `git diff --check`, patch-level strict checkpatch with
+zero errors, warnings, or checks, and focused PowerPC `W=1` module compilation
+with `-j16`.
