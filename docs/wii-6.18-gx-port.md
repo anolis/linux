@@ -13050,3 +13050,25 @@ red; `EQUAL` and `GEQUAL` remain secondary until clear programming is proven.
 Host validation passed `git diff --check`, patch-level strict checkpatch with
 zero errors, warnings, or checks, and focused PowerPC `W=1` module compilation
 with `-j16`.
+
+Hardware result for candidate `91ed24081`: positive control failed on boot ID
+`074d4013-5533-4058-8874-379fcf893a01`. The fenced pre-draw read logged
+`depth-clear peek requested=fffffe efb=ffffff`. The requested BP `0x51` value
+was emitted, but the EFB depth observed after the completed clear remained the
+conventional far value. API-max `ALWAYS` still rendered all 17,024 interior
+pixels; `EQUAL` and `GEQUAL` remained green.
+
+Do not interpret this one-bit result as endpoint rounding yet. The next
+positive control must use a distinctive semantic clear such as `0x800000`,
+retain the same immediate fence and pre-draw peek, and require exactly
+`efb=800000`. If EFB remains `0xffffff`, copy-clear is not updating depth as
+assumed; if it follows the distinctive value, only endpoint precision remains.
+
+One unrelated transient XRGB8888 scaler sample differed. The provider unloaded
+normally and restored CPU scanout, with no PE/FIFO timeout, fallback, oops,
+panic, machine check, or reboot. The complete client transcript is
+`/tmp/wii-depth-clear-peek-cycle-output.txt`, SHA-256
+`3735515c1b1863a4def6ad981440cca89e24dedc5994e0c22ac58d1b97c105a2`.
+The full kernel log is `/tmp/wii-dmesg-depth-clear-peek-074d4013.txt`,
+SHA-256
+`66bbdab0bf14e3c189167436540eec75da30fb7cee3f6e7ef358cafbba02b614`.
