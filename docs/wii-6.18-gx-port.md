@@ -13004,3 +13004,24 @@ and render regression must remain unchanged.
 Host validation passed `git diff --check`, patch-level strict checkpatch with
 zero errors, warnings, or checks, and focused PowerPC `W=1` module compilation
 with `-j16`.
+
+Hardware result for candidate `65a6ca8cb`: rejected on boot ID
+`074d4013-5533-4058-8874-379fcf893a01`. API-max `ALWAYS` remained red across
+all 17,024 classified interior pixels, but both `EQUAL` and `GEQUAL` remained
+green after requesting a `0xfffffe` semantic clear. Every retained non-endpoint
+depth and render regression passed.
+
+The unchanged compare result means either the BP `0x51` override did not become
+the depth value used by copy-clear, or fragment comparison is not following the
+24-bit relation inferred from EFB peeks. Do not try another endpoint value yet.
+The next diagnostic must submit and fence only the initial copy-clear, then
+directly peek interior EFB depth before destination restore or primitive draw.
+That is the required positive control for semantic clear programming.
+
+The provider unloaded normally and restored CPU scanout, with no PE/FIFO
+timeout, fallback, oops, panic, machine check, or reboot. The complete client
+transcript is `/tmp/wii-depth-raster-clear-cycle-output.txt`, SHA-256
+`959a8e1bfa27244c9997701931f80652dd57467d93c2f4e925919ac9cfc1c6e8`.
+The full kernel log is `/tmp/wii-dmesg-depth-raster-clear-074d4013.txt`,
+SHA-256
+`4cb446604cc521dd37eb44fc3d007e5b96fe17e15e4577d025353b4fcd4bd765`.
