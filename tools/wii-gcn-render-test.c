@@ -1582,6 +1582,7 @@ static void test_draw_triangles_depth(int fd)
 
 	for (unsigned int test = 0; test < ARRAY_SIZE(depth_cases); test++) {
 		unsigned int mode_inside = 0;
+		bool mode_failed = false;
 
 		for (unsigned int vertex = 0; vertex < 3; vertex++) {
 			triangles[0].vertices[vertex].z =
@@ -1620,10 +1621,15 @@ static void test_draw_triangles_depth(int fd)
 						depth_cases[test].name, x, y,
 						map[pixel], expected);
 					failures++;
-					goto out_sync;
+					mode_failed = true;
+					break;
 				}
 			}
+			if (mode_failed)
+				break;
 		}
+		if (mode_failed)
+			continue;
 		if (!mode_inside) {
 			fail("depth compare-mode oracle did not classify pixels");
 			goto out_sync;
