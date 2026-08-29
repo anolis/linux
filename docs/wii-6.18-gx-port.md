@@ -12689,3 +12689,28 @@ requested compare/write state, and copy-clear depth initialization as the
 working depth-render path. The depth milestone is complete; subsequent work
 should move to production cleanup and broader ABI behavior rather than further
 depth-register diagnostics.
+
+#### Full depth-compare and write-enable conformance
+
+- Test-client commit: `34a94f686`
+- unchanged accepted `zImage` SHA-256:
+  `182d747be50d6e6fea0d757821a9c713cb8835f2d2b469b7f2683d8237aecf96`
+- unchanged accepted `gcn-gx.ko` SHA-256:
+  `0ff817b4ec775dc09a3c96e181d0d64774099b364af5dc976ccd0aef97163ca8`
+- expanded static `wii-gcn-render-test` SHA-256:
+  `3bcadf7a281d263e477624029ffa0b07d1c81386ee66a78f27c3acd56fba6231`
+
+Exercise every UAPI depth comparison over the entire confidently classified
+triangle interior and exterior. Existing `LESS` remains the near-blue strict
+ordering case. Add `NEVER`, `EQUAL`, `LEQUAL`, `GREATER`, `NEQUAL`, `GEQUAL`,
+and enabled `ALWAYS`; exact far-depth vertices provide positive controls for
+`EQUAL` and `GEQUAL`. Add `LESS` with depth writes disabled, where both near and
+far fragments compare against the unchanged far clear and painter-order red
+must result.
+
+All cases must print their matched interior count and the suite must end with
+`PASS: GCN render UAPI`. Any pixel mismatch rejects the corresponding compare
+or write behavior. A PE/FIFO timeout requires reboot before another test.
+Host validation passed `git diff --check`, patch-level strict checkpatch with
+zero errors, warnings, or checks, and a `-Wall -Wextra -Werror` static PowerPC
+client build against freshly installed UAPI headers.
