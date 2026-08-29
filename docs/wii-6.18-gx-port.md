@@ -12881,3 +12881,30 @@ hardware's half-open normalized interval: convert depth code `z` as
 split diagnostic, then rerun the complete all-mode client. `ALWAYS` must first
 prove that API-max primitives rasterize; `EQUAL` and `GEQUAL` must then prove
 that they compare as the far UAPI value against the far clear.
+
+#### Half-open GX depth normalization
+
+- Candidate commit: `1f9dd947b`
+- unchanged accepted `zImage` SHA-256:
+  `182d747be50d6e6fea0d757821a9c713cb8835f2d2b469b7f2683d8237aecf96`
+- `gcn-gx.ko` SHA-256:
+  `d17155404f1aa3796cca7205ba813b0516f8e230509ea3ba4effe876bb5420b4`
+- unchanged all-mode `wii-gcn-render-test` SHA-256:
+  `7d1162b3dfb587b02971aafe8e9b422dc8eadb12501a01081a047ccc15072b3f`
+
+Convert each inclusive 24-bit UAPI depth code as `z / 0x01000000`. In
+particular, `DRM_GCN_DEPTH_MAX` now becomes IEEE `0x3f7fffff`, the largest
+single-precision value below the GX far clip endpoint. Keep the hardware clear
+at `0xffffff`; hardware quantization should map the rasterized API far value
+back to that 24-bit clear value for `EQUAL` and `GEQUAL` comparison.
+
+Remove the direct EFB mapping and diagnostic split submission, restoring the
+accepted single-stream clear, destination restore, indexed XYZ/F32 draw, and
+copy-back path. Retain the expanded test matrix and API-max `ALWAYS` positive
+control. `ALWAYS`, `EQUAL`, and `GEQUAL` must each render all 17,024 classified
+interior pixels red, every other depth mode must retain its accepted result,
+and the suite must end with `PASS: GCN render UAPI`.
+
+Host validation passed `git diff --check`, patch-level strict checkpatch with
+zero errors, warnings, or checks, and focused PowerPC `W=1` module compilation
+with `-j16`.
