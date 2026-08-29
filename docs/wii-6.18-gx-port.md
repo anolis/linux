@@ -12776,3 +12776,28 @@ The likely hardware encoding of the largest rasterizable/API-max depth is
 all fragments. The next isolated candidate should override only the semantic
 depth request's initial clear value to `0xfffffe` and rerun this exact client.
 Passing all modes validates the endpoint mapping before production cleanup.
+
+#### Semantic far-depth raster endpoint
+
+- Candidate commit: `793b5a869`
+- unchanged accepted `zImage` SHA-256:
+  `182d747be50d6e6fea0d757821a9c713cb8835f2d2b469b7f2683d8237aecf96`
+- `gcn-gx.ko` SHA-256:
+  `2d90797ba4edcc8f617c26bc928c21c825c2075d7b3a105ece4040e89bd9895c`
+- unchanged all-mode diagnostic client SHA-256:
+  `58a330315de41be99aa279a7d0b5d945c07785ca7cf7c24bb6bb0213eed23ada`
+
+Override only the initial copy-clear depth for semantic depth-draw requests
+from conventional sentinel `0xffffff` to raster endpoint `0xfffffe`. Keep the
+copy-clear Z-update fix, indexed XYZ/F32 transport, API depth conversion,
+requested comparisons and writes, all other clear operations, and the complete
+retained test suite unchanged.
+
+Every depth mode must now match all 17,024 classified interior pixels. In
+particular, API-max vertices must pass `EQUAL` and `GEQUAL` against the semantic
+far initialization, while strict `LESS`, `LEQUAL`, `NEQUAL`, disabled writes,
+and all existing controls retain their prior outcomes. Final status must be
+`PASS: GCN render UAPI` with no backend fault or timeout.
+
+Host validation passed `git diff --check`, patch-level strict checkpatch with
+zero errors, warnings, or checks, and focused PowerPC `W=1` module compilation.
