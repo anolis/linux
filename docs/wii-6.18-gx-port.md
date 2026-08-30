@@ -13240,3 +13240,30 @@ the transformed clear.
 Host validation passed `git diff --check`, patch-level strict checkpatch with
 zero errors, warnings, or checks, and focused PowerPC `W=1` module compilation
 with `-j16`.
+
+Hardware result for candidate `61c4b7678`: the `0x001f` PE poke-mode
+hypothesis is rejected on boot ID
+`074d4013-5533-4058-8874-379fcf893a01`. The fenced `0x800000` copy-clear
+again read uniformly as `0xc00000` at all four coordinates. After writing PE
+register 0 to `0x001f`, the CPU poke requested `0x123456` but still read back
+as `0x800000`. Endpoint `EQUAL` and `GEQUAL` remained green while `ALWAYS`
+and retained non-endpoint depth regressions passed. Two unrelated transient
+XRGB8888 scaler samples differed; neither repeated in the depth cases.
+
+The PowerPC `ioread32be()` and `iowrite32be()` implementations already use
+heavyweight `sync` ordering, so an omitted generic memory barrier is not the
+leading explanation. Re-reading the exact local libogc implementation also
+corrected the candidate premise: its final `GX_PokeZMode()` assignment masks
+with `0x10`, not `~0x10`, so the observed value for
+`GX_PokeZMode(GX_TRUE, GX_ALWAYS, GX_TRUE)` is `0x0010`, not `0x001f`.
+The next isolated candidate must write `0x0010`, read PE register 0 back as a
+positive control, and repeat the same poke/read. This distinguishes an exact
+libogc-state mismatch from the EFB aperture itself.
+
+The provider unloaded normally and restored CPU scanout, with no PE/FIFO
+timeout, fallback, oops, panic, machine check, or reboot. The complete
+transcript is `/tmp/wii-depth-poke-mode-cycle-output.txt`, SHA-256
+`480717398c39941f29ed4ecca9c1c20fb8b509c4374a8908bcc7b23e1dcdf851`.
+The full kernel log is
+`/tmp/wii-dmesg-depth-poke-mode-074d4013.txt`, SHA-256
+`3e8dccec71c542c35df0e83a12f5ab4446017c133b551eba82a6be0e19c6f688`.
