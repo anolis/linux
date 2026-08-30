@@ -13097,3 +13097,26 @@ endpoint precision.
 Host validation passed `git diff --check`, patch-level strict checkpatch with
 zero errors, warnings, or checks, and focused PowerPC `W=1` module compilation
 with `-j16`.
+
+Hardware result for candidate `14eaa455d`: copy-clear updates depth but the
+one-for-one positive control failed on boot ID
+`074d4013-5533-4058-8874-379fcf893a01`. The fenced pre-draw read logged
+`depth-clear peek requested=800000 efb=c00000`. The result is neither the old
+`0xffffff` value nor the requested value; it is exactly the rounded midpoint
+between them. API-max `ALWAYS` remained red, while endpoint `EQUAL` and
+`GEQUAL` remained green. All retained non-endpoint regressions passed.
+
+The next diagnostic must validate the CPU EFB depth window independently:
+after the distinctive clear and fence, peek several neighboring pixels, poke a
+known 24-bit value into one interior pixel using the exact libogc `GX_PokeZ`
+address, and immediately read it back. Uniform `0xc00000` clear reads plus an
+exact poke/read would isolate the transformation to copy-clear or EFB sample
+resolve; spatial variation would indicate partial region/field clearing.
+
+The provider unloaded normally and restored CPU scanout, with no PE/FIFO
+timeout, fallback, oops, panic, machine check, or reboot. The complete client
+transcript is `/tmp/wii-depth-clear-800000-cycle-output.txt`, SHA-256
+`959a8e1bfa27244c9997701931f80652dd57467d93c2f4e925919ac9cfc1c6e8`.
+The full kernel log is
+`/tmp/wii-dmesg-depth-clear-800000-074d4013.txt`, SHA-256
+`40b857a1e2c01a8ca3172c8bb71f19257c4997533a0e20861d7db1f6991fb969`.
