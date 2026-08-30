@@ -13627,3 +13627,11 @@ console live. No interval contains a PE/FIFO timeout, fallback, oops, panic,
 machine check, or reboot. The complete post-test kernel log is
 `/tmp/wii-dmesg-textured-triangles.txt`, SHA-256
 `951b831e486848637117135ad5bdff79a537103a82835f706393005ebed56d64`.
+
+After acceptance, the checksum-identical v4 module was installed at
+`/lib/modules/6.18.40-wii+/kernel/drivers/video/fbdev/gcn-gx.ko` and `depmod`
+completed. Its installed SHA-256 is the pinned `2b031a8f...` value above. The
+previous module remains at
+`gcn-gx.ko.backup.86f4e92e516ebd8b255d07a968167073969a89a332459b60ef17177712dde702`
+with that exact SHA-256, so the rootfs and booted v4 core now agree while the
+prior provider remains recoverable.
