@@ -13479,3 +13479,29 @@ The post-validation kernel log is
 Promote `0xfffffe` to the fixed production semantic far clear and remove the
 diagnostic module parameter. Keep the mandatory PE finish between clear and
 raster work; it is required for the clear value to affect comparisons.
+
+#### Production semantic depth initialization
+
+- Candidate commit: `dfa78b08c`
+- unchanged accepted `zImage` SHA-256:
+  `182d747be50d6e6fea0d757821a9c713cb8835f2d2b469b7f2683d8237aecf96`
+- `gcn-gx.ko` SHA-256:
+  `40eb9f2f9356b5dca158182869431697c80d3eec297ee6d15d0140dd19efb0f0`
+- unchanged all-mode `wii-gcn-render-test` SHA-256:
+  `7d1162b3dfb587b02971aafe8e9b422dc8eadb12501a01081a047ccc15072b3f`
+
+Fix the semantic far clear at `0xfffffe`, remove the diagnostic module
+parameter, and retain the mandatory isolated clear submission plus PE-finish
+wait. The inclusive UAPI maximum remains normalized by `0x01000000`, so its
+rasterized comparator-domain value and the fixed clear now match exactly.
+
+Acceptance requires every depth case to pass: painter order, disabled test,
+all eight compare functions represented by the client, disabled writes, and
+the maximum-depth `EQUAL`/`GEQUAL` endpoints. The complete render-UAPI suite
+must otherwise retain its established behavior; separately tracked transient
+scaler samples require an immediate repeat rather than invalidating a depth
+result.
+
+Host validation passed `git diff --check`, patch-level strict checkpatch with
+zero errors, warnings, or checks, and focused PowerPC `W=1` module compilation
+with `-j16`.
