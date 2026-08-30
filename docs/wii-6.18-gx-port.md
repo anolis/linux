@@ -13293,3 +13293,30 @@ must remain non-authoritative while the aperture semantics are investigated.
 Host validation passed `git diff --check`, patch-level strict checkpatch with
 zero errors, warnings, or checks, and focused PowerPC `W=1` module compilation
 with `-j16`.
+
+Hardware result for candidate `b2ae0a539`: the literal local-libogc value is
+rejected on boot ID `074d4013-5533-4058-8874-379fcf893a01`. PE register 0
+read back exactly as `0x0010`, validating the register MMIO path, but the
+`0x123456` poke was suppressed completely: the pixel remained at the fenced
+pre-poke clear value `0xc00000`. This contrasts with candidate `61c4b7678`,
+where `0x001f` changed the same pixel to `0x800000`.
+
+Dolphin's `UPEZConfReg` confirms the hardware fields: bit 0 enables compare,
+bits 1-3 select the function, and bit 4 enables update. Thus `0x001f` is the
+field-correct enabled/`ALWAYS`/update value; the current libogc source's final
+`regval & 0x10` expression discards compare and function bits and explains
+the no-write result. The PE register is live, but the CPU depth aperture still
+does not round-trip values directly. The next diagnostic should restore
+`0x001f` and poke several distinctive values at separate cleared coordinates,
+then read all of them back to derive the actual data transformation or
+quantization before changing production depth semantics.
+
+The authoritative repeat had no scaler mismatches; only the two expected
+endpoint `EQUAL`/`GEQUAL` failures remained. The provider unloaded normally
+and restored CPU scanout, with no PE/FIFO timeout, fallback, oops, panic,
+machine check, or reboot. Its client transcript is
+`/tmp/wii-depth-literal-libogc-repeat-client.txt`, SHA-256
+`bffd744a2eba55bb37d712fba06f7345077c50017d7406dc6361ec5b5efd1faa`.
+The pre-unload kernel log is
+`/tmp/wii-dmesg-depth-literal-libogc-repeat.txt`, SHA-256
+`faea6f9eff709d0d320e387d223a830531d089648b6b80c3d1b97e2adb15c82d`.
