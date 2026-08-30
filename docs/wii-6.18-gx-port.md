@@ -13525,3 +13525,13 @@ complete transcript is `/tmp/wii-depth-production-cycle-output.txt`, SHA-256
 `dcbad2a773a14b1ef053f3aecb96a034c69e4f1f467b15923de63d5621a541d6`.
 The full kernel log is `/tmp/wii-dmesg-depth-production.txt`, SHA-256
 `2d23e30f031acd7c410bb3fe6a1679e4b9ed743a851172c7b3f8323b5e62b512`.
+
+Final host validation at accepted commit `07cc984c2` passed all 19 focused
+KUnit tests: three `gcn_gx_mem1` tests and 16 `gcn_drm_render` tests. The
+KUnit JSON is `/tmp/wii-gcn-depth-production-kunit.json`, SHA-256
+`a23dcf5f94ff1993ff8cfe508890b8d4b8afc321547cd8c76492ed913c413a5c`.
+A complete PowerPC `modules zImage` build with `-j16` also completed without
+warnings. It reproduced the accepted module SHA-256
+`40eb9f2f9356b5dca158182869431697c80d3eec297ee6d15d0140dd19efb0f0`;
+the resulting `zImage` SHA-256 is
+`3debf262dc3f7c42ca169ec15ba1c6f37d8251e4fad9cda09a48e7f92d17c9e7`.
