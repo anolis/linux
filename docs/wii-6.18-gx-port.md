@@ -13170,3 +13170,28 @@ machine check, or reboot. The complete transcript is
 The full kernel log is `/tmp/wii-dmesg-depth-access-controls-074d4013.txt`,
 SHA-256
 `35f6a12b13657ea5ec7cc1f458e67e8219327a4415813732bff457b55ed2a0ed`.
+
+#### PE-finished semantic copy-clear
+
+- Candidate commit: `b83866018`
+- unchanged accepted `zImage` SHA-256:
+  `182d747be50d6e6fea0d757821a9c713cb8835f2d2b469b7f2683d8237aecf96`
+- `gcn-gx.ko` SHA-256:
+  `518dc1afa807f75acae57c872b016d8ae202a3b71a179117ebbe4073f39314d3`
+- unchanged all-mode `wii-gcn-render-test` SHA-256:
+  `7d1162b3dfb587b02971aafe8e9b422dc8eadb12501a01081a047ccc15072b3f`
+
+Keep candidate `06ff8b4c5` byte-for-byte except for synchronization. After the
+initial clear stream reaches its appended PE token, wait for one BP `0x45`
+finish relative to the pre-submit finish counter before any CPU EFB access.
+This distinguishes command parsing from asynchronous copy-clear completion.
+
+All four pre-draw samples must now read the requested `0x800000` if the prior
+uniform `0xc00000` was an intermediate clear state. A timeout rejects BP
+`0x45` as a copy-completion fence for this path. The unconfigured CPU poke
+result remains non-authoritative and must not affect interpretation of the
+clear samples.
+
+Host validation passed `git diff --check`, patch-level strict checkpatch with
+zero errors, warnings, or checks, and focused PowerPC `W=1` module compilation
+with `-j16`.
