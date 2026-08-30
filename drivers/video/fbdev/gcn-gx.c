@@ -415,6 +415,12 @@ static inline void wg_f32_bits(u32 bits)
 #define F32_NEG(b)	((b) ^ 0x80000000U)
 #define GX_RASTER_DEPTH_MAX	0x00800000U
 
+#if IS_ENABLED(CONFIG_DRM_GCN_GX)
+static unsigned int gx_depth_clear = GX_RASTER_DEPTH_MAX;
+module_param_named(depth_clear, gx_depth_clear, uint, 0444);
+MODULE_PARM_DESC(depth_clear, "DRM depth copy-clear value (24-bit)");
+#endif
+
 /* f32_from_u16 - encode a u16 integer as IEEE 754 single-precision bits */
 static u32 f32_from_u16(u16 n)
 {
@@ -1998,34 +2004,6 @@ static void gx_copy_efb_to_rgb565_texture(void *dest, u16 width, u16 height,
 					   clear);
 }
 
-static int gx_peek_efb_depth(u16 x, u16 y, u32 *depth)
-{
-	phys_addr_t phys = 0x08000000 | ((u32)x << 2) | ((u32)y << 12) |
-			   BIT(22);
-	void __iomem *peek;
-
-	peek = ioremap(phys, sizeof(u32));
-	if (!peek)
-		return -ENOMEM;
-	*depth = ioread32be(peek) & 0x00ffffff;
-	iounmap(peek);
-	return 0;
-}
-
-static int gx_poke_efb_depth(u16 x, u16 y, u32 depth)
-{
-	phys_addr_t phys = 0x08000000 | ((u32)x << 2) | ((u32)y << 12) |
-			   BIT(22);
-	void __iomem *poke;
-
-	poke = ioremap(phys, sizeof(u32));
-	if (!poke)
-		return -ENOMEM;
-	iowrite32be(depth & 0x00ffffff, poke);
-	iounmap(poke);
-	return 0;
-}
-
 static void __maybe_unused gcn_gx_copy_efb_to_xfb(u32 xfb_phys, u16 width,
 						  u16 height)
 {
@@ -3543,20 +3521,12 @@ static int gcn_gx_drm_draw_depth_rgb565(void *dst_allocation, u16 width,
 					const struct gcn_drm_draw_state *state,
 					const struct gcn_drm_depth_state *depth)
 {
-	static const u32 poke_values[] = {
-		0x000000, 0x000001, 0x123456, 0x3fffff, 0x400000,
-		0x7fffff, 0x800000, 0xbfffff, 0xfffffe,
-	};
 	struct gx_mem1_allocation *dst = dst_allocation;
 	u32 finish_count;
-	u32 peek_depth[4];
-	u32 poke_depth[ARRAY_SIZE(poke_values)];
-	u16 poke_mode;
 	size_t bytes;
 	long completed;
 	unsigned int vertex_count;
 	unsigned int i;
-	unsigned int j;
 	int ret;
 
 	if (!dst || !vertices || !state || !depth || !triangle_count ||
@@ -3597,60 +3567,12 @@ static int gcn_gx_drm_draw_depth_rgb565(void *dst_allocation, u16 width,
 	gx_load_libogc_init_preamble();
 	gx_setup_display_copy_state();
 
-	/* Use the established copy engine to initialize EFB depth to far. */
+	/* Use the established copy engine to initialize EFB depth. */
 	gx_set_copy_clear_rgb(0x00, 0x00, 0x00);
-	/* Match the largest rasterized normalized UAPI value. */
-	gx_load_bp_reg(0x51000000 | GX_RASTER_DEPTH_MAX);
+	gx_load_bp_reg(0x51000000 | gx_depth_clear);
 	gx_copy_efb_to_rgb565_texture(gx_tex_buf, width, height, true);
 	for (i = 0; i < 32; i++)
 		gx_wr8(0);
-	if (depth->compare == DRM_GCN_DEPTH_ALWAYS &&
-	    vertices[0].z == DRM_GCN_DEPTH_MAX) {
-		ret = gx_submit_cmds("render-depth-clear-peek");
-		if (ret)
-			goto out_unlock;
-		completed = gx_wait_for_pe_finishes(finish_count, 1);
-		if (!completed) {
-			pr_warn("gcn-gx: depth clear timed out waiting for PE finish\n");
-			ret = -ETIMEDOUT;
-			goto out_unlock;
-		}
-		ret = gx_peek_efb_depth(34, 34, &peek_depth[0]);
-		if (!ret)
-			ret = gx_peek_efb_depth(35, 34, &peek_depth[1]);
-		if (!ret)
-			ret = gx_peek_efb_depth(34, 35, &peek_depth[2]);
-		if (!ret)
-			ret = gx_peek_efb_depth(100, 100, &peek_depth[3]);
-		if (ret) {
-			pr_warn("gcn-gx: failed to map EFB depth peek: %d\n", ret);
-			goto out_unlock;
-		}
-		pr_info("gcn-gx: depth-clear samples requested=%06x p3434=%06x p3534=%06x p3435=%06x p100100=%06x\n",
-			GX_RASTER_DEPTH_MAX, peek_depth[0], peek_depth[1],
-			peek_depth[2], peek_depth[3]);
-
-		/* PE Z compare enabled, GX_ALWAYS, depth update enabled. */
-		pe_write(0, 0x001f);
-		poke_mode = pe_read(0);
-		for (j = 0; j < ARRAY_SIZE(poke_values); j++) {
-			ret = gx_poke_efb_depth(34, 34, poke_values[j]);
-			if (!ret)
-				ret = gx_peek_efb_depth(34, 34, &poke_depth[j]);
-			if (ret) {
-				pr_warn("gcn-gx: failed EFB depth poke/read %u: %d\n",
-					j, ret);
-				goto out_unlock;
-			}
-		}
-		pr_info("gcn-gx: depth-poke-map mode=%04x 000000=%06x 000001=%06x 123456=%06x 3fffff=%06x 400000=%06x 7fffff=%06x 800000=%06x bfffff=%06x fffffe=%06x\n",
-			poke_mode, poke_depth[0], poke_depth[1], poke_depth[2],
-			poke_depth[3], poke_depth[4], poke_depth[5], poke_depth[6],
-			poke_depth[7], poke_depth[8]);
-
-		finish_count = READ_ONCE(gx_pe_finish_count);
-		fifo_pos = 0;
-	}
 
 	/* Restore destination colour after copy-clear initialized depth. */
 	gx_setup_rgb565_texture_state(width, height);
@@ -4314,6 +4236,14 @@ static int gcn_gx_init(struct platform_device *pdev)
 #endif
 	int irq;
 	int ret;
+
+#if IS_ENABLED(CONFIG_DRM_GCN_GX)
+	if (gx_depth_clear > DRM_GCN_DEPTH_MAX) {
+		pr_err("gcn-gx: invalid depth_clear 0x%x (expected 0..0xffffff)\n",
+		       gx_depth_clear);
+		return -EINVAL;
+	}
+#endif
 
 	if (!strcmp(gx_renderer, "generated")) {
 		gx_use_reference = false;
