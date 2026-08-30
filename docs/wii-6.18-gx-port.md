@@ -13396,3 +13396,29 @@ draw, copy, scaling, and XRGB8888 cases remain controls for each load.
 Host validation passed `git diff --check`, patch-level strict checkpatch with
 zero errors, warnings, or checks, and focused PowerPC `W=1` module compilation
 with `-j16`.
+
+Hardware result for candidate `b53e66b93`: the unfenced clear-value
+hypothesis is rejected on boot ID
+`074d4013-5533-4058-8874-379fcf893a01`. Fifteen loads spanning `0x000000`,
+adjacent low values, quarter/half/three-quarter boundaries, and
+`0xfffffe`/`0xffffff` all produced the identical endpoint result: both
+`EQUAL` and `GEQUAL` remained green. The clear payload has no observable
+effect on those comparisons in the current one-stream sequence.
+
+The sweep reveals an ordering gap rather than a candidate value. EFB
+copy-clear is asynchronous, but the driver immediately restores colour and
+submits the depth primitive in the same stream. Prior PE-finish experiments
+split and fenced only the conditional API-max `ALWAYS` diagnostic after the
+failing endpoint requests had already run; they never fenced the actual
+`EQUAL` or `GEQUAL` clear. The next isolated candidate must submit copy-clear
+alone, wait for its BP `0x45` PE finish, reset the FIFO builder, and only then
+restore colour and draw for every depth request. Retain `depth_clear` so the
+same checksum can be swept again after ordering is established.
+
+Most sweep loads had only the two endpoint failures. A few unrelated scaler
+samples showed the separately tracked transient one-bit/one-channel issue.
+There was no PE/FIFO timeout, fallback, oops, panic, machine check, or reboot.
+The sweep summary is `/tmp/wii-depth-clear-sweep-summary.txt`, SHA-256
+`babedec8e4c379c0a1f9bc096d66759b7de8676e8a7e822f2a2dda1703662427`.
+The post-sweep kernel log is `/tmp/wii-dmesg-depth-clear-sweep.txt`, SHA-256
+`bcb4c5e2bf12f1ff7464a45644f24580d6d329a9e117983b190d6432eba1c040`.
