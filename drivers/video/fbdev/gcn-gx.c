@@ -3573,6 +3573,18 @@ static int gcn_gx_drm_draw_depth_rgb565(void *dst_allocation, u16 width,
 	gx_copy_efb_to_rgb565_texture(gx_tex_buf, width, height, true);
 	for (i = 0; i < 32; i++)
 		gx_wr8(0);
+	ret = gx_submit_cmds("render-depth-clear");
+	if (ret)
+		goto out_unlock;
+	completed = gx_wait_for_pe_finishes(finish_count, 1);
+	if (!completed) {
+		pr_warn_ratelimited("gcn-gx: depth clear timed out waiting for PE finish\n");
+		ret = -ETIMEDOUT;
+		goto out_unlock;
+	}
+
+	finish_count = READ_ONCE(gx_pe_finish_count);
+	fifo_pos = 0;
 
 	/* Restore destination colour after copy-clear initialized depth. */
 	gx_setup_rgb565_texture_state(width, height);
