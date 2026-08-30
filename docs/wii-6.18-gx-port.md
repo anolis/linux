@@ -13346,3 +13346,28 @@ bit boundaries needed for the next isolated test.
 Host validation passed `git diff --check`, patch-level strict checkpatch with
 zero errors, warnings, or checks, and focused PowerPC `W=1` module compilation
 with `-j16`.
+
+Hardware result for candidate `f8562aeb5`: CPU EFB depth access is rejected
+as a raw-Z24 diagnostic on boot ID
+`074d4013-5533-4058-8874-379fcf893a01`. PE register 0 read back as the
+field-correct `0x001f`, but every one of the nine writes read back as exactly
+`0x800000`, including `0x000000`, `0x000001`, `0x123456`, all range-boundary
+values, and `0xfffffe`. The fenced pre-poke clear remained uniformly
+`0xc00000` at all four sampled coordinates.
+
+The PE mode changes whether a poke is suppressed (`0x0010`) or produces the
+constant `0x800000` (`0x001f`), but the written 24-bit payload is not preserved.
+Consequently neither prior copy-clear peeks nor CPU poke/read pairs are valid
+evidence for the renderer's comparator-domain depth value. Set this aperture
+aside. The next diagnostic should use actual rendered endpoint comparisons as
+the oracle: expose the BP `0x51` copy-clear payload as a bounded load-time
+parameter and automatically sweep it with the unchanged endpoint `EQUAL` and
+`GEQUAL` client cases.
+
+The authoritative repeat had no scaler mismatches; only the two expected
+endpoint depth failures remained. The provider unloaded normally and restored
+CPU scanout, with no PE/FIFO timeout, fallback, oops, panic, machine check, or
+reboot. Its client transcript is `/tmp/wii-depth-poke-map-client.txt`, SHA-256
+`bffd744a2eba55bb37d712fba06f7345077c50017d7406dc6361ec5b5efd1faa`.
+The pre-unload kernel log is `/tmp/wii-dmesg-depth-poke-map.txt`, SHA-256
+`5b96b1da65bcc231dbc5d2138f3b598f9883a83531ad4e0658df6a2015692dcf`.
