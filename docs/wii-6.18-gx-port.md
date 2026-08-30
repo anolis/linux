@@ -13267,3 +13267,29 @@ transcript is `/tmp/wii-depth-poke-mode-cycle-output.txt`, SHA-256
 The full kernel log is
 `/tmp/wii-dmesg-depth-poke-mode-074d4013.txt`, SHA-256
 `3e8dccec71c542c35df0e83a12f5ab4446017c133b551eba82a6be0e19c6f688`.
+
+#### Literal libogc PE depth-poke mode and readback
+
+- Candidate commit: `b2ae0a539`
+- unchanged accepted `zImage` SHA-256:
+  `182d747be50d6e6fea0d757821a9c713cb8835f2d2b469b7f2683d8237aecf96`
+- `gcn-gx.ko` SHA-256:
+  `801e6320d0cf5e5f0d1e9b1039ed3bb49f3f604f2e2c63e5d590f331c70d4424`
+- unchanged all-mode `wii-gcn-render-test` SHA-256:
+  `7d1162b3dfb587b02971aafe8e9b422dc8eadb12501a01081a047ccc15072b3f`
+
+Keep candidate `61c4b7678` unchanged except for the PE poke-mode value and
+its diagnostic. Write PE register 0 as `0x0010`, the literal final value
+produced by the checked local libogc `GX_PokeZMode(GX_TRUE, GX_ALWAYS,
+GX_TRUE)` implementation, then read the register back before the same
+`0x123456` EFB depth poke.
+
+The PE positive control requires `mode=0010`. An exact
+`depth-poke mode=0010 requested=123456 efb=123456` then validates the CPU EFB
+depth aperture. If the mode reads back correctly but depth remains
+`0x800000`, the exact libogc poke state is ruled out and direct EFB accesses
+must remain non-authoritative while the aperture semantics are investigated.
+
+Host validation passed `git diff --check`, patch-level strict checkpatch with
+zero errors, warnings, or checks, and focused PowerPC `W=1` module compilation
+with `-j16`.
