@@ -3547,6 +3547,7 @@ static int gcn_gx_drm_draw_depth_rgb565(void *dst_allocation, u16 width,
 	u32 finish_count;
 	u32 peek_depth[4];
 	u32 poke_depth;
+	u16 poke_mode;
 	size_t bytes;
 	long completed;
 	unsigned int vertex_count;
@@ -3624,8 +3625,9 @@ static int gcn_gx_drm_draw_depth_rgb565(void *dst_allocation, u16 width,
 			GX_RASTER_DEPTH_MAX, peek_depth[0], peek_depth[1],
 			peek_depth[2], peek_depth[3]);
 
-		/* GX_PokeZMode(GX_TRUE, GX_ALWAYS, GX_TRUE). */
-		pe_write(0, 0x001f);
+		/* Literal result of libogc GX_PokeZMode(TRUE, ALWAYS, TRUE). */
+		pe_write(0, 0x0010);
+		poke_mode = pe_read(0);
 		ret = gx_poke_efb_depth(34, 34, 0x00123456);
 		if (!ret)
 			ret = gx_peek_efb_depth(34, 34, &poke_depth);
@@ -3633,8 +3635,8 @@ static int gcn_gx_drm_draw_depth_rgb565(void *dst_allocation, u16 width,
 			pr_warn("gcn-gx: failed EFB depth poke/read: %d\n", ret);
 			goto out_unlock;
 		}
-		pr_info("gcn-gx: depth-poke requested=123456 efb=%06x\n",
-			poke_depth);
+		pr_info("gcn-gx: depth-poke mode=%04x requested=123456 efb=%06x\n",
+			poke_mode, poke_depth);
 
 		finish_count = READ_ONCE(gx_pe_finish_count);
 		fifo_pos = 0;
