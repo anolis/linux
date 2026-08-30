@@ -13120,3 +13120,28 @@ transcript is `/tmp/wii-depth-clear-800000-cycle-output.txt`, SHA-256
 The full kernel log is
 `/tmp/wii-dmesg-depth-clear-800000-074d4013.txt`, SHA-256
 `40b857a1e2c01a8ca3172c8bb71f19257c4997533a0e20861d7db1f6991fb969`.
+
+#### CPU EFB depth-access positive control
+
+- Candidate commit: `06ff8b4c5`
+- unchanged accepted `zImage` SHA-256:
+  `182d747be50d6e6fea0d757821a9c713cb8835f2d2b469b7f2683d8237aecf96`
+- `gcn-gx.ko` SHA-256:
+  `5fc2b1cfabda4c4c24663bb594ccf7326c84274017a4a151e8c166a2b1dc4e18`
+- unchanged all-mode `wii-gcn-render-test` SHA-256:
+  `7d1162b3dfb587b02971aafe8e9b422dc8eadb12501a01081a047ccc15072b3f`
+
+Keep the distinctive `0x800000` clear and immediate PE fence. Read raw EFB
+depth at `(34,34)`, `(35,34)`, `(34,35)`, and `(100,100)` before drawing to
+test spatial uniformity. Then use the exact libogc `GX_PokeZ` CPU EFB address
+formula to write `0x123456` at `(34,34)` and immediately read it back.
+
+Uniform `0xc00000` clear samples plus `depth-poke requested=123456
+efb=123456` validate the CPU EFB window and isolate the transformed clear to
+copy/sample behavior. Spatially varying clear samples indicate a region,
+field, or sample-selection issue. A failed poke/read invalidates all direct EFB
+depth observations until the CPU access path is corrected.
+
+Host validation passed `git diff --check`, patch-level strict checkpatch with
+zero errors, warnings, or checks, and focused PowerPC `W=1` module compilation
+with `-j16`.
