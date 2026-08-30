@@ -3603,6 +3603,12 @@ static int gcn_gx_drm_draw_depth_rgb565(void *dst_allocation, u16 width,
 		ret = gx_submit_cmds("render-depth-clear-peek");
 		if (ret)
 			goto out_unlock;
+		completed = gx_wait_for_pe_finishes(finish_count, 1);
+		if (!completed) {
+			pr_warn("gcn-gx: depth clear timed out waiting for PE finish\n");
+			ret = -ETIMEDOUT;
+			goto out_unlock;
+		}
 		ret = gx_peek_efb_depth(34, 34, &peek_depth[0]);
 		if (!ret)
 			ret = gx_peek_efb_depth(35, 34, &peek_depth[1]);
