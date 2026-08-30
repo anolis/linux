@@ -413,13 +413,7 @@ static inline void wg_f32_bits(u32 bits)
 #define F32_NEG_ONE	0xBF800000U
 #define F32_16M		0x4B7FFFFFU	/* 16777215.0 */
 #define F32_NEG(b)	((b) ^ 0x80000000U)
-#define GX_RASTER_DEPTH_MAX	0x00800000U
-
-#if IS_ENABLED(CONFIG_DRM_GCN_GX)
-static unsigned int gx_depth_clear = GX_RASTER_DEPTH_MAX;
-module_param_named(depth_clear, gx_depth_clear, uint, 0444);
-MODULE_PARM_DESC(depth_clear, "DRM depth copy-clear value (24-bit)");
-#endif
+#define GX_RASTER_DEPTH_MAX	0x00fffffeU
 
 /* f32_from_u16 - encode a u16 integer as IEEE 754 single-precision bits */
 static u32 f32_from_u16(u16 n)
@@ -3569,7 +3563,7 @@ static int gcn_gx_drm_draw_depth_rgb565(void *dst_allocation, u16 width,
 
 	/* Use the established copy engine to initialize EFB depth. */
 	gx_set_copy_clear_rgb(0x00, 0x00, 0x00);
-	gx_load_bp_reg(0x51000000 | gx_depth_clear);
+	gx_load_bp_reg(0x51000000 | GX_RASTER_DEPTH_MAX);
 	gx_copy_efb_to_rgb565_texture(gx_tex_buf, width, height, true);
 	for (i = 0; i < 32; i++)
 		gx_wr8(0);
@@ -4248,15 +4242,6 @@ static int gcn_gx_init(struct platform_device *pdev)
 #endif
 	int irq;
 	int ret;
-
-#if IS_ENABLED(CONFIG_DRM_GCN_GX)
-	if (gx_depth_clear > DRM_GCN_DEPTH_MAX) {
-		pr_err("gcn-gx: invalid depth_clear 0x%x (expected 0..0xffffff)\n",
-		       gx_depth_clear);
-		return -EINVAL;
-	}
-#endif
-
 	if (!strcmp(gx_renderer, "generated")) {
 		gx_use_reference = false;
 		gx_use_direct = false;
