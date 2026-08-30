@@ -3624,6 +3624,8 @@ static int gcn_gx_drm_draw_depth_rgb565(void *dst_allocation, u16 width,
 			GX_RASTER_DEPTH_MAX, peek_depth[0], peek_depth[1],
 			peek_depth[2], peek_depth[3]);
 
+		/* GX_PokeZMode(GX_TRUE, GX_ALWAYS, GX_TRUE). */
+		pe_write(0, 0x001f);
 		ret = gx_poke_efb_depth(34, 34, 0x00123456);
 		if (!ret)
 			ret = gx_peek_efb_depth(34, 34, &poke_depth);
