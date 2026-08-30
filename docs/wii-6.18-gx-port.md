@@ -13422,3 +13422,29 @@ The sweep summary is `/tmp/wii-depth-clear-sweep-summary.txt`, SHA-256
 `babedec8e4c379c0a1f9bc096d66759b7de8676e8a7e822f2a2dda1703662427`.
 The post-sweep kernel log is `/tmp/wii-dmesg-depth-clear-sweep.txt`, SHA-256
 `bcb4c5e2bf12f1ff7464a45644f24580d6d329a9e117983b190d6432eba1c040`.
+
+#### Mandatory depth-clear completion fence
+
+- Candidate commit: `c47f91ed6`
+- unchanged accepted `zImage` SHA-256:
+  `182d747be50d6e6fea0d757821a9c713cb8835f2d2b469b7f2683d8237aecf96`
+- `gcn-gx.ko` SHA-256:
+  `36d881f7361038eea67d2c5a5084a967c41c1281cfd72a42fd9d129d1c5988e0`
+- unchanged all-mode `wii-gcn-render-test` SHA-256:
+  `7d1162b3dfb587b02971aafe8e9b422dc8eadb12501a01081a047ccc15072b3f`
+
+For every DRM depth request, submit EFB copy-clear alone and wait for its BP
+`0x45` PE finish. Only after completion reset the FIFO builder and finish
+baseline, restore destination colour, configure requested depth state, draw,
+and copy back. Keep default `depth_clear=0x800000` and every other byte of
+depth/raster behavior unchanged.
+
+If endpoint `GEQUAL` turns red while `EQUAL` stays green, the fence is valid
+and the clear is below the largest raster depth; the parameter sweep can then
+locate equality. If both remain green, asynchronous copy-clear ordering is
+rejected and the next investigation must move to vertex-depth transform or
+comparator-domain encoding.
+
+Host validation passed `git diff --check`, patch-level strict checkpatch with
+zero errors, warnings, or checks, and focused PowerPC `W=1` module compilation
+with `-j16`.
