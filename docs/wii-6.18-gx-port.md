@@ -13535,3 +13535,58 @@ warnings. It reproduced the accepted module SHA-256
 `40eb9f2f9356b5dca158182869431697c80d3eec297ee6d15d0140dd19efb0f0`;
 the resulting `zImage` SHA-256 is
 `3debf262dc3f7c42ca169ec15ba1c6f37d8251e4fad9cda09a48e7f92d17c9e7`.
+
+#### Bounded RGB565 textured triangles
+
+- Candidate commit: `61a4db7bb`
+- `zImage` / `dtbImage.wii` SHA-256:
+  `4a2f8b79e623897b172f5d4fceef014b4abd9dfe4afd755982c16cd7f865d92a`
+- `gcn-gx.ko` SHA-256:
+  `2b031a8f764f0398b5aab9fef4821ee37125383bfdc98081e2dcea48d36d0f31`
+- static `wii-gcn-render-test` SHA-256:
+  `478d980184c33e5005fef1c44982cfa1eff0638f0b67bb42639f3a7dddba052d`
+- KUnit JSON SHA-256:
+  `8a25e3f9a688abc08efefe651ff2c00b1ba39b7012210a5dd298653de9664e8c`
+
+Add the first bounded texture-sampling render operation needed by a future
+Mesa command path. The feature-gated ioctl accepts at most 64 RGB565 textured
+triangles, a distinct tiled MEM1 RGB565 source and destination, and direct XY
+plus ST vertices. ST uses semantic texel-edge coordinates from zero through
+the corresponding source extent, inclusive. Sampling is fixed to nearest and
+clamp, texture colour replaces raster colour, and only viewport and scissor
+state are accepted; blending is rejected.
+
+The provider restores destination colour into EFB, binds the source through
+the hardware-validated direct TEX0 configuration, applies the fixed
+negative-quarter-texel sampling phase independently of diagnostic module
+parameters, renders the batch, and copies EFB back to the destination. The
+private core/provider ABI is bumped from v3 to v4 because the callback is
+appended to `struct gcn_drm_accel_ops`. The matching module imports only the
+v4 registration symbols and the matching kernel exports them. Do not test
+this module under the currently deployed v3 core: boot the matching candidate
+kernel first.
+
+The strict client initializes a 256x256 source with a coordinate-dependent
+pattern and the destination with a sentinel. Two triangles cover the complete
+surface while a 224x216 scissor limits writes. Acceptance requires all 48,384
+interior pixels to equal their exact source texels and all 17,152 exterior
+pixels to preserve the sentinel byte-exactly. The same run must reject
+same-object aliasing, source-alpha blending, an out-of-range ST coordinate,
+nonzero padding, and an invalid userspace triangle pointer with their specified
+errors. Every retained allocator, copy, fill, draw, depth, scale, system-memory,
+and XRGB8888 oracle must also pass.
+
+Host validation passed `git diff --check`, patch-level strict checkpatch with
+zero errors, warnings, or checks across 876 lines, warning-enabled PowerPC
+compilation of all changed driver objects, static-client compilation with
+`-Wall -Wextra -Werror`, installed-UAPI native compilation, and a complete
+PowerPC `modules zImage` build with `-j16`. Focused KUnit passed all 20 tests:
+three `gcn_gx_mem1` tests and 17 `gcn_drm_render` tests, including the new UAPI
+layout and validation controls.
+
+Hardware acceptance additionally requires matching live kernel, module, and
+client checksums; normal provider load and unload; CPU console restoration;
+and a clean candidate interval with no PE/FIFO timeout, fallback, oops, panic,
+machine check, reboot, capacity leak, stale destination pixel, or display
+corruption. A strict mismatch is a rejected candidate and must not be hidden by
+weakening the exact oracle.
