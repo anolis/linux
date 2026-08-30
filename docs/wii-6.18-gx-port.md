@@ -13215,3 +13215,28 @@ fallback, oops, panic, machine check, or reboot. The complete transcript is
 `959a8e1bfa27244c9997701931f80652dd57467d93c2f4e925919ac9cfc1c6e8`.
 The full kernel log is `/tmp/wii-dmesg-depth-pe-finish-074d4013.txt`, SHA-256
 `650ccdb70f4036e023cf665485a90a6fc31dbf25268bbafb838fcde3760ceb7a`.
+
+#### Libogc-matched CPU depth-poke mode
+
+- Candidate commit: `61c4b7678`
+- unchanged accepted `zImage` SHA-256:
+  `182d747be50d6e6fea0d757821a9c713cb8835f2d2b469b7f2683d8237aecf96`
+- `gcn-gx.ko` SHA-256:
+  `453aed93049471b11d39f4010022c3b27e6ee063a93d87b4f06f589ede1fec34`
+- unchanged all-mode `wii-gcn-render-test` SHA-256:
+  `7d1162b3dfb587b02971aafe8e9b422dc8eadb12501a01081a047ccc15072b3f`
+
+Keep candidate `b83866018` unchanged except for one PE MMIO write immediately
+before the CPU depth poke: set PE register 0 to `0x001f`, exactly matching
+libogc `GX_PokeZMode(GX_TRUE, GX_ALWAYS, GX_TRUE)`. This enables comparison,
+selects `ALWAYS`, and enables depth update for CPU EFB pokes.
+
+The authoritative positive control is now `depth-poke requested=123456
+efb=123456`. The four pre-poke clear samples should remain uniformly
+`0xc00000`; they are intentionally unchanged. A successful poke/read validates
+the CPU EFB depth window and leaves copy-clear/sample behavior as the source of
+the transformed clear.
+
+Host validation passed `git diff --check`, patch-level strict checkpatch with
+zero errors, warnings, or checks, and focused PowerPC `W=1` module compilation
+with `-j16`.
