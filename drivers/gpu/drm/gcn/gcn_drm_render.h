@@ -150,6 +150,44 @@ gcn_drm_render_validate_triangle_depth_batch(const struct drm_gcn_draw_triangles
 	return 0;
 }
 
+static inline int
+gcn_drm_render_validate_textured_triangle_batch(const struct drm_gcn_draw_textured_triangles *args)
+{
+	if (!args || !args->ctx_id || !args->src_handle || !args->dst_handle ||
+	    args->src_handle == args->dst_handle || args->flags ||
+	    !args->triangle_count ||
+	    args->triangle_count > DRM_GCN_MAX_TRIANGLES ||
+	    !args->triangles_ptr || args->state.pad || args->pad ||
+	    args->state.blend_mode != DRM_GCN_BLEND_NONE)
+		return -EINVAL;
+
+	return 0;
+}
+
+static inline int
+gcn_drm_validate_texture_triangle(const struct drm_gcn_texture_vertex vertices[3],
+				  u16 src_width, u16 src_height,
+				  u16 dst_width, u16 dst_height)
+{
+	s64 area;
+	unsigned int i;
+
+	if (!vertices)
+		return -EINVAL;
+
+	for (i = 0; i < 3; i++) {
+		if (vertices[i].x > dst_width || vertices[i].y > dst_height ||
+		    vertices[i].s > src_width || vertices[i].t > src_height)
+			return -EINVAL;
+	}
+
+	area = (s64)(vertices[1].x - vertices[0].x) *
+		(vertices[2].y - vertices[0].y) -
+		(s64)(vertices[2].x - vertices[0].x) *
+		(vertices[1].y - vertices[0].y);
+	return area ? 0 : -EINVAL;
+}
+
 static inline int gcn_drm_validate_z(const struct drm_gcn_color_depth_vertex vertices[3],
 				     u16 dst_width, u16 dst_height,
 				     bool require_opaque)

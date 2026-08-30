@@ -47,6 +47,7 @@ enum drm_gcn_param {
 #define DRM_GCN_FEATURE_DRAW_TRIANGLES_RGB565	(1ULL << 16)
 #define DRM_GCN_FEATURE_DRAW_TRIANGLES_STATE_RGB565	(1ULL << 17)
 #define DRM_GCN_FEATURE_DRAW_TRIANGLES_DEPTH_RGB565	(1ULL << 18)
+#define DRM_GCN_FEATURE_DRAW_TEXTURED_TRIANGLES_RGB565	(1ULL << 19)
 
 struct drm_gcn_get_param {
 	__u32 param;
@@ -372,6 +373,45 @@ struct drm_gcn_draw_triangles_depth {
 	__u64 pad1;
 };
 
+/*
+ * Texture coordinates use texel-edge space. Valid coordinates range from
+ * zero through the corresponding source extent, inclusive. GX applies the
+ * fixed nearest-sampling phase internally; userspace does not encode it.
+ */
+struct drm_gcn_texture_vertex {
+	__u16 x;
+	__u16 y;
+	__u16 s;
+	__u16 t;
+};
+
+struct drm_gcn_texture_triangle {
+	struct drm_gcn_texture_vertex vertices[3];
+};
+
+/*
+ * Draw bounded, unlit RGB565 textured triangles into a distinct tiled RGB565
+ * destination. Sampling is nearest with clamp wrapping and texture colour
+ * replaces raster colour. Only viewport and scissor state are accepted;
+ * blend_mode must be DRM_GCN_BLEND_NONE.
+ */
+struct drm_gcn_draw_textured_triangles {
+	__u32 ctx_id;
+	__u32 src_handle;
+	__u32 dst_handle;
+	/* Optional binary syncobj replaced with the completion fence. */
+	__u32 out_syncobj;
+	/* Must be zero. */
+	__u32 flags;
+	/* Inclusive range 1..DRM_GCN_MAX_TRIANGLES. */
+	__u32 triangle_count;
+	/* Userspace pointer to drm_gcn_texture_triangle[triangle_count]. */
+	__u64 triangles_ptr;
+	struct drm_gcn_draw_state state;
+	/* Must be zero. */
+	__u64 pad;
+};
+
 #define DRM_GCN_GET_PARAM	0x00
 #define DRM_GCN_GEM_CREATE	0x01
 #define DRM_GCN_GEM_MMAP	0x02
@@ -384,7 +424,8 @@ struct drm_gcn_draw_triangles_depth {
 #define DRM_GCN_DRAW_TRIANGLES	0x09
 #define DRM_GCN_DRAW_TRIANGLES_STATE	0x0a
 #define DRM_GCN_DRAW_TRIANGLES_DEPTH	0x0b
-#define DRM_GCN_NUM_IOCTLS	0x0c
+#define DRM_GCN_DRAW_TEXTURED_TRIANGLES	0x0c
+#define DRM_GCN_NUM_IOCTLS	0x0d
 
 #define DRM_IOCTL_GCN_GET_PARAM \
 	DRM_IOWR(DRM_COMMAND_BASE + DRM_GCN_GET_PARAM, \
@@ -420,6 +461,9 @@ struct drm_gcn_draw_triangles_depth {
 #define DRM_IOCTL_GCN_DRAW_TRIANGLES_DEPTH \
 	DRM_IOW(DRM_COMMAND_BASE + DRM_GCN_DRAW_TRIANGLES_DEPTH, \
 		 struct drm_gcn_draw_triangles_depth)
+#define DRM_IOCTL_GCN_DRAW_TEXTURED_TRIANGLES \
+	DRM_IOW(DRM_COMMAND_BASE + DRM_GCN_DRAW_TEXTURED_TRIANGLES, \
+		 struct drm_gcn_draw_textured_triangles)
 
 #if defined(__cplusplus)
 }

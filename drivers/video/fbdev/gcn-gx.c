@@ -520,9 +520,9 @@ static void gx_load_pos_to_tex_mtx0_offset(u16 width, u16 height,
 	 * TEXMTX0 for GX_TG_POS maps object-space quad positions to either
 	 * normalized or texel-space coordinates. The configurable translation
 	 * preserves the same fraction-of-a-texel phase in both forms.
-	 * This avoids the direct TEX0 vertex attribute path,
-	 * which hardware testing shows wedges the downstream pipeline when
-	 * texgen output is enabled.
+	 * Rectangle paths keep position-derived coordinates so their sampling
+	 * phase remains independent of vertex payloads. Semantic textured
+	 * primitives configure the validated direct TEX0 path separately.
 	 */
 	gx_load_xf_regs_n(0x0078, 8);
 	wg_f32_bits(s_scale);  wg_f32_bits(F32_ZERO);
@@ -600,6 +600,14 @@ static u32 gx_direct_center_texcoord_bits(u16 extent)
 	int numerator = extent * 4 + gx_texel_bias_eighths;
 	u16 denominator = gx_use_texel_space ? 8 : extent * 8;
 	u32 bits = f32_div_u16(abs(numerator), denominator);
+
+	return numerator < 0 ? F32_NEG(bits) : bits;
+}
+
+static u32 gx_semantic_texcoord_bits(u16 coordinate, u16 extent)
+{
+	s32 numerator = (u32)coordinate * 8 - 2;
+	u32 bits = f32_div_u32(abs(numerator), (u32)extent * 8);
 
 	return numerator < 0 ? F32_NEG(bits) : bits;
 }
@@ -1671,6 +1679,31 @@ gx_draw_color_depth_triangles(const struct gcn_drm_color_depth_vertex *vertices,
 	for (i = 0; i < vertex_count; i++) {
 		gx_wr8(i);
 		gx_wr8(i);
+	}
+}
+
+static void
+gx_draw_textured_triangles(const struct gcn_drm_texture_vertex *vertices,
+			   unsigned int triangle_count,
+			   u16 texture_width, u16 texture_height)
+{
+	unsigned int vertex_count = triangle_count * 3;
+	unsigned int i;
+
+	gx_wr8(0x90); /* GX_TRIANGLES | vtxfmt 0 */
+	gx_wr16be(vertex_count);
+
+	for (i = 0; i < vertex_count; i++) {
+		wg_f32_bits(f32_from_u16(vertices[i].x));
+		wg_f32_bits(f32_from_u16(vertices[i].y));
+		gx_wr8(0xff);
+		gx_wr8(0xff);
+		gx_wr8(0xff);
+		gx_wr8(0xff);
+		wg_f32_bits(gx_semantic_texcoord_bits(vertices[i].s,
+						      texture_width));
+		wg_f32_bits(gx_semantic_texcoord_bits(vertices[i].t,
+						      texture_height));
 	}
 }
 
@@ -3065,7 +3098,8 @@ static int gcn_gx_drm_mem1_info(struct gcn_drm_mem1_info *info)
 			 DRM_GCN_FEATURE_DRAW_TRIANGLE_RGB565 |
 			 DRM_GCN_FEATURE_DRAW_TRIANGLES_RGB565 |
 			 DRM_GCN_FEATURE_DRAW_TRIANGLES_STATE_RGB565 |
-			 DRM_GCN_FEATURE_DRAW_TRIANGLES_DEPTH_RGB565;
+			 DRM_GCN_FEATURE_DRAW_TRIANGLES_DEPTH_RGB565 |
+			 DRM_GCN_FEATURE_DRAW_TEXTURED_TRIANGLES_RGB565;
 	mutex_unlock(&gx_mem1_lock);
 	return 0;
 }
@@ -3616,6 +3650,109 @@ out_unlock:
 }
 
 static int
+gcn_gx_drm_draw_textured_rgb565(void *src_allocation,
+				void *dst_allocation,
+				u16 src_width, u16 src_height,
+				u16 dst_width, u16 dst_height,
+				const struct gcn_drm_texture_vertex *vertices,
+				u32 triangle_count,
+				const struct gcn_drm_draw_state *state)
+{
+	struct gx_mem1_allocation *src = src_allocation;
+	struct gx_mem1_allocation *dst = dst_allocation;
+	unsigned int vertex_count;
+	u32 finish_count;
+	size_t src_bytes;
+	size_t dst_bytes;
+	long completed;
+	unsigned int i;
+	int ret;
+
+	if (!src || !dst || src == dst || !vertices || !state ||
+	    !triangle_count || triangle_count > DRM_GCN_MAX_TRIANGLES ||
+	    !src_width || !src_height || !dst_width || !dst_height ||
+	    (src_width & 3) || (src_height & 3) ||
+	    (dst_width & 3) || (dst_height & 3) ||
+	    !state->viewport_width || !state->viewport_height ||
+	    state->viewport_x >= dst_width || state->viewport_y >= dst_height ||
+	    state->viewport_width > dst_width - state->viewport_x ||
+	    state->viewport_height > dst_height - state->viewport_y ||
+	    !state->scissor_width || !state->scissor_height ||
+	    state->scissor_x >= dst_width || state->scissor_y >= dst_height ||
+	    state->scissor_width > dst_width - state->scissor_x ||
+	    state->scissor_height > dst_height - state->scissor_y ||
+	    state->blend_mode != DRM_GCN_BLEND_NONE)
+		return -EINVAL;
+
+	vertex_count = triangle_count * 3;
+	for (i = 0; i < vertex_count; i++) {
+		if (vertices[i].x > dst_width || vertices[i].y > dst_height ||
+		    vertices[i].s > src_width || vertices[i].t > src_height)
+			return -EINVAL;
+	}
+	src_bytes = (size_t)src_width * src_height * sizeof(u16);
+	dst_bytes = (size_t)dst_width * dst_height * sizeof(u16);
+	if (src_bytes > src->size || dst_bytes > dst->size)
+		return -E2BIG;
+	if (!READ_ONCE(gx_accel_ready))
+		return -ENODEV;
+
+	mutex_lock(&gx_submit_lock);
+	flush_dcache_range((unsigned long)src->cpu_addr,
+			   (unsigned long)src->cpu_addr + src_bytes);
+	flush_dcache_range((unsigned long)dst->cpu_addr,
+			   (unsigned long)dst->cpu_addr + dst_bytes);
+
+	finish_count = READ_ONCE(gx_pe_finish_count);
+	fifo_pos = 0;
+	gx_load_libogc_init_preamble();
+	gx_setup_display_copy_state();
+
+	/* Restore destination colour before applying the textured primitive. */
+	gx_setup_rgb565_texture_state_mode(dst_width, dst_height, false);
+	gx_setup_texture_rgb565(dst->cpu_addr, dst_width, dst_height);
+	gx_setup_texture_coordinate_scale(dst_width, dst_height, false, false);
+	gx_draw_color_quad(dst_width, dst_height, 0xff, 0xff, 0xff);
+	gx_load_bp_reg(0x45000002);
+	for (i = 0; i < 32; i++)
+		gx_wr8(0);
+
+	/* Direct TEX0 uses normalized texel-edge coordinates with fixed phase. */
+	gx_setup_rgb565_texture_state_mode(dst_width, dst_height, true);
+	gx_setup_texture_rgb565(src->cpu_addr, src_width, src_height);
+	gx_setup_texture_coordinate_scale(src_width, src_height, false, false);
+	gx_set_viewport(state->viewport_x, state->viewport_y,
+			state->viewport_width, state->viewport_height);
+	gx_set_scissor(state->scissor_x, state->scissor_y,
+		       state->scissor_width, state->scissor_height);
+	gx_draw_textured_triangles(vertices, triangle_count,
+				   src_width, src_height);
+	gx_load_bp_reg(0x45000002);
+	for (i = 0; i < 32; i++)
+		gx_wr8(0);
+
+	gx_set_copy_clear_rgb(0x00, 0x00, 0x00);
+	gx_copy_efb_to_rgb565_texture(dst->cpu_addr, dst_width, dst_height, true);
+	ret = gx_submit_cmds("render-draw-textured");
+	if (ret)
+		goto out_unlock;
+
+	completed = gx_wait_for_pe_finishes(finish_count, 1);
+	if (!completed) {
+		pr_warn_ratelimited("gcn-gx: textured triangle batch timed out waiting for final PE finish\n");
+		ret = -ETIMEDOUT;
+		goto out_unlock;
+	}
+
+	invalidate_dcache_range((unsigned long)dst->cpu_addr,
+				(unsigned long)dst->cpu_addr + dst_bytes);
+
+out_unlock:
+	mutex_unlock(&gx_submit_lock);
+	return ret;
+}
+
+static int
 gcn_gx_drm_draw_triangle_rgb565(void *dst_allocation, u16 width, u16 height,
 				const struct gcn_drm_color_vertex vertices[3])
 {
@@ -4095,6 +4232,8 @@ static const struct gcn_drm_accel_ops gcn_gx_drm_accel_ops = {
 	.blit_scaled_system_xrgb8888 = gcn_gx_drm_blit_scaled_system_xrgb8888,
 	.draw_triangles_depth_rgb565 =
 		gcn_gx_drm_draw_depth_rgb565,
+	.draw_textured_triangles_rgb565 =
+		gcn_gx_drm_draw_textured_rgb565,
 };
 #endif
 
@@ -4591,7 +4730,7 @@ static int gcn_gx_probe(struct platform_device *pdev)
 		return ret;
 
 #if IS_ENABLED(CONFIG_DRM_GCN_GX)
-	ret = gcn_drm_register_accel_v3(&gcn_gx_drm_accel_ops);
+	ret = gcn_drm_register_accel_v4(&gcn_gx_drm_accel_ops);
 #else
 	ret = gcnfb_register_accel(&gcn_gx_accel_ops);
 #endif
@@ -4617,7 +4756,7 @@ static void gcn_gx_remove(struct platform_device *pdev)
 	cancel_work_sync(&gx_frame_work.work);
 	gcnfb_unregister_accel(&gcn_gx_accel_ops);
 #else
-	gcn_drm_unregister_accel_v3(&gcn_gx_drm_accel_ops);
+	gcn_drm_unregister_accel_v4(&gcn_gx_drm_accel_ops);
 #endif
 	gcn_gx_exit();
 }

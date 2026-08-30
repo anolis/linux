@@ -50,6 +50,13 @@ int gcn_drm_provider_draw_depth(const struct gcn_drm_accel_ops *provider,
 				u32 triangle_count,
 				const struct gcn_drm_draw_state *state,
 				const struct gcn_drm_depth_state *depth);
+int gcn_drm_provider_draw_textured(const struct gcn_drm_accel_ops *provider,
+				   void *src_allocation, void *dst_allocation,
+				   u16 src_width, u16 src_height,
+				   u16 dst_width, u16 dst_height,
+				   const struct gcn_drm_texture_vertex *vertices,
+				   u32 triangle_count,
+				   const struct gcn_drm_draw_state *state);
 int gcn_drm_provider_blit_rect(const struct gcn_drm_accel_ops *provider,
 			       void *src_allocation, void *dst_allocation,
 			       u16 src_width, u16 src_height, u16 dst_width,

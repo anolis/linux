@@ -1971,6 +1971,176 @@ out:
 		fail("close triangle-batch destination");
 }
 
+static void test_draw_textured_triangles(int fd)
+{
+	const uint16_t sentinel = 0x39e7;
+	struct drm_syncobj_create sync = {};
+	struct drm_syncobj_destroy destroy = {};
+	struct drm_gcn_ctx_create ctx = {};
+	struct drm_gcn_ctx_free free_ctx = {};
+	struct drm_gcn_gem_create src = {};
+	struct drm_gcn_gem_create dst = {};
+	struct drm_gcn_texture_triangle triangles[2] = {
+		{
+			.vertices = {
+				{ 0, 0, 0, 0 },
+				{ TEST_WIDTH, 0, TEST_WIDTH, 0 },
+				{ 0, TEST_HEIGHT, 0, TEST_HEIGHT },
+			},
+		},
+		{
+			.vertices = {
+				{ TEST_WIDTH, 0, TEST_WIDTH, 0 },
+				{ TEST_WIDTH, TEST_HEIGHT,
+				  TEST_WIDTH, TEST_HEIGHT },
+				{ 0, TEST_HEIGHT, 0, TEST_HEIGHT },
+			},
+		},
+	};
+	struct drm_gcn_draw_textured_triangles draw = {
+		.triangle_count = ARRAY_SIZE(triangles),
+		.triangles_ptr = (uintptr_t)triangles,
+		.state = {
+			.viewport_width = TEST_WIDTH,
+			.viewport_height = TEST_HEIGHT,
+			.scissor_x = 16,
+			.scissor_y = 20,
+			.scissor_width = TEST_WIDTH - 32,
+			.scissor_height = TEST_HEIGHT - 40,
+			.blend_mode = DRM_GCN_BLEND_NONE,
+		},
+	};
+	struct drm_syncobj_wait sync_wait = {};
+	uint16_t *src_map = MAP_FAILED;
+	uint16_t *dst_map = MAP_FAILED;
+	unsigned int checked_texture = 0;
+	unsigned int checked_preserved = 0;
+
+	if (create_bo(fd, &src) || create_bo(fd, &dst)) {
+		fail("create textured-triangle objects");
+		goto out;
+	}
+	src_map = map_bo(fd, &src);
+	dst_map = map_bo(fd, &dst);
+	if (src_map == MAP_FAILED || dst_map == MAP_FAILED) {
+		fail("map textured-triangle objects");
+		goto out;
+	}
+	if (ioctl(fd, DRM_IOCTL_GCN_CTX_CREATE, &ctx)) {
+		fail("create textured-triangle context");
+		goto out;
+	}
+	if (ioctl(fd, DRM_IOCTL_SYNCOBJ_CREATE, &sync)) {
+		fail("create textured-triangle syncobj");
+		goto out_ctx;
+	}
+
+	for (unsigned int y = 0; y < TEST_HEIGHT; y++) {
+		for (unsigned int x = 0; x < TEST_WIDTH; x++) {
+			size_t pixel = tiled_rgb565_index(x, y, TEST_WIDTH);
+
+			src_map[pixel] = source_pattern(x, y);
+			dst_map[pixel] = sentinel;
+		}
+	}
+
+	draw.ctx_id = ctx.id;
+	draw.src_handle = src.handle;
+	draw.dst_handle = dst.handle;
+	draw.out_syncobj = sync.handle;
+
+	draw.src_handle = dst.handle;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_TEXTURED_TRIANGLES, &draw) ||
+	    errno != EINVAL)
+		fail("aliased textured draw should return EINVAL");
+	draw.src_handle = src.handle;
+	draw.state.blend_mode = DRM_GCN_BLEND_SRC_ALPHA;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_TEXTURED_TRIANGLES, &draw) ||
+	    errno != EINVAL)
+		fail("blended textured draw should return EINVAL");
+	draw.state.blend_mode = DRM_GCN_BLEND_NONE;
+	triangles[1].vertices[1].s = TEST_WIDTH + 1;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_TEXTURED_TRIANGLES, &draw) ||
+	    errno != EINVAL)
+		fail("out-of-range texture coordinate should return EINVAL");
+	triangles[1].vertices[1].s = TEST_WIDTH;
+	draw.pad = 1;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_TEXTURED_TRIANGLES, &draw) ||
+	    errno != EINVAL)
+		fail("padded textured draw should return EINVAL");
+	draw.pad = 0;
+	draw.triangles_ptr = 1;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_TEXTURED_TRIANGLES, &draw) ||
+	    errno != EFAULT)
+		fail("bad textured-triangle pointer should return EFAULT");
+	draw.triangles_ptr = (uintptr_t)triangles;
+
+	if (ioctl(fd, DRM_IOCTL_GCN_DRAW_TEXTURED_TRIANGLES, &draw)) {
+		fail("draw textured RGB565 triangle batch");
+		goto out_sync;
+	}
+	{
+		uint32_t sync_handle = sync.handle;
+
+		sync_wait.handles = (uintptr_t)&sync_handle;
+		sync_wait.timeout_nsec = (int64_t)(monotonic_ns() +
+							  1000000000ULL);
+		sync_wait.count_handles = 1;
+		if (ioctl(fd, DRM_IOCTL_SYNCOBJ_WAIT, &sync_wait)) {
+			fail("wait for textured-triangle syncobj");
+			goto out_sync;
+		}
+	}
+
+	for (unsigned int y = 0; y < TEST_HEIGHT; y++) {
+		for (unsigned int x = 0; x < TEST_WIDTH; x++) {
+			bool inside = x >= draw.state.scissor_x &&
+				x < draw.state.scissor_x + draw.state.scissor_width &&
+				y >= draw.state.scissor_y &&
+				y < draw.state.scissor_y + draw.state.scissor_height;
+			uint16_t expected = inside ? source_pattern(x, y) : sentinel;
+			size_t pixel = tiled_rgb565_index(x, y, TEST_WIDTH);
+
+			if (inside)
+				checked_texture++;
+			else
+				checked_preserved++;
+			if (dst_map[pixel] != expected) {
+				fprintf(stderr,
+					"FAIL: textured-triangle mismatch at (%u,%u): got=0x%04x expected=0x%04x\n",
+					x, y, dst_map[pixel], expected);
+				failures++;
+				goto out_sync;
+			}
+		}
+	}
+	printf("DRAW: textured batch matched %u sampled and %u preserved RGB565 pixels\n",
+	       checked_texture, checked_preserved);
+
+out_sync:
+	destroy.handle = sync.handle;
+	if (ioctl(fd, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy))
+		fail("destroy textured-triangle syncobj");
+out_ctx:
+	free_ctx.id = ctx.id;
+	if (ioctl(fd, DRM_IOCTL_GCN_CTX_FREE, &free_ctx))
+		fail("free textured-triangle context");
+out:
+	if (dst_map != MAP_FAILED && munmap(dst_map, dst.size))
+		fail("unmap textured-triangle destination");
+	if (src_map != MAP_FAILED && munmap(src_map, src.size))
+		fail("unmap textured-triangle source");
+	if (dst.handle && close_bo(fd, dst.handle))
+		fail("close textured-triangle destination");
+	if (src.handle && close_bo(fd, src.handle))
+		fail("close textured-triangle source");
+}
+
 static void test_wide_scaled_blit(int fd)
 {
 	struct drm_gcn_ctx_create ctx = {};
@@ -2661,6 +2831,11 @@ int main(int argc, char **argv)
 		else
 			fail_value("depth triangle-batch render feature", features,
 				   DRM_GCN_FEATURE_DRAW_TRIANGLES_DEPTH_RGB565);
+		if (features & DRM_GCN_FEATURE_DRAW_TEXTURED_TRIANGLES_RGB565)
+			test_draw_textured_triangles(fd);
+		else
+			fail_value("textured triangle-batch render feature", features,
+				   DRM_GCN_FEATURE_DRAW_TEXTURED_TRIANGLES_RGB565);
 		if (features & DRM_GCN_FEATURE_BLIT_SCALED_RGB565)
 			test_wide_scaled_blit(fd);
 		if (features & DRM_GCN_FEATURE_BLIT_SCALED_RGB565)
@@ -2675,13 +2850,13 @@ int main(int argc, char **argv)
 		     DRM_GCN_FEATURE_BLIT_SCALED_SYSTEM_XRGB8888_TO_RGB565)) {
 			test_full_scaled_system_blit(fd);
 			test_full_xrgb8888_to_rgb565_system_blit(fd);
-		}
-		else
+		} else {
 			fail_value("system-memory scaled features", features,
 				   DRM_GCN_FEATURE_SYSTEM_GEM |
 				   DRM_GCN_FEATURE_BLIT_SCALED_SYSTEM_RGB565 |
 				   DRM_GCN_FEATURE_SYSTEM_GEM_LINEAR |
 				   DRM_GCN_FEATURE_BLIT_SCALED_SYSTEM_XRGB8888_TO_RGB565);
+		}
 	}
 
 	close(other_fd);
