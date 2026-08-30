@@ -13145,3 +13145,28 @@ depth observations until the CPU access path is corrected.
 Host validation passed `git diff --check`, patch-level strict checkpatch with
 zero errors, warnings, or checks, and focused PowerPC `W=1` module compilation
 with `-j16`.
+
+Hardware result for candidate `06ff8b4c5`: diagnostic partially accepted on
+boot ID `074d4013-5533-4058-8874-379fcf893a01`. All four pre-draw coordinates
+returned the same transformed clear value `0xc00000`, ruling out a simple
+region, line, or field-boundary artifact. The CPU poke requested `0x123456`
+but read back `0x800000`; this is not a valid poke positive control because the
+driver never initialized the separate PE poke-Z mode that libogc sets to
+enabled/`ALWAYS`/write-enabled.
+
+The diagnostic also exposed a more immediate synchronization gap. The first
+stream contains the copy helper's BP `0x45` finish request, but
+`gx_submit_cmds()` waits only for its appended token value. A token can be
+parsed while the asynchronous copy-clear is still completing. The next
+candidate must additionally wait for one PE finish relative to the pre-submit
+`finish_count` before any EFB peek. Keep the distinctive clear and all four
+samples; defer poke interpretation until its PE mode is initialized.
+
+One unrelated transient XRGB8888 scaler sample differed. The provider unloaded
+normally and restored CPU scanout, with no timeout, fallback, oops, panic,
+machine check, or reboot. The complete transcript is
+`/tmp/wii-depth-access-controls-cycle-output.txt`, SHA-256
+`d0c85f96f700defe9ddd69155bc78dd9a8f0f82ecc66c544a1060cead0480d59`.
+The full kernel log is `/tmp/wii-dmesg-depth-access-controls-074d4013.txt`,
+SHA-256
+`35f6a12b13657ea5ec7cc1f458e67e8219327a4415813732bff457b55ed2a0ed`.
