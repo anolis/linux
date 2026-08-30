@@ -3543,15 +3543,20 @@ static int gcn_gx_drm_draw_depth_rgb565(void *dst_allocation, u16 width,
 					const struct gcn_drm_draw_state *state,
 					const struct gcn_drm_depth_state *depth)
 {
+	static const u32 poke_values[] = {
+		0x000000, 0x000001, 0x123456, 0x3fffff, 0x400000,
+		0x7fffff, 0x800000, 0xbfffff, 0xfffffe,
+	};
 	struct gx_mem1_allocation *dst = dst_allocation;
 	u32 finish_count;
 	u32 peek_depth[4];
-	u32 poke_depth;
+	u32 poke_depth[ARRAY_SIZE(poke_values)];
 	u16 poke_mode;
 	size_t bytes;
 	long completed;
 	unsigned int vertex_count;
 	unsigned int i;
+	unsigned int j;
 	int ret;
 
 	if (!dst || !vertices || !state || !depth || !triangle_count ||
@@ -3625,18 +3630,23 @@ static int gcn_gx_drm_draw_depth_rgb565(void *dst_allocation, u16 width,
 			GX_RASTER_DEPTH_MAX, peek_depth[0], peek_depth[1],
 			peek_depth[2], peek_depth[3]);
 
-		/* Literal result of libogc GX_PokeZMode(TRUE, ALWAYS, TRUE). */
-		pe_write(0, 0x0010);
+		/* PE Z compare enabled, GX_ALWAYS, depth update enabled. */
+		pe_write(0, 0x001f);
 		poke_mode = pe_read(0);
-		ret = gx_poke_efb_depth(34, 34, 0x00123456);
-		if (!ret)
-			ret = gx_peek_efb_depth(34, 34, &poke_depth);
-		if (ret) {
-			pr_warn("gcn-gx: failed EFB depth poke/read: %d\n", ret);
-			goto out_unlock;
+		for (j = 0; j < ARRAY_SIZE(poke_values); j++) {
+			ret = gx_poke_efb_depth(34, 34, poke_values[j]);
+			if (!ret)
+				ret = gx_peek_efb_depth(34, 34, &poke_depth[j]);
+			if (ret) {
+				pr_warn("gcn-gx: failed EFB depth poke/read %u: %d\n",
+					j, ret);
+				goto out_unlock;
+			}
 		}
-		pr_info("gcn-gx: depth-poke mode=%04x requested=123456 efb=%06x\n",
-			poke_mode, poke_depth);
+		pr_info("gcn-gx: depth-poke-map mode=%04x 000000=%06x 000001=%06x 123456=%06x 3fffff=%06x 400000=%06x 7fffff=%06x 800000=%06x bfffff=%06x fffffe=%06x\n",
+			poke_mode, poke_depth[0], poke_depth[1], poke_depth[2],
+			poke_depth[3], poke_depth[4], poke_depth[5], poke_depth[6],
+			poke_depth[7], poke_depth[8]);
 
 		finish_count = READ_ONCE(gx_pe_finish_count);
 		fifo_pos = 0;
