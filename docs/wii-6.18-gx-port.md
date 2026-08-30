@@ -13448,3 +13448,34 @@ comparator-domain encoding.
 Host validation passed `git diff --check`, patch-level strict checkpatch with
 zero errors, warnings, or checks, and focused PowerPC `W=1` module compilation
 with `-j16`.
+
+Hardware result for candidate `c47f91ed6`: mandatory clear completion is
+accepted and the semantic far value is identified on boot ID
+`074d4013-5533-4058-8874-379fcf893a01`. At default `0x800000`, endpoint
+`GEQUAL` changed from green to red exactly as predicted, proving that the
+comparator now observes the configured clear. The `GREATER` and
+no-write-`LESS` controls also changed in the direction required by a real
+half-range clear.
+
+A 22-value fenced sweep then found one exact value: `depth_clear=0xfffffe`
+passed every depth case, including endpoint `EQUAL`, `GEQUAL`, painter order,
+all compare functions, and disabled writes. `0xfffff0` still failed only
+endpoint equality; `0xffffff` failed endpoint equality and `GEQUAL`. The
+largest rasterized UAPI depth therefore compares exactly equal to BP `0x51`
+clear `0xfffffe`, one integer below the nominal 24-bit maximum.
+
+Three immediate `0xfffffe` repeats passed every depth case. Two passed the
+entire render-UAPI suite; one had only a separately tracked transient
+full-screen scaler sample. No run had a PE/FIFO timeout, fallback, oops,
+panic, machine check, or reboot. The fenced sweep summary is
+`/tmp/wii-depth-clear-fenced-sweep-summary.txt`, SHA-256
+`44be4662677ed6e3ac3c7aca829c0838234f66f12ed000ab02363fa77692a19e`.
+The repeat summary is `/tmp/wii-depth-fffffe-repeat-summary.txt`, SHA-256
+`d9b43f79ea15f016dc43f59d16910eddda7c84f9c8b49bf6ea93ff48401070fe`.
+The post-validation kernel log is
+`/tmp/wii-dmesg-depth-clear-fenced-sweep.txt`, SHA-256
+`773b9dec4e6cd3479597bac06d07f02b353a7ef3bb00c3289e499715b804ec05`.
+
+Promote `0xfffffe` to the fixed production semantic far clear and remove the
+diagnostic module parameter. Keep the mandatory PE finish between clear and
+raster work; it is required for the clear value to affect comparisons.
