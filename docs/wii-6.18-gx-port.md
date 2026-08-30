@@ -13590,3 +13590,40 @@ and a clean candidate interval with no PE/FIFO timeout, fallback, oops, panic,
 machine check, reboot, capacity leak, stale destination pixel, or display
 corruption. A strict mismatch is a rejected candidate and must not be hidden by
 weakening the exact oracle.
+
+Hardware result for candidate `61a4db7bb`: accepted on boot ID
+`0c340dec-63e2-4025-9d17-7b2664eff334`. Live `/proc/kallsyms` exposed only the
+v4 registration symbols, and the installed boot image matched the pinned
+`4a2f8b79...` SHA-256 before the provider was loaded. The direct-TEX0 textured
+batch passed its complete exact oracle in all four invocations: every one of
+48,384 scissored pixels matched the coordinate-derived source texel and all
+17,152 exterior pixels preserved the destination sentinel. Alias, blend,
+coordinate, padding, and bad-pointer controls returned their required errors.
+
+The first and final invocations passed the complete render-UAPI suite. Every
+retained allocator, mapping, context, syncobj, copy, fill, rectangle, overlap,
+scale, colour/state/depth draw, system-object, and XRGB8888 case passed; both
+ended with `PASS: GCN render UAPI`. The saved final transcript is
+`/tmp/wii-textured-triangles-final-output.txt`, SHA-256
+`24708df9708ac5f298624dacb1fa5c9aa8460c5fd7107febd013292eb1fbac9a`.
+
+Two checksum-identical controls between those passes each retained one
+previously tracked transient sample outside the new operation. The first found
+a full-screen system-scale pixel at `(303,356)` equal to `0xdf13` rather than
+`0xdf17`; the second found an XRGB8888 sample at `(302,108)` equal to `0x28d8`
+rather than `0x28f8`. Their transcripts are
+`/tmp/wii-textured-triangles-cycle-output.txt`, SHA-256
+`e5b820e3688f1a1f7c4bebab1fac246a7552736f8f1a5b7730af7e86d086704a`, and
+`/tmp/wii-textured-triangles-repeat-output.txt`, SHA-256
+`b83cc085313dca3c7474bf2720ef008bac6178511d41e9f73738aeb1c7dd7818`.
+Both controls still passed all 65,536 textured-draw pixels exactly. Neither
+mismatch reproduced in the final complete pass, so they remain attributed to
+the separately tracked intermittent scale/conversion issue rather than this
+additive textured-triangle ABI.
+
+All four provider intervals registered and unregistered normally, selected
+native GX chroma order, restored native CPU chroma order, and left the CPU
+console live. No interval contains a PE/FIFO timeout, fallback, oops, panic,
+machine check, or reboot. The complete post-test kernel log is
+`/tmp/wii-dmesg-textured-triangles.txt`, SHA-256
+`951b831e486848637117135ad5bdff79a537103a82835f706393005ebed56d64`.
