@@ -13320,3 +13320,29 @@ machine check, or reboot. Its client transcript is
 The pre-unload kernel log is
 `/tmp/wii-dmesg-depth-literal-libogc-repeat.txt`, SHA-256
 `faea6f9eff709d0d320e387d223a830531d089648b6b80c3d1b97e2adb15c82d`.
+
+#### Field-correct CPU depth-poke transfer map
+
+- Candidate commit: `f8562aeb5`
+- unchanged accepted `zImage` SHA-256:
+  `182d747be50d6e6fea0d757821a9c713cb8835f2d2b469b7f2683d8237aecf96`
+- `gcn-gx.ko` SHA-256:
+  `19348a9c7c44053fc01b2fcb18ff6d78a002348d499f0cdb9273c58680cd200b`
+- unchanged all-mode `wii-gcn-render-test` SHA-256:
+  `7d1162b3dfb587b02971aafe8e9b422dc8eadb12501a01081a047ccc15072b3f`
+
+Restore field-correct PE Z configuration `0x001f`. At the same fenced interior
+pixel, immediately write and read back `0x000000`, `0x000001`, `0x123456`,
+`0x3fffff`, `0x400000`, `0x7fffff`, `0x800000`, `0xbfffff`, and `0xfffffe`.
+Keep the clear, four pre-poke samples, geometry, and all depth comparisons
+unchanged.
+
+Exact readback of every value validates the aperture and identifies the old
+single-value result as incidental. A monotonic but transformed map exposes
+quantization or sample resolution. Constant, thresholded, or non-monotonic
+results show that CPU poke/peek cannot be treated as raw Z24 and provide the
+bit boundaries needed for the next isolated test.
+
+Host validation passed `git diff --check`, patch-level strict checkpatch with
+zero errors, warnings, or checks, and focused PowerPC `W=1` module compilation
+with `-j16`.
