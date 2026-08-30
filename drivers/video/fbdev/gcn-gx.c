@@ -2012,6 +2012,20 @@ static int gx_peek_efb_depth(u16 x, u16 y, u32 *depth)
 	return 0;
 }
 
+static int gx_poke_efb_depth(u16 x, u16 y, u32 depth)
+{
+	phys_addr_t phys = 0x08000000 | ((u32)x << 2) | ((u32)y << 12) |
+			   BIT(22);
+	void __iomem *poke;
+
+	poke = ioremap(phys, sizeof(u32));
+	if (!poke)
+		return -ENOMEM;
+	iowrite32be(depth & 0x00ffffff, poke);
+	iounmap(poke);
+	return 0;
+}
+
 static void __maybe_unused gcn_gx_copy_efb_to_xfb(u32 xfb_phys, u16 width,
 						  u16 height)
 {
@@ -3531,7 +3545,8 @@ static int gcn_gx_drm_draw_depth_rgb565(void *dst_allocation, u16 width,
 {
 	struct gx_mem1_allocation *dst = dst_allocation;
 	u32 finish_count;
-	u32 peek_depth;
+	u32 peek_depth[4];
+	u32 poke_depth;
 	size_t bytes;
 	long completed;
 	unsigned int vertex_count;
@@ -3588,13 +3603,30 @@ static int gcn_gx_drm_draw_depth_rgb565(void *dst_allocation, u16 width,
 		ret = gx_submit_cmds("render-depth-clear-peek");
 		if (ret)
 			goto out_unlock;
-		ret = gx_peek_efb_depth(34, 34, &peek_depth);
+		ret = gx_peek_efb_depth(34, 34, &peek_depth[0]);
+		if (!ret)
+			ret = gx_peek_efb_depth(35, 34, &peek_depth[1]);
+		if (!ret)
+			ret = gx_peek_efb_depth(34, 35, &peek_depth[2]);
+		if (!ret)
+			ret = gx_peek_efb_depth(100, 100, &peek_depth[3]);
 		if (ret) {
 			pr_warn("gcn-gx: failed to map EFB depth peek: %d\n", ret);
 			goto out_unlock;
 		}
-		pr_info("gcn-gx: depth-clear peek requested=%06x efb=%06x\n",
-			GX_RASTER_DEPTH_MAX, peek_depth);
+		pr_info("gcn-gx: depth-clear samples requested=%06x p3434=%06x p3534=%06x p3435=%06x p100100=%06x\n",
+			GX_RASTER_DEPTH_MAX, peek_depth[0], peek_depth[1],
+			peek_depth[2], peek_depth[3]);
+
+		ret = gx_poke_efb_depth(34, 34, 0x00123456);
+		if (!ret)
+			ret = gx_peek_efb_depth(34, 34, &poke_depth);
+		if (ret) {
+			pr_warn("gcn-gx: failed EFB depth poke/read: %d\n", ret);
+			goto out_unlock;
+		}
+		pr_info("gcn-gx: depth-poke requested=123456 efb=%06x\n",
+			poke_depth);
 
 		finish_count = READ_ONCE(gx_pe_finish_count);
 		fifo_pos = 0;
