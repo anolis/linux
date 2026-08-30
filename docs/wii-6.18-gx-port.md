@@ -13505,3 +13505,23 @@ result.
 Host validation passed `git diff --check`, patch-level strict checkpatch with
 zero errors, warnings, or checks, and focused PowerPC `W=1` module compilation
 with `-j16`.
+
+Hardware result for candidate `dfa78b08c`: accepted on boot ID
+`074d4013-5533-4058-8874-379fcf893a01`. The production-shaped module, with
+fixed `0xfffffe` semantic far clear, mandatory PE completion fence, and no
+diagnostic depth parameter or CPU EFB access, passed the complete render UAPI
+suite.
+
+All depth behavior passed byte-exact client validation: painter ordering,
+disabled depth testing, `NEVER`, `EQUAL`, `LEQUAL`, `GREATER`, `NEQUAL`,
+`GEQUAL`, `ALWAYS`, disabled depth writes, and both maximum-depth endpoint
+cases. MEM1 exhaustion/reuse, submit/copy/fill/blit, overlap and alias handling,
+the complete nearest-scale matrix, stateful drawing, system-memory paths, and
+XRGB8888 conversion also passed without a transient mismatch.
+
+The module loaded and unloaded normally and CPU scanout was restored. There
+was no PE/FIFO timeout, fallback, oops, panic, machine check, or reboot. The
+complete transcript is `/tmp/wii-depth-production-cycle-output.txt`, SHA-256
+`dcbad2a773a14b1ef053f3aecb96a034c69e4f1f467b15923de63d5621a541d6`.
+The full kernel log is `/tmp/wii-dmesg-depth-production.txt`, SHA-256
+`2d23e30f031acd7c410bb3fe6a1679e4b9ed743a851172c7b3f8323b5e62b512`.
