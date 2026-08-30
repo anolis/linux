@@ -13195,3 +13195,23 @@ clear samples.
 Host validation passed `git diff --check`, patch-level strict checkpatch with
 zero errors, warnings, or checks, and focused PowerPC `W=1` module compilation
 with `-j16`.
+
+Hardware result for candidate `b83866018`: synchronization hypothesis rejected
+on boot ID `074d4013-5533-4058-8874-379fcf893a01`. The relative BP `0x45`
+finish completed without timeout, but all four pre-draw samples remained
+exactly `0xc00000`. The unconfigured CPU poke again read `0x800000` after
+requesting `0x123456`. The transformed clear is stable after both token and
+finish completion.
+
+The next isolated candidate should retain this finished-clear sequence and set
+PE register 0 to `0x001f` immediately before the CPU poke, matching libogc
+`GX_PokeZMode(GX_TRUE, GX_ALWAYS, GX_TRUE)`. An exact `0x123456` readback then
+validates CPU EFB depth access; any other value requires correcting the MMIO
+access path before further interpreting peeks.
+
+The provider unloaded normally and restored CPU scanout, with no timeout,
+fallback, oops, panic, machine check, or reboot. The complete transcript is
+`/tmp/wii-depth-pe-finish-cycle-output.txt`, SHA-256
+`959a8e1bfa27244c9997701931f80652dd57467d93c2f4e925919ac9cfc1c6e8`.
+The full kernel log is `/tmp/wii-dmesg-depth-pe-finish-074d4013.txt`, SHA-256
+`650ccdb70f4036e023cf665485a90a6fc31dbf25268bbafb838fcde3760ceb7a`.
