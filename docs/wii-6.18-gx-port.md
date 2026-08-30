@@ -13371,3 +13371,28 @@ reboot. Its client transcript is `/tmp/wii-depth-poke-map-client.txt`, SHA-256
 `bffd744a2eba55bb37d712fba06f7345077c50017d7406dc6361ec5b5efd1faa`.
 The pre-unload kernel log is `/tmp/wii-dmesg-depth-poke-map.txt`, SHA-256
 `5b96b1da65bcc231dbc5d2138f3b598f9883a83531ad4e0658df6a2015692dcf`.
+
+#### Comparator-oracle depth-clear sweep
+
+- Candidate commit: `b53e66b93`
+- unchanged accepted `zImage` SHA-256:
+  `182d747be50d6e6fea0d757821a9c713cb8835f2d2b469b7f2683d8237aecf96`
+- `gcn-gx.ko` SHA-256:
+  `e04a36cbf8844cd942ca4e3b78a734e2f2248f3039694899228357f958254bde`
+- unchanged all-mode `wii-gcn-render-test` SHA-256:
+  `7d1162b3dfb587b02971aafe8e9b422dc8eadb12501a01081a047ccc15072b3f`
+
+Remove all CPU EFB depth accesses and restore one-stream depth rendering. Add
+the bounded read-only module parameter `depth_clear`, defaulting to the current
+`0x800000`, and use it only as the BP `0x51` copy-clear payload. Module load
+rejects values greater than `0xffffff`.
+
+Automatically sweep representative 24-bit values with the same module and
+client checksum. Endpoint `GEQUAL` changing from green to red locates where the
+largest representable raster depth crosses the clear value. Endpoint `EQUAL`
+turning red identifies an exact comparator-domain match. All retained depth,
+draw, copy, scaling, and XRGB8888 cases remain controls for each load.
+
+Host validation passed `git diff --check`, patch-level strict checkpatch with
+zero errors, warnings, or checks, and focused PowerPC `W=1` module compilation
+with `-j16`.
