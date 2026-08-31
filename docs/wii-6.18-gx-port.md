@@ -13825,3 +13825,71 @@ retained at
 `gcn-gx.ko.backup.13509abf2b90a30ea04088c44ed2c3146b342b129f5c2d881365fc27187561d8`
 with that exact SHA-256, so the installed provider and booted v6 core agree
 while the previous accepted provider remains recoverable.
+
+#### Bounded indexed RGB565 textured triangles with depth
+
+- Candidate commit: `23650e2a1`
+- `zImage` / `dtbImage.wii` SHA-256:
+  `4171f7149f41ccb0aaefc56b63fe5470f1ad46c25d97782816fe0df662c523ca`
+- `gcn-gx.ko` SHA-256:
+  `ccdd98ebcffe08ed25841f31b7e9893302dbc3bab9e6f0829209f1a3fcc14a18`
+- static `wii-gcn-render-test` SHA-256:
+  `d8a34599dcf64251e4f7fbe219cd87760a5c4573e6c15052d419098c1ddad95a`
+- focused KUnit JSON SHA-256:
+  `cac8c4813e9d907629d09026c363590d7f8b40c96f30285d728487656f713a07`
+
+Combine the independently accepted v6 indexed-texture transport and semantic
+depth path in one bounded Gallium-oriented operation. The feature-gated ioctl
+accepts up to 192 shared semantic XYZ/ST vertices, 64 triangles referenced by
+unsigned 16-bit indices, distinct tiled MEM1 RGB565 source and destination
+objects, semantic viewport/scissor and depth state, and an optional output
+syncobj. Texture sampling remains fixed to nearest and clamp, and blending is
+rejected. No raw GX packet, register, address, copy target, or unbounded count
+crosses the UAPI.
+
+The DRM core copies both userspace arrays before execution, validates every
+XY, U24 depth, ST coordinate, and index, resolves every triangle to reject
+degenerate geometry, converts the bounded indices to index8, locks both
+reservations, and records source-read and destination-write fences. The
+private core/provider ABI advances from v6 to v7 by appending one callback.
+The provider uploads each shared XYZ and ST element once alongside a constant
+white color, flushes the private MEM1 arrays, invalidates the GX vertex cache,
+binds indexed8 POS, CLR0, and TEX0 arrays, and emits each validated index for
+all three attributes.
+
+Depth initialization retains the accepted two-submission sequence. The first
+fenced submission uses the copy engine to initialize EFB depth to far. The
+second restores destination color, applies semantic viewport/scissor and
+depth state, renders the indexed textured stream, and copies EFB color back to
+the destination before the final PE-finish wait and cache invalidation.
+
+The strict client fills the left source half with exact RGB565 red and the
+right half with exact RGB565 blue. A near shared quad samples red and is
+submitted first; an overlapping far shared quad samples blue and is submitted
+second. With `LESS` depth and writes enabled, exactly 44,928 scissored pixels
+must remain red and all 20,608 exterior pixels must preserve the destination
+sentinel. The depth-disabled painter-order control must instead make all
+44,928 scissored pixels blue. This pair proves combined index transport,
+texture lookup, depth rejection, painter order, and scissor preservation.
+
+Aliased objects, blending, an out-of-range index, resolved degenerate
+geometry, out-of-range depth and texture coordinates, malformed depth booleans
+or compare mode, depth/request padding, and invalid vertex and index pointers
+must all return their specified errors before either valid draw.
+
+Host validation passed `git diff --check`, strict patch checkpatch with zero
+errors, warnings, or checks across 1,082 lines, warning-free PowerPC
+`modules zImage -j16`, and static-client compilation. Focused KUnit passed all
+23 tests: three `gcn_gx_mem1` tests and 20 `gcn_drm_render` tests, including
+the new fixed UAPI layouts and indexed-texture-depth validation case. Static
+symbols confirm that the provider imports only v7 registration and the
+matching kernel exports v7 registration and the combined provider dispatch.
+
+Boot the matching v7 kernel before loading the provider. Hardware acceptance
+requires both exact depth and painter-order pixel oracles in at least two
+checksum-identical invocations, every malformed-input control, the complete
+retained render-UAPI suite, normal provider unload and CPU-console restoration,
+and no PE/FIFO timeout, fallback, oops, panic, machine check, reboot, capacity
+leak, stale pixel, or display corruption. Preserve any separately tracked
+one-sample scaler/conversion transient and require an immediate unchanged
+repeat without weakening the new or any retained exact oracle.
