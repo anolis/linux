@@ -13926,3 +13926,13 @@ post-test kernel log is `/tmp/wii-dmesg-indexed-textured-depth.txt`, SHA-256
 It retains the known boot-time PowerPC coherent-DMA alignment warning at
 `0.91s`; that warning occurred more than 101 seconds before the first provider
 load and is outside both candidate intervals.
+
+After acceptance, the checksum-identical v7 module was installed at
+`/lib/modules/6.18.40-wii+/kernel/drivers/video/fbdev/gcn-gx.ko` and `depmod`
+completed. Its installed SHA-256 is the pinned `ccdd98eb...` value above and
+its vermagic is `6.18.40-wii+ preempt mod_unload`. The accepted v6 module is
+retained at
+`gcn-gx.ko.backup.5f7c242d0dc33b5570548d7f1fe38da27b9fb627f478a7c26a26a9b12e97c0f6`
+with that exact SHA-256, so the installed provider and booted v7 core agree
+while the previous accepted provider remains recoverable. The provider was
+left unloaded after installation.
