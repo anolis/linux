@@ -13728,3 +13728,62 @@ retained at
 `gcn-gx.ko.backup.2b031a8f764f0398b5aab9fef4821ee37125383bfdc98081e2dcea48d36d0f31`
 with that exact SHA-256, so the installed provider and booted v5 core agree
 while the prior accepted provider remains recoverable.
+
+#### Bounded indexed RGB565 textured triangles
+
+- Candidate commit: `91c98417c`
+- `zImage` / `dtbImage.wii` SHA-256:
+  `2cac4410b733d3d92aab3e980d82ddf13c0b0c72101bc048590591bf99f216bb`
+- `gcn-gx.ko` SHA-256:
+  `5f7c242d0dc33b5570548d7f1fe38da27b9fb627f478a7c26a26a9b12e97c0f6`
+- static `wii-gcn-render-test` SHA-256:
+  `8703d694b347857c947f8e6aa20912a82be3670afe5f257be34a49a49119893d`
+- focused KUnit JSON SHA-256:
+  `395b7c389677237c5798916f9c58081a51310967d101a9a01660b38f43bb4c2c`
+
+Combine the independently accepted indexed-vertex and RGB565-texture paths in
+one bounded Gallium-oriented operation. The feature-gated ioctl accepts up to
+192 shared semantic XY/ST vertices, 64 triangles referenced by unsigned
+16-bit indices, a distinct tiled MEM1 RGB565 source and destination, semantic
+viewport/scissor state, and an optional output syncobj. Sampling remains fixed
+to nearest and clamp, texture colour replaces raster colour, and blending is
+rejected. No raw GX packet, register, address, copy target, or unbounded count
+crosses the UAPI.
+
+The DRM core copies both arrays before object execution, validates every
+vertex and index, resolves every triangle to reject degenerate geometry,
+converts the bounded indices to index8, locks both reservations, and records
+source-read and destination-write fences. The private core/provider ABI moves
+from v5 to v6 by appending one callback. The provider uploads each unique
+position, constant-white raster colour, and texture coordinate once, flushes
+the private MEM1 arrays, issues `GX_InvVtxCache`, binds indexed8 POS, CLR0, and
+TEX0 arrays, and emits each validated index for all three attributes through
+the accepted textured render and EFB copyback sequence.
+
+The strict client deliberately leaves vertex zero, at a conflicting valid
+position and texture coordinate, unreferenced. Indices `1,2,3,1,3,4` form a
+shared-vertex full-surface quad. A 208 by 200 scissor requires exactly 41,600
+pixels to match their coordinate-derived RGB565 source texels and all 23,936
+exterior pixels to preserve the destination sentinel. This exact oracle fails
+if indices are ignored, flattened, or applied to only a subset of attributes.
+Aliased objects, blending, an out-of-range index, resolved degenerate geometry,
+an out-of-range texture coordinate, both padding fields, and invalid vertex
+and index pointers must return their specified errors before the valid draw.
+
+Host validation passed `git diff --check`, strict patch checkpatch with zero
+errors, warnings, or checks across 906 lines, warning-enabled compilation of
+all changed PowerPC objects, static-client compilation with
+`-Wall -Wextra -Werror`, and a complete PowerPC `modules zImage -j16` build.
+Focused KUnit passed all 22 tests: three `gcn_gx_mem1` tests and 19
+`gcn_drm_render` tests, including the new layout and indexed-texture validation
+case. Static symbols confirm that the provider imports only v6 registration
+and the matching kernel exports only v6 registration.
+
+Boot the matching v6 kernel before loading the provider. Hardware acceptance
+requires the exact indexed-texture pixel and malformed-input oracles in at
+least two checksum-identical invocations, the complete retained render-UAPI
+suite, normal provider unload and CPU-console restoration, and no PE/FIFO
+timeout, fallback, oops, panic, machine check, reboot, capacity leak, stale
+pixel, or display corruption. Preserve any separately tracked one-sample
+scaler/conversion transient and require an immediate unchanged repeat; never
+weaken the new or any retained exact oracle.
