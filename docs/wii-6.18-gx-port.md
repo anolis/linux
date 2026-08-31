@@ -13719,3 +13719,12 @@ oops, panic, machine check, or reboot. The complete post-test kernel log is
 It retains the known boot-time PowerPC coherent-DMA alignment warning at
 `0.91s`; that warning occurred roughly 488 seconds before the first provider
 load and is not part of either candidate interval.
+
+After acceptance, the checksum-identical v5 module was installed at
+`/lib/modules/6.18.40-wii+/kernel/drivers/video/fbdev/gcn-gx.ko` and `depmod`
+completed. Its installed SHA-256 is the pinned `13509abf...` value above and
+its vermagic is `6.18.40-wii+ preempt mod_unload`. The accepted v4 module is
+retained at
+`gcn-gx.ko.backup.2b031a8f764f0398b5aab9fef4821ee37125383bfdc98081e2dcea48d36d0f31`
+with that exact SHA-256, so the installed provider and booted v5 core agree
+while the prior accepted provider remains recoverable.
