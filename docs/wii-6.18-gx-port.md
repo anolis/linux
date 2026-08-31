@@ -13635,3 +13635,56 @@ previous module remains at
 `gcn-gx.ko.backup.86f4e92e516ebd8b255d07a968167073969a89a332459b60ef17177712dde702`
 with that exact SHA-256, so the rootfs and booted v4 core now agree while the
 prior provider remains recoverable.
+
+#### Bounded indexed RGB565 color triangles
+
+- Candidate commit: `ccd821dc8`
+- `zImage` / `dtbImage.wii` SHA-256:
+  `2be82c097e373acee82d09509f7fa10017e11c4f624496b3ef3c6a41ff188cc1`
+- `gcn-gx.ko` SHA-256:
+  `13509abf2b90a30ea04088c44ed2c3146b342b129f5c2d881365fc27187561d8`
+- static `wii-gcn-render-test` SHA-256:
+  `a8aeb21b6b0d59135a072b8f7f6c64f875a4887c7ba0847e957e7354da9caad7`
+- focused KUnit JSON SHA-256:
+  `9cadb1bf1fe1be93db24dffa1fde60c991dafa029e2bff99b4e3b2a0fb6cd77d`
+
+Add the next bounded Gallium-oriented operation: up to 192 semantic RGBA8 XY
+vertices and 64 triangles referenced by unsigned 16-bit userspace indices.
+The DRM core copies both arrays before execution, validates every vertex and
+index, resolves each triangle to reject degenerate geometry, applies the
+accepted viewport/scissor and source-alpha state, locks the destination, and
+publishes its completion fence and optional syncobj. No raw GX state, address,
+packet, copy target, or unbounded count crosses the UAPI.
+
+The private provider ABI advances to v5. The GX provider converts validated
+indices to index8, uploads each unique position and color once into its private
+MEM1 workspace, flushes the arrays, invalidates the vertex cache, binds indexed
+POS and CLR0 arrays, and emits index pairs through one `GX_TRIANGLES` stream.
+Destination restore, semantic state, EFB copyback, token ordering, finish wait,
+and cache ownership remain the accepted production paths.
+
+The strict client uses five vertices but deliberately leaves vertex zero, a
+blue vertex at the origin, unreferenced. Indices `1,2,3,1,3,4` form a red
+rectangle from four shared vertices. Acceptance requires 32,336 pixels safely
+inside the rectangle to equal exact RGB565 red and 30,256 pixels safely outside
+to preserve exact RGB565 green. This fails if the implementation ignores or
+silently flattens indices. An out-of-range index, a degenerate indexed
+triangle, nonzero padding, and invalid vertex and index pointers must return
+their specified errors before the valid draw.
+
+Host validation passed `git diff --check`, strict patch checkpatch with zero
+errors, warnings, or checks across 828 lines, warning-enabled compilation of
+all changed PowerPC objects, static-client compilation with
+`-Wall -Wextra -Werror`, and a complete PowerPC `modules zImage -j16` build.
+Focused KUnit passed all 21 tests: three `gcn_gx_mem1` tests and 18
+`gcn_drm_render` tests, including the new layout and indexed-validation case.
+Static symbols confirm that the module imports only v5 registration and the
+matching kernel exports only v5 registration.
+
+Boot the matching v5 kernel before loading the provider. Hardware acceptance
+requires the exact indexed pixel and malformed-input oracles, the complete
+retained render-UAPI suite, normal provider unload and CPU-console restoration,
+and no PE/FIFO timeout, fallback, oops, panic, machine check, reboot, capacity
+leak, stale pixel, or display corruption. Preserve any separately tracked
+one-sample scaler transient and require an immediate unchanged repeat; do not
+weaken either the indexed or existing exact oracles.
