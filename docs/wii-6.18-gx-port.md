@@ -13812,7 +13812,16 @@ GX chroma order, restored native CPU chroma order, rebound the VT console, and
 left the module absent. There was no test-interval PE/FIFO timeout, fallback,
 oops, panic, machine check, or reboot. The complete post-test kernel log is
 `/tmp/wii-dmesg-indexed-textured.txt`, SHA-256
-`c87e38da3a2bea56478a691b4d231c1912e93a807cbd05f591d433f3261b3516`.
+`125ee7109321e9bf3b868bab7ccb118f190e95b541bd135383ac116749cb0cbe`.
 It retains the known boot-time PowerPC coherent-DMA alignment warning at
 `0.91s`; that warning occurred about 76 seconds before the first provider load
 and is outside both candidate intervals.
+
+After acceptance, the checksum-identical v6 module was installed at
+`/lib/modules/6.18.40-wii+/kernel/drivers/video/fbdev/gcn-gx.ko` and `depmod`
+completed. Its installed SHA-256 is the pinned `5f7c242d...` value above and
+its vermagic is `6.18.40-wii+ preempt mod_unload`. The accepted v5 module is
+retained at
+`gcn-gx.ko.backup.13509abf2b90a30ea04088c44ed2c3146b342b129f5c2d881365fc27187561d8`
+with that exact SHA-256, so the installed provider and booted v6 core agree
+while the previous accepted provider remains recoverable.
