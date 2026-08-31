@@ -188,6 +188,56 @@ gcn_drm_validate_texture_triangle(const struct drm_gcn_texture_vertex vertices[3
 	return area ? 0 : -EINVAL;
 }
 
+static inline int
+gcn_drm_render_validate_indexed_triangle_batch(const struct drm_gcn_draw_indexed_triangles *args)
+{
+	if (!args || !args->ctx_id || !args->dst_handle || args->flags ||
+	    args->vertex_count < 3 ||
+	    args->vertex_count > DRM_GCN_MAX_VERTICES ||
+	    !args->triangle_count ||
+	    args->triangle_count > DRM_GCN_MAX_TRIANGLES ||
+	    !args->vertices_ptr || !args->indices_ptr || args->state.pad ||
+	    args->pad || args->state.blend_mode > DRM_GCN_BLEND_SRC_ALPHA)
+		return -EINVAL;
+
+	return 0;
+}
+
+static inline int
+gcn_drm_validate_indexed_triangles(const struct drm_gcn_color_vertex *vertices,
+				   u32 vertex_count, const u16 *indices,
+				   u32 triangle_count, u16 dst_width,
+				   u16 dst_height, bool require_opaque)
+{
+	unsigned int index_count = triangle_count * 3;
+	unsigned int i;
+
+	if (!vertices || !indices)
+		return -EINVAL;
+
+	for (i = 0; i < vertex_count; i++) {
+		if (vertices[i].x > dst_width || vertices[i].y > dst_height ||
+		    (require_opaque && (vertices[i].rgba & 0xff) != 0xff))
+			return -EINVAL;
+	}
+	for (i = 0; i < index_count; i++) {
+		if (indices[i] >= vertex_count)
+			return -EINVAL;
+	}
+	for (i = 0; i < index_count; i += 3) {
+		const struct drm_gcn_color_vertex *a = &vertices[indices[i]];
+		const struct drm_gcn_color_vertex *b = &vertices[indices[i + 1]];
+		const struct drm_gcn_color_vertex *c = &vertices[indices[i + 2]];
+		s64 area = (s64)(b->x - a->x) * (c->y - a->y) -
+			   (s64)(c->x - a->x) * (b->y - a->y);
+
+		if (!area)
+			return -EINVAL;
+	}
+
+	return 0;
+}
+
 static inline int gcn_drm_validate_z(const struct drm_gcn_color_depth_vertex vertices[3],
 				     u16 dst_width, u16 dst_height,
 				     bool require_opaque)
