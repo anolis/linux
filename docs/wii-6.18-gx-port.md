@@ -13893,3 +13893,36 @@ and no PE/FIFO timeout, fallback, oops, panic, machine check, reboot, capacity
 leak, stale pixel, or display corruption. Preserve any separately tracked
 one-sample scaler/conversion transient and require an immediate unchanged
 repeat without weakening the new or any retained exact oracle.
+
+Hardware result for candidate `23650e2a1`: accepted on boot ID
+`72c56d24-f3e6-4efe-90d7-d8720bc409c0`. The installed boot image matched the
+pinned `4171f714...` SHA-256, live `/proc/kallsyms` exported v7 registration
+and no v6 registration, and no prior GX provider was loaded. Both
+checksum-identical invocations passed the paired indexed-texture-depth oracle
+exactly: 44,928 scissored pixels remained near red under `LESS`, 44,928 became
+far blue under the depth-disabled painter-order control, and 20,608 exterior
+pixels preserved the destination sentinel. Every alias, blend, index,
+geometry, coordinate, depth-state, padding, and bad-pointer control returned
+its specified error.
+
+The first invocation retained one separately tracked XRGB8888 conversion
+transient at `(530,356)`, reading `0xf428` instead of `0xf438`. It nevertheless
+passed all 110,464 pixels in the new depth, painter-order, and preservation
+oracles exactly. The required immediate repeat used checksum-identical kernel,
+module, and client artifacts and passed every retained allocator, mapping,
+context, syncobj, copy, fill, rectangle, overlap, scale, color/state/depth
+draw, textured draw, indexed draw, system-object, and XRGB8888 oracle, ending
+with `PASS: GCN render UAPI`.
+
+The authoritative passing transcript is
+`/tmp/wii-indexed-textured-depth-final-output.txt`, SHA-256
+`c13cf5a077612a283a2e56766b2aea401ef18ace568af460f522b26a96ccf123`.
+Both provider intervals registered and unregistered normally, selected native
+GX chroma order, restored native CPU chroma order, rebound the VT console, and
+left the module absent with cursor blink enabled. There was no test-interval
+PE/FIFO timeout, fallback, oops, panic, machine check, or reboot. The complete
+post-test kernel log is `/tmp/wii-dmesg-indexed-textured-depth.txt`, SHA-256
+`9cc0a8dad45281f5e567fed154d354d60ecfba44649a23a964b36e3faec03c8a`.
+It retains the known boot-time PowerPC coherent-DMA alignment warning at
+`0.91s`; that warning occurred more than 101 seconds before the first provider
+load and is outside both candidate intervals.
