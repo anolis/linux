@@ -289,6 +289,65 @@ gcn_drm_itex_vertices(const struct drm_gcn_texture_vertex *vertices,
 	return 0;
 }
 
+static inline int
+gcn_drm_itex_z_args(const struct drm_gcn_draw_indexed_textured_depth *args)
+{
+	if (!args || !args->ctx_id || !args->src_handle || !args->dst_handle ||
+	    args->src_handle == args->dst_handle || args->flags ||
+	    args->vertex_count < 3 ||
+	    args->vertex_count > DRM_GCN_MAX_VERTICES ||
+	    !args->triangle_count ||
+	    args->triangle_count > DRM_GCN_MAX_TRIANGLES || args->pad0 ||
+	    !args->vertices_ptr || !args->indices_ptr || args->state.pad ||
+	    args->depth.pad || args->pad1 ||
+	    args->state.blend_mode != DRM_GCN_BLEND_NONE ||
+	    args->depth.test_enable > 1 || args->depth.write_enable > 1 ||
+	    args->depth.compare > DRM_GCN_DEPTH_ALWAYS)
+		return -EINVAL;
+
+	return 0;
+}
+
+static inline int
+gcn_drm_itex_z_vertices(const struct drm_gcn_texture_depth_vertex *vertices,
+			u32 vertex_count, const u16 *indices,
+			u32 triangle_count, u16 src_width, u16 src_height,
+			u16 dst_width, u16 dst_height)
+{
+	unsigned int index_count = triangle_count * 3;
+	unsigned int i;
+
+	if (!vertices || !indices)
+		return -EINVAL;
+
+	for (i = 0; i < vertex_count; i++) {
+		if (vertices[i].x > dst_width || vertices[i].y > dst_height ||
+		    vertices[i].z > DRM_GCN_DEPTH_MAX ||
+		    vertices[i].s > src_width || vertices[i].t > src_height)
+			return -EINVAL;
+	}
+	for (i = 0; i < index_count; i++) {
+		if (indices[i] >= vertex_count)
+			return -EINVAL;
+	}
+	for (i = 0; i < index_count; i += 3) {
+		const struct drm_gcn_texture_depth_vertex *a;
+		const struct drm_gcn_texture_depth_vertex *b;
+		const struct drm_gcn_texture_depth_vertex *c;
+		s64 area;
+
+		a = &vertices[indices[i]];
+		b = &vertices[indices[i + 1]];
+		c = &vertices[indices[i + 2]];
+		area = (s64)(b->x - a->x) * (c->y - a->y) -
+		       (s64)(c->x - a->x) * (b->y - a->y);
+		if (!area)
+			return -EINVAL;
+	}
+
+	return 0;
+}
+
 static inline int gcn_drm_validate_z(const struct drm_gcn_color_depth_vertex vertices[3],
 				     u16 dst_width, u16 dst_height,
 				     bool require_opaque)

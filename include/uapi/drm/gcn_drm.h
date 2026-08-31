@@ -50,6 +50,7 @@ enum drm_gcn_param {
 #define DRM_GCN_FEATURE_DRAW_TEXTURED_TRIANGLES_RGB565	(1ULL << 19)
 #define DRM_GCN_FEATURE_DRAW_INDEXED_TRIANGLES_RGB565	(1ULL << 20)
 #define DRM_GCN_FEATURE_DRAW_INDEXED_TEXTURED_TRIANGLES_RGB565	(1ULL << 21)
+#define DRM_GCN_FEATURE_DRAW_INDEXED_TEXTURED_DEPTH_RGB565	(1ULL << 22)
 
 struct drm_gcn_get_param {
 	__u32 param;
@@ -469,6 +470,43 @@ struct drm_gcn_draw_indexed_textured {
 	__u64 pad1;
 };
 
+struct drm_gcn_texture_depth_vertex {
+	__u16 x;
+	__u16 y;
+	/* Screen-space depth: zero is near and DRM_GCN_DEPTH_MAX is far. */
+	__u32 z;
+	__u16 s;
+	__u16 t;
+};
+
+/*
+ * Draw bounded indexed RGB565 textured triangles with semantic depth state.
+ * The EFB depth buffer is initialized to DRM_GCN_DEPTH_MAX for each request.
+ */
+struct drm_gcn_draw_indexed_textured_depth {
+	__u32 ctx_id;
+	__u32 src_handle;
+	__u32 dst_handle;
+	/* Optional binary syncobj replaced with the completion fence. */
+	__u32 out_syncobj;
+	/* Must be zero. */
+	__u32 flags;
+	/* Inclusive range 3..DRM_GCN_MAX_VERTICES. */
+	__u32 vertex_count;
+	/* Inclusive range 1..DRM_GCN_MAX_TRIANGLES. */
+	__u32 triangle_count;
+	/* Must be zero. */
+	__u32 pad0;
+	/* Userspace pointer to drm_gcn_texture_depth_vertex[vertex_count]. */
+	__u64 vertices_ptr;
+	/* Userspace pointer to __u16[triangle_count * 3]. */
+	__u64 indices_ptr;
+	struct drm_gcn_draw_state state;
+	struct drm_gcn_depth_state depth;
+	/* Must be zero. */
+	__u64 pad1;
+};
+
 #define DRM_GCN_GET_PARAM	0x00
 #define DRM_GCN_GEM_CREATE	0x01
 #define DRM_GCN_GEM_MMAP	0x02
@@ -484,7 +522,8 @@ struct drm_gcn_draw_indexed_textured {
 #define DRM_GCN_DRAW_TEXTURED_TRIANGLES	0x0c
 #define DRM_GCN_DRAW_INDEXED_TRIANGLES	0x0d
 #define DRM_GCN_DRAW_INDEXED_TEXTURED_TRIANGLES	0x0e
-#define DRM_GCN_NUM_IOCTLS	0x0f
+#define DRM_GCN_DRAW_INDEXED_TEXTURED_DEPTH	0x0f
+#define DRM_GCN_NUM_IOCTLS	0x10
 
 #define DRM_IOCTL_GCN_GET_PARAM \
 	DRM_IOWR(DRM_COMMAND_BASE + DRM_GCN_GET_PARAM, \
@@ -529,6 +568,9 @@ struct drm_gcn_draw_indexed_textured {
 #define DRM_IOCTL_GCN_DRAW_INDEXED_TEXTURED_TRIANGLES \
 	DRM_IOW(DRM_COMMAND_BASE + DRM_GCN_DRAW_INDEXED_TEXTURED_TRIANGLES, \
 		 struct drm_gcn_draw_indexed_textured)
+#define DRM_IOCTL_GCN_DRAW_INDEXED_TEXTURED_DEPTH \
+	DRM_IOW(DRM_COMMAND_BASE + DRM_GCN_DRAW_INDEXED_TEXTURED_DEPTH, \
+		 struct drm_gcn_draw_indexed_textured_depth)
 
 #if defined(__cplusplus)
 }

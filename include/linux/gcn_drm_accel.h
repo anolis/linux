@@ -62,6 +62,14 @@ struct gcn_drm_texture_vertex {
 	u16 t;
 };
 
+struct gcn_drm_itex_depth_vertex {
+	u16 x;
+	u16 y;
+	u32 z;
+	u16 s;
+	u16 t;
+};
+
 struct gcn_drm_accel_ops {
 	/*
 	 * This layout is a private core/provider ABI. Add new callbacks only at
@@ -147,9 +155,18 @@ struct gcn_drm_accel_ops {
 					     u32 vertex_count, const u8 *indices,
 					     u32 triangle_count,
 					     const struct gcn_drm_draw_state *state);
+	int (*draw_itex_depth_rgb565)(void *src_allocation,
+				      void *dst_allocation,
+				      u16 src_width, u16 src_height,
+				      u16 dst_width, u16 dst_height,
+				      const struct gcn_drm_itex_depth_vertex *vertices,
+				      u32 vertex_count, const u8 *indices,
+				      u32 triangle_count,
+				      const struct gcn_drm_draw_state *state,
+				      const struct gcn_drm_depth_state *depth);
 };
 
-int gcn_drm_register_accel_v6(const struct gcn_drm_accel_ops *ops);
-void gcn_drm_unregister_accel_v6(const struct gcn_drm_accel_ops *ops);
+int gcn_drm_register_accel_v7(const struct gcn_drm_accel_ops *ops);
+void gcn_drm_unregister_accel_v7(const struct gcn_drm_accel_ops *ops);
 
 #endif /* _LINUX_GCN_DRM_ACCEL_H */

@@ -1092,6 +1092,21 @@ static int submit_triangle_depth(int fd,
 	return ioctl(fd, DRM_IOCTL_SYNCOBJ_WAIT, &wait);
 }
 
+static int
+submit_itex_depth(int fd, struct drm_gcn_draw_indexed_textured_depth *draw,
+		  uint32_t sync_handle)
+{
+	struct drm_syncobj_wait wait = {
+		.handles = (uintptr_t)&sync_handle,
+		.timeout_nsec = (int64_t)(monotonic_ns() + 1000000000ULL),
+		.count_handles = 1,
+	};
+
+	if (ioctl(fd, DRM_IOCTL_GCN_DRAW_INDEXED_TEXTURED_DEPTH, draw))
+		return -1;
+	return ioctl(fd, DRM_IOCTL_SYNCOBJ_WAIT, &wait);
+}
+
 static void test_draw_triangles_state(int fd)
 {
 	struct drm_syncobj_create sync = {};
@@ -2479,6 +2494,249 @@ out:
 		fail("close indexed-textured source");
 }
 
+static void test_draw_indexed_textured_depth(int fd)
+{
+	const uint16_t sentinel = 0x39e7;
+	const uint16_t red = 0xf800;
+	const uint16_t blue = 0x001f;
+	struct drm_syncobj_create sync = {};
+	struct drm_syncobj_destroy destroy = {};
+	struct drm_gcn_ctx_create ctx = {};
+	struct drm_gcn_ctx_free free_ctx = {};
+	struct drm_gcn_gem_create src = {};
+	struct drm_gcn_gem_create dst = {};
+	struct drm_gcn_texture_depth_vertex vertices[9] = {
+		{ TEST_WIDTH / 2, TEST_HEIGHT / 2, DRM_GCN_DEPTH_MAX, 0, 0 },
+		{ 0, 0, DRM_GCN_DEPTH_MAX / 8, 64, 64 },
+		{ TEST_WIDTH, 0, DRM_GCN_DEPTH_MAX / 8, 64, 64 },
+		{ TEST_WIDTH, TEST_HEIGHT, DRM_GCN_DEPTH_MAX / 8, 64, 64 },
+		{ 0, TEST_HEIGHT, DRM_GCN_DEPTH_MAX / 8, 64, 64 },
+		{ 0, 0, DRM_GCN_DEPTH_MAX * 3 / 4, 192, 64 },
+		{ TEST_WIDTH, 0, DRM_GCN_DEPTH_MAX * 3 / 4, 192, 64 },
+		{ TEST_WIDTH, TEST_HEIGHT, DRM_GCN_DEPTH_MAX * 3 / 4,
+		  192, 64 },
+		{ 0, TEST_HEIGHT, DRM_GCN_DEPTH_MAX * 3 / 4, 192, 64 },
+	};
+	uint16_t indices[12] = { 1, 2, 3, 1, 3, 4, 5, 6, 7, 5, 7, 8 };
+	struct drm_gcn_draw_indexed_textured_depth draw = {
+		.vertex_count = ARRAY_SIZE(vertices),
+		.triangle_count = 4,
+		.vertices_ptr = (uintptr_t)vertices,
+		.indices_ptr = (uintptr_t)indices,
+		.state = {
+			.viewport_width = TEST_WIDTH,
+			.viewport_height = TEST_HEIGHT,
+			.scissor_x = 20,
+			.scissor_y = 24,
+			.scissor_width = 216,
+			.scissor_height = 208,
+			.blend_mode = DRM_GCN_BLEND_NONE,
+		},
+		.depth = {
+			.test_enable = 1,
+			.compare = DRM_GCN_DEPTH_LESS,
+			.write_enable = 1,
+		},
+	};
+	uint16_t *src_map = MAP_FAILED;
+	uint16_t *dst_map = MAP_FAILED;
+	unsigned int checked_depth = 0;
+	unsigned int checked_painter = 0;
+	unsigned int checked_preserved = 0;
+
+	if (create_bo(fd, &src) || create_bo(fd, &dst)) {
+		fail("create indexed-textured-depth objects");
+		goto out;
+	}
+	src_map = map_bo(fd, &src);
+	dst_map = map_bo(fd, &dst);
+	if (src_map == MAP_FAILED || dst_map == MAP_FAILED) {
+		fail("map indexed-textured-depth objects");
+		goto out;
+	}
+	if (ioctl(fd, DRM_IOCTL_GCN_CTX_CREATE, &ctx)) {
+		fail("create indexed-textured-depth context");
+		goto out;
+	}
+	if (ioctl(fd, DRM_IOCTL_SYNCOBJ_CREATE, &sync)) {
+		fail("create indexed-textured-depth syncobj");
+		goto out_ctx;
+	}
+
+	for (unsigned int y = 0; y < TEST_HEIGHT; y++) {
+		for (unsigned int x = 0; x < TEST_WIDTH; x++) {
+			size_t pixel = tiled_rgb565_index(x, y, TEST_WIDTH);
+
+			src_map[pixel] = x < TEST_WIDTH / 2 ? red : blue;
+			dst_map[pixel] = sentinel;
+		}
+	}
+
+	draw.ctx_id = ctx.id;
+	draw.src_handle = src.handle;
+	draw.dst_handle = dst.handle;
+	draw.out_syncobj = sync.handle;
+
+	draw.src_handle = dst.handle;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_INDEXED_TEXTURED_DEPTH, &draw) ||
+	    errno != EINVAL)
+		fail("aliased indexed-textured-depth draw should return EINVAL");
+	draw.src_handle = src.handle;
+	draw.state.blend_mode = DRM_GCN_BLEND_SRC_ALPHA;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_INDEXED_TEXTURED_DEPTH, &draw) ||
+	    errno != EINVAL)
+		fail("blended indexed-textured-depth draw should return EINVAL");
+	draw.state.blend_mode = DRM_GCN_BLEND_NONE;
+	indices[0] = ARRAY_SIZE(vertices);
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_INDEXED_TEXTURED_DEPTH, &draw) ||
+	    errno != EINVAL)
+		fail("out-of-range indexed-textured-depth index should return EINVAL");
+	indices[0] = 1;
+	indices[1] = 1;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_INDEXED_TEXTURED_DEPTH, &draw) ||
+	    errno != EINVAL)
+		fail("degenerate indexed-textured-depth draw should return EINVAL");
+	indices[1] = 2;
+	vertices[8].z = DRM_GCN_DEPTH_MAX + 1;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_INDEXED_TEXTURED_DEPTH, &draw) ||
+	    errno != EINVAL)
+		fail("out-of-range indexed-textured depth should return EINVAL");
+	vertices[8].z = DRM_GCN_DEPTH_MAX * 3 / 4;
+	vertices[8].s = TEST_WIDTH + 1;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_INDEXED_TEXTURED_DEPTH, &draw) ||
+	    errno != EINVAL)
+		fail("out-of-range indexed-textured-depth texcoord should return EINVAL");
+	vertices[8].s = 192;
+	draw.depth.test_enable = 2;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_INDEXED_TEXTURED_DEPTH, &draw) ||
+	    errno != EINVAL)
+		fail("nonboolean indexed-textured depth enable should return EINVAL");
+	draw.depth.test_enable = 1;
+	draw.depth.compare = DRM_GCN_DEPTH_ALWAYS + 1;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_INDEXED_TEXTURED_DEPTH, &draw) ||
+	    errno != EINVAL)
+		fail("invalid indexed-textured depth compare should return EINVAL");
+	draw.depth.compare = DRM_GCN_DEPTH_LESS;
+	draw.depth.write_enable = 2;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_INDEXED_TEXTURED_DEPTH, &draw) ||
+	    errno != EINVAL)
+		fail("nonboolean indexed-textured depth write should return EINVAL");
+	draw.depth.write_enable = 1;
+	draw.depth.pad = 1;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_INDEXED_TEXTURED_DEPTH, &draw) ||
+	    errno != EINVAL)
+		fail("indexed-textured depth padding should return EINVAL");
+	draw.depth.pad = 0;
+	draw.pad0 = 1;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_INDEXED_TEXTURED_DEPTH, &draw) ||
+	    errno != EINVAL)
+		fail("pad0 indexed-textured-depth draw should return EINVAL");
+	draw.pad0 = 0;
+	draw.pad1 = 1;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_INDEXED_TEXTURED_DEPTH, &draw) ||
+	    errno != EINVAL)
+		fail("pad1 indexed-textured-depth draw should return EINVAL");
+	draw.pad1 = 0;
+	draw.vertices_ptr = 1;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_INDEXED_TEXTURED_DEPTH, &draw) ||
+	    errno != EFAULT)
+		fail("bad indexed-textured-depth vertex pointer should return EFAULT");
+	draw.vertices_ptr = (uintptr_t)vertices;
+	draw.indices_ptr = 1;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_INDEXED_TEXTURED_DEPTH, &draw) ||
+	    errno != EFAULT)
+		fail("bad indexed-textured-depth index pointer should return EFAULT");
+	draw.indices_ptr = (uintptr_t)indices;
+
+	if (submit_itex_depth(fd, &draw, sync.handle)) {
+		fail("draw indexed-textured depth-tested batch");
+		goto out_sync;
+	}
+	for (unsigned int y = 0; y < TEST_HEIGHT; y++) {
+		for (unsigned int x = 0; x < TEST_WIDTH; x++) {
+			bool inside = x >= draw.state.scissor_x &&
+				x < draw.state.scissor_x + draw.state.scissor_width &&
+				y >= draw.state.scissor_y &&
+				y < draw.state.scissor_y + draw.state.scissor_height;
+			uint16_t expected = inside ? red : sentinel;
+			size_t pixel = tiled_rgb565_index(x, y, TEST_WIDTH);
+
+			if (inside)
+				checked_depth++;
+			else
+				checked_preserved++;
+			if (dst_map[pixel] != expected) {
+				fprintf(stderr,
+					"FAIL: indexed-textured depth mismatch at (%u,%u): got=0x%04x expected=0x%04x\n",
+					x, y, dst_map[pixel], expected);
+				failures++;
+				goto out_sync;
+			}
+		}
+	}
+
+	for (unsigned int y = 0; y < TEST_HEIGHT; y++)
+		for (unsigned int x = 0; x < TEST_WIDTH; x++)
+			dst_map[tiled_rgb565_index(x, y, TEST_WIDTH)] = sentinel;
+	draw.depth.test_enable = 0;
+	draw.depth.compare = DRM_GCN_DEPTH_ALWAYS;
+	draw.depth.write_enable = 0;
+	if (submit_itex_depth(fd, &draw, sync.handle)) {
+		fail("draw indexed-textured painter-order control");
+		goto out_sync;
+	}
+	for (unsigned int y = draw.state.scissor_y;
+	     y < draw.state.scissor_y + draw.state.scissor_height; y++) {
+		for (unsigned int x = draw.state.scissor_x;
+		     x < draw.state.scissor_x + draw.state.scissor_width; x++) {
+			size_t pixel = tiled_rgb565_index(x, y, TEST_WIDTH);
+
+			checked_painter++;
+			if (dst_map[pixel] != blue) {
+				fprintf(stderr,
+					"FAIL: indexed-textured painter mismatch at (%u,%u): got=0x%04x expected=0x%04x\n",
+					x, y, dst_map[pixel], blue);
+				failures++;
+				goto out_sync;
+			}
+		}
+	}
+	printf("DRAW itex depth: near=%u painter=%u preserved=%u\n",
+	       checked_depth, checked_painter, checked_preserved);
+
+out_sync:
+	destroy.handle = sync.handle;
+	if (ioctl(fd, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy))
+		fail("destroy indexed-textured-depth syncobj");
+out_ctx:
+	free_ctx.id = ctx.id;
+	if (ioctl(fd, DRM_IOCTL_GCN_CTX_FREE, &free_ctx))
+		fail("free indexed-textured-depth context");
+out:
+	if (dst_map != MAP_FAILED && munmap(dst_map, dst.size))
+		fail("unmap indexed-textured-depth destination");
+	if (src_map != MAP_FAILED && munmap(src_map, src.size))
+		fail("unmap indexed-textured-depth source");
+	if (dst.handle && close_bo(fd, dst.handle))
+		fail("close indexed-textured-depth destination");
+	if (src.handle && close_bo(fd, src.handle))
+		fail("close indexed-textured-depth source");
+}
+
 static void test_wide_scaled_blit(int fd)
 {
 	struct drm_gcn_ctx_create ctx = {};
@@ -3185,6 +3443,12 @@ int main(int argc, char **argv)
 		else
 			fail_value("indexed textured render feature", features,
 				   DRM_GCN_FEATURE_DRAW_INDEXED_TEXTURED_TRIANGLES_RGB565);
+		if (features &
+		    DRM_GCN_FEATURE_DRAW_INDEXED_TEXTURED_DEPTH_RGB565)
+			test_draw_indexed_textured_depth(fd);
+		else
+			fail_value("indexed textured depth render feature", features,
+				   DRM_GCN_FEATURE_DRAW_INDEXED_TEXTURED_DEPTH_RGB565);
 		if (features & DRM_GCN_FEATURE_BLIT_SCALED_RGB565)
 			test_wide_scaled_blit(fd);
 		if (features & DRM_GCN_FEATURE_BLIT_SCALED_RGB565)

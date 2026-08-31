@@ -71,6 +71,16 @@ int gcn_drm_provider_draw_itex(const struct gcn_drm_accel_ops *provider,
 				  u32 vertex_count, const u8 *indices,
 				  u32 triangle_count,
 				  const struct gcn_drm_draw_state *state);
+int
+gcn_drm_provider_draw_itex_depth(const struct gcn_drm_accel_ops *provider,
+				 void *src_allocation, void *dst_allocation,
+				 u16 src_width, u16 src_height,
+				 u16 dst_width, u16 dst_height,
+				 const struct gcn_drm_itex_depth_vertex *vertices,
+				 u32 vertex_count, const u8 *indices,
+				 u32 triangle_count,
+				 const struct gcn_drm_draw_state *state,
+				 const struct gcn_drm_depth_state *depth);
 int gcn_drm_provider_blit_rect(const struct gcn_drm_accel_ops *provider,
 			       void *src_allocation, void *dst_allocation,
 			       u16 src_width, u16 src_height, u16 dst_width,
