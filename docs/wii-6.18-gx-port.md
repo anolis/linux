@@ -13787,3 +13787,32 @@ timeout, fallback, oops, panic, machine check, reboot, capacity leak, stale
 pixel, or display corruption. Preserve any separately tracked one-sample
 scaler/conversion transient and require an immediate unchanged repeat; never
 weaken the new or any retained exact oracle.
+
+Hardware result for candidate `91c98417c`: accepted on boot ID
+`69a1b9ab-a882-47a7-94a4-4363eaf2b53e`. The installed boot image matched the
+pinned `2cac4410...` SHA-256, live `/proc/kallsyms` exported only the v6
+registration symbols, and no prior GX provider was loaded. Both
+checksum-identical invocations passed the new indexed-texture oracle exactly:
+all 41,600 scissored pixels matched their coordinate-derived source texels and
+all 23,936 exterior pixels preserved the destination sentinel. The conflicting
+unreferenced vertex had no effect, proving that the provider applied the index
+stream to position, colour, and TEX0. Every alias, blend, index, geometry,
+coordinate, padding, and bad-pointer control returned its specified error.
+
+Both invocations passed the complete render-UAPI suite without a scaler or
+conversion transient. Every retained allocator, mapping, context, syncobj,
+copy, fill, rectangle, overlap, scale, colour/state/depth draw, non-indexed
+texture, indexed colour, system-object, and XRGB8888 oracle passed exactly;
+both ended with `PASS: GCN render UAPI`. The authoritative repeat transcript
+is `/tmp/wii-indexed-textured-final-output.txt`, SHA-256
+`5f8877ce01b97480ee5e56a975ba4a95e9806c591f1666d170b9299332f2991a`.
+
+Both provider intervals registered and unregistered normally, selected native
+GX chroma order, restored native CPU chroma order, rebound the VT console, and
+left the module absent. There was no test-interval PE/FIFO timeout, fallback,
+oops, panic, machine check, or reboot. The complete post-test kernel log is
+`/tmp/wii-dmesg-indexed-textured.txt`, SHA-256
+`c87e38da3a2bea56478a691b4d231c1912e93a807cbd05f591d433f3261b3516`.
+It retains the known boot-time PowerPC coherent-DMA alignment warning at
+`0.91s`; that warning occurred about 76 seconds before the first provider load
+and is outside both candidate intervals.
