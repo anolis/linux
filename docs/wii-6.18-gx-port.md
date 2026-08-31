@@ -13688,3 +13688,34 @@ and no PE/FIFO timeout, fallback, oops, panic, machine check, reboot, capacity
 leak, stale pixel, or display corruption. Preserve any separately tracked
 one-sample scaler transient and require an immediate unchanged repeat; do not
 weaken either the indexed or existing exact oracles.
+
+Hardware result for candidate `ccd821dc8`: accepted on boot ID
+`d456e995-202e-4e16-8148-958838f0d3ab`. The installed boot image matched the
+pinned `2be82c09...` SHA-256, live `/proc/kallsyms` exported only the v5
+registration symbols, and no prior GX provider was loaded. Both invocations
+passed the new indexed oracle exactly: all 32,336 safely interior pixels were
+RGB565 red and all 30,256 safely exterior pixels preserved RGB565 green. The
+unreferenced blue vertex had no effect, proving that the provider consumed the
+shared index stream. Every malformed-index, degenerate-triangle, padding, and
+bad-pointer control returned its specified error.
+
+The first invocation retained one separately tracked XRGB8888 conversion
+transient at `(108,120)`, reading `0x653b` instead of `0x657b`. It nevertheless
+passed all 62,592 indexed-draw pixels exactly. The required immediate repeat
+used checksum-identical kernel, module, and client artifacts and passed every
+retained allocator, mapping, context, syncobj, copy, fill, rectangle, overlap,
+scale, color/state/depth draw, textured draw, system-object, and XRGB8888
+oracle, ending with `PASS: GCN render UAPI`.
+
+The authoritative passing transcript is
+`/tmp/wii-indexed-triangles-final-output.txt`, SHA-256
+`e47265b7118191e4be87770669fb07827061adc2658551eb094300a820797dab`.
+Both provider intervals registered and unregistered normally, selected native
+GX chroma order, restored native CPU chroma order, rebound the VT console, and
+left the module absent. There was no test-interval PE/FIFO timeout, fallback,
+oops, panic, machine check, or reboot. The complete post-test kernel log is
+`/tmp/wii-dmesg-indexed-triangles.txt`, SHA-256
+`d5024bfaf0825e947ccae28d63bc6197fe74492393a4cde4b747052789a71cad`.
+It retains the known boot-time PowerPC coherent-DMA alignment warning at
+`0.91s`; that warning occurred roughly 488 seconds before the first provider
+load and is not part of either candidate interval.
