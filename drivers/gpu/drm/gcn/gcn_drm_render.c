@@ -1540,6 +1540,165 @@ out_put:
 	return ret;
 }
 
+static int gcn_drm_ioctl_draw_indexed_textured(struct drm_device *drm,
+					       void *data, struct drm_file *file)
+{
+	struct gcn_drm_render_file *render = file->driver_priv;
+	struct drm_gcn_draw_indexed_textured *args = data;
+	struct drm_gcn_texture_vertex *user_vertices = NULL;
+	struct gcn_drm_texture_vertex *vertices = NULL;
+	struct drm_syncobj *out_syncobj = NULL;
+	struct drm_gem_object *src_gem = NULL;
+	struct drm_gem_object *dst_gem = NULL;
+	struct dma_fence *fence = NULL;
+	struct gcn_drm_draw_state state;
+	struct gcn_drm_bo *src;
+	struct gcn_drm_bo *dst;
+	struct drm_exec exec;
+	u16 *user_indices = NULL;
+	u8 *indices = NULL;
+	unsigned int index_count;
+	unsigned int i;
+	int ret;
+
+	(void)drm;
+
+	ret = gcn_drm_itex_args(args);
+	if (ret)
+		return ret;
+	if (!xa_load(&render->contexts, args->ctx_id))
+		return -ENOENT;
+
+	if (args->out_syncobj) {
+		out_syncobj = drm_syncobj_find(file, args->out_syncobj);
+		if (!out_syncobj)
+			return -ENOENT;
+	}
+
+	user_vertices = memdup_array_user(u64_to_user_ptr(args->vertices_ptr),
+					  args->vertex_count,
+					  sizeof(*user_vertices));
+	if (IS_ERR(user_vertices)) {
+		ret = PTR_ERR(user_vertices);
+		user_vertices = NULL;
+		goto out_put;
+	}
+	index_count = args->triangle_count * 3;
+	user_indices = memdup_array_user(u64_to_user_ptr(args->indices_ptr),
+					 index_count, sizeof(*user_indices));
+	if (IS_ERR(user_indices)) {
+		ret = PTR_ERR(user_indices);
+		user_indices = NULL;
+		goto out_put;
+	}
+
+	src_gem = drm_gem_object_lookup(file, args->src_handle);
+	dst_gem = drm_gem_object_lookup(file, args->dst_handle);
+	if (!src_gem || !dst_gem) {
+		ret = -ENOENT;
+		goto out_put;
+	}
+	if (src_gem == dst_gem || !gcn_drm_is_mem1_bo(src_gem) ||
+	    !gcn_drm_is_mem1_bo(dst_gem)) {
+		ret = -EINVAL;
+		goto out_put;
+	}
+
+	src = to_gcn_drm_bo(src_gem);
+	dst = to_gcn_drm_bo(dst_gem);
+	if (src->provider != dst->provider ||
+	    src->format != DRM_GCN_GEM_FORMAT_RGB565 ||
+	    dst->format != DRM_GCN_GEM_FORMAT_RGB565 ||
+	    src->layout != DRM_GCN_GEM_LAYOUT_TILED_4X4 ||
+	    dst->layout != DRM_GCN_GEM_LAYOUT_TILED_4X4) {
+		ret = -EINVAL;
+		goto out_put;
+	}
+	ret = gcn_drm_render_validate_draw_state(&args->state, dst->width,
+						 dst->height);
+	if (ret)
+		goto out_put;
+	ret = gcn_drm_itex_vertices(user_vertices,
+				    args->vertex_count, user_indices,
+			args->triangle_count, src->width, src->height,
+			dst->width, dst->height);
+	if (ret)
+		goto out_put;
+
+	vertices = kcalloc(args->vertex_count, sizeof(*vertices), GFP_KERNEL);
+	indices = kmalloc_array(index_count, sizeof(*indices), GFP_KERNEL);
+	if (!vertices || !indices) {
+		ret = -ENOMEM;
+		goto out_put;
+	}
+	for (i = 0; i < args->vertex_count; i++) {
+		vertices[i].x = user_vertices[i].x;
+		vertices[i].y = user_vertices[i].y;
+		vertices[i].s = user_vertices[i].s;
+		vertices[i].t = user_vertices[i].t;
+	}
+	for (i = 0; i < index_count; i++)
+		indices[i] = user_indices[i];
+	state.viewport_x = args->state.viewport_x;
+	state.viewport_y = args->state.viewport_y;
+	state.viewport_width = args->state.viewport_width;
+	state.viewport_height = args->state.viewport_height;
+	state.scissor_x = args->state.scissor_x;
+	state.scissor_y = args->state.scissor_y;
+	state.scissor_width = args->state.scissor_width;
+	state.scissor_height = args->state.scissor_height;
+	state.blend_mode = args->state.blend_mode;
+
+	drm_exec_init(&exec, DRM_EXEC_INTERRUPTIBLE_WAIT, 2);
+	drm_exec_until_all_locked(&exec) {
+		ret = drm_exec_prepare_obj(&exec, src_gem, 1);
+		drm_exec_retry_on_contention(&exec);
+		if (ret)
+			break;
+		ret = drm_exec_prepare_obj(&exec, dst_gem, 1);
+		drm_exec_retry_on_contention(&exec);
+		if (ret)
+			break;
+	}
+	if (ret)
+		goto out_exec;
+
+	fence = dma_fence_allocate_private_stub(ktime_get());
+	if (!fence) {
+		ret = -ENOMEM;
+		goto out_exec;
+	}
+
+	ret = gcn_drm_provider_draw_itex(src->provider, src->allocation,
+					 dst->allocation,
+			src->width, src->height, dst->width, dst->height,
+			vertices, args->vertex_count, indices,
+			args->triangle_count, &state);
+	if (ret)
+		goto out_exec;
+
+	dma_resv_add_fence(src_gem->resv, fence, DMA_RESV_USAGE_READ);
+	dma_resv_add_fence(dst_gem->resv, fence, DMA_RESV_USAGE_WRITE);
+	if (out_syncobj)
+		drm_syncobj_replace_fence(out_syncobj, fence);
+
+out_exec:
+	drm_exec_fini(&exec);
+out_put:
+	dma_fence_put(fence);
+	if (dst_gem)
+		drm_gem_object_put(dst_gem);
+	if (src_gem)
+		drm_gem_object_put(src_gem);
+	if (out_syncobj)
+		drm_syncobj_put(out_syncobj);
+	kfree(indices);
+	kfree(vertices);
+	kfree(user_indices);
+	kfree(user_vertices);
+	return ret;
+}
+
 const struct drm_ioctl_desc gcn_drm_render_ioctls[DRM_GCN_NUM_IOCTLS] = {
 	DRM_IOCTL_DEF_DRV(GCN_GET_PARAM, gcn_drm_ioctl_get_param,
 			  DRM_RENDER_ALLOW),
@@ -1570,6 +1729,9 @@ const struct drm_ioctl_desc gcn_drm_render_ioctls[DRM_GCN_NUM_IOCTLS] = {
 			  DRM_RENDER_ALLOW),
 	DRM_IOCTL_DEF_DRV(GCN_DRAW_INDEXED_TRIANGLES,
 			  gcn_drm_ioctl_draw_indexed_triangles,
+			  DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(GCN_DRAW_INDEXED_TEXTURED_TRIANGLES,
+			  gcn_drm_ioctl_draw_indexed_textured,
 			  DRM_RENDER_ALLOW),
 };
 

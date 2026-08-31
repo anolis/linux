@@ -188,7 +188,7 @@ static int gcn_drm_set_accel_ave_locked(bool accel_active)
 	return 0;
 }
 
-int gcn_drm_register_accel_v5(const struct gcn_drm_accel_ops *ops)
+int gcn_drm_register_accel_v6(const struct gcn_drm_accel_ops *ops)
 {
 	int ret = 0;
 
@@ -215,9 +215,9 @@ out_unlock:
 			ops->name);
 	return ret;
 }
-EXPORT_SYMBOL_GPL(gcn_drm_register_accel_v5);
+EXPORT_SYMBOL_GPL(gcn_drm_register_accel_v6);
 
-void gcn_drm_unregister_accel_v5(const struct gcn_drm_accel_ops *ops)
+void gcn_drm_unregister_accel_v6(const struct gcn_drm_accel_ops *ops)
 {
 	int ret = 0;
 
@@ -234,7 +234,7 @@ void gcn_drm_unregister_accel_v5(const struct gcn_drm_accel_ops *ops)
 	pr_info("gcn-drm: unregistered scanout accelerator %s\n",
 		ops ? ops->name : "unknown");
 }
-EXPORT_SYMBOL_GPL(gcn_drm_unregister_accel_v5);
+EXPORT_SYMBOL_GPL(gcn_drm_unregister_accel_v6);
 
 int gcn_drm_provider_info(struct gcn_drm_mem1_info *info)
 {
@@ -450,6 +450,30 @@ int gcn_drm_provider_draw_indexed(const struct gcn_drm_accel_ops *provider,
 		ret = provider->draw_indexed_triangles_rgb565(dst_allocation,
 				width, height, vertices, vertex_count, indices,
 				triangle_count, state);
+	mutex_unlock(&gcn_drm_accel_lock);
+
+	return ret;
+}
+
+int gcn_drm_provider_draw_itex(const struct gcn_drm_accel_ops *provider,
+			       void *src_allocation, void *dst_allocation,
+				  u16 src_width, u16 src_height,
+				  u16 dst_width, u16 dst_height,
+				  const struct gcn_drm_texture_vertex *vertices,
+				  u32 vertex_count, const u8 *indices,
+				  u32 triangle_count,
+				  const struct gcn_drm_draw_state *state)
+{
+	int ret = -ENODEV;
+
+	mutex_lock(&gcn_drm_accel_lock);
+	if (gcn_drm_accel == provider &&
+	    provider->draw_indexed_textured_triangles_rgb565)
+		ret = provider->draw_indexed_textured_triangles_rgb565(src_allocation,
+				dst_allocation,
+				src_width, src_height, dst_width, dst_height,
+				vertices, vertex_count, indices, triangle_count,
+				state);
 	mutex_unlock(&gcn_drm_accel_lock);
 
 	return ret;

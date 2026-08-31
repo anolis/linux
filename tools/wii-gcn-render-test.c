@@ -2292,6 +2292,193 @@ out:
 		fail("close indexed-triangle destination");
 }
 
+static void test_draw_indexed_textured_triangles(int fd)
+{
+	const uint16_t sentinel = 0x39e7;
+	struct drm_syncobj_create sync = {};
+	struct drm_syncobj_destroy destroy = {};
+	struct drm_gcn_ctx_create ctx = {};
+	struct drm_gcn_ctx_free free_ctx = {};
+	struct drm_gcn_gem_create src = {};
+	struct drm_gcn_gem_create dst = {};
+	struct drm_gcn_texture_vertex vertices[5] = {
+		{ TEST_WIDTH / 2, TEST_HEIGHT / 2, TEST_WIDTH, 0 },
+		{ 0, 0, 0, 0 },
+		{ TEST_WIDTH, 0, TEST_WIDTH, 0 },
+		{ TEST_WIDTH, TEST_HEIGHT, TEST_WIDTH, TEST_HEIGHT },
+		{ 0, TEST_HEIGHT, 0, TEST_HEIGHT },
+	};
+	uint16_t indices[6] = { 1, 2, 3, 1, 3, 4 };
+	struct drm_gcn_draw_indexed_textured draw = {
+		.vertex_count = ARRAY_SIZE(vertices),
+		.triangle_count = 2,
+		.vertices_ptr = (uintptr_t)vertices,
+		.indices_ptr = (uintptr_t)indices,
+		.state = {
+			.viewport_width = TEST_WIDTH,
+			.viewport_height = TEST_HEIGHT,
+			.scissor_x = 24,
+			.scissor_y = 28,
+			.scissor_width = TEST_WIDTH - 48,
+			.scissor_height = TEST_HEIGHT - 56,
+			.blend_mode = DRM_GCN_BLEND_NONE,
+		},
+	};
+	struct drm_syncobj_wait sync_wait = {};
+	uint16_t *src_map = MAP_FAILED;
+	uint16_t *dst_map = MAP_FAILED;
+	unsigned int checked_texture = 0;
+	unsigned int checked_preserved = 0;
+
+	if (create_bo(fd, &src) || create_bo(fd, &dst)) {
+		fail("create indexed-textured objects");
+		goto out;
+	}
+	src_map = map_bo(fd, &src);
+	dst_map = map_bo(fd, &dst);
+	if (src_map == MAP_FAILED || dst_map == MAP_FAILED) {
+		fail("map indexed-textured objects");
+		goto out;
+	}
+	if (ioctl(fd, DRM_IOCTL_GCN_CTX_CREATE, &ctx)) {
+		fail("create indexed-textured context");
+		goto out;
+	}
+	if (ioctl(fd, DRM_IOCTL_SYNCOBJ_CREATE, &sync)) {
+		fail("create indexed-textured syncobj");
+		goto out_ctx;
+	}
+
+	for (unsigned int y = 0; y < TEST_HEIGHT; y++) {
+		for (unsigned int x = 0; x < TEST_WIDTH; x++) {
+			size_t pixel = tiled_rgb565_index(x, y, TEST_WIDTH);
+
+			src_map[pixel] = source_pattern(x, y);
+			dst_map[pixel] = sentinel;
+		}
+	}
+
+	draw.ctx_id = ctx.id;
+	draw.src_handle = src.handle;
+	draw.dst_handle = dst.handle;
+	draw.out_syncobj = sync.handle;
+
+	draw.src_handle = dst.handle;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_INDEXED_TEXTURED_TRIANGLES, &draw) ||
+	    errno != EINVAL)
+		fail("aliased indexed-textured draw should return EINVAL");
+	draw.src_handle = src.handle;
+	draw.state.blend_mode = DRM_GCN_BLEND_SRC_ALPHA;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_INDEXED_TEXTURED_TRIANGLES, &draw) ||
+	    errno != EINVAL)
+		fail("blended indexed-textured draw should return EINVAL");
+	draw.state.blend_mode = DRM_GCN_BLEND_NONE;
+	indices[0] = ARRAY_SIZE(vertices);
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_INDEXED_TEXTURED_TRIANGLES, &draw) ||
+	    errno != EINVAL)
+		fail("out-of-range indexed-textured index should return EINVAL");
+	indices[0] = 1;
+	indices[1] = 1;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_INDEXED_TEXTURED_TRIANGLES, &draw) ||
+	    errno != EINVAL)
+		fail("degenerate indexed-textured triangle should return EINVAL");
+	indices[1] = 2;
+	vertices[4].t = TEST_HEIGHT + 1;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_INDEXED_TEXTURED_TRIANGLES, &draw) ||
+	    errno != EINVAL)
+		fail("out-of-range indexed texcoord should return EINVAL");
+	vertices[4].t = TEST_HEIGHT;
+	draw.pad0 = 1;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_INDEXED_TEXTURED_TRIANGLES, &draw) ||
+	    errno != EINVAL)
+		fail("pad0 indexed-textured draw should return EINVAL");
+	draw.pad0 = 0;
+	draw.pad1 = 1;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_INDEXED_TEXTURED_TRIANGLES, &draw) ||
+	    errno != EINVAL)
+		fail("pad1 indexed-textured draw should return EINVAL");
+	draw.pad1 = 0;
+	draw.vertices_ptr = 1;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_INDEXED_TEXTURED_TRIANGLES, &draw) ||
+	    errno != EFAULT)
+		fail("bad indexed-textured vertex pointer should return EFAULT");
+	draw.vertices_ptr = (uintptr_t)vertices;
+	draw.indices_ptr = 1;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_INDEXED_TEXTURED_TRIANGLES, &draw) ||
+	    errno != EFAULT)
+		fail("bad indexed-textured index pointer should return EFAULT");
+	draw.indices_ptr = (uintptr_t)indices;
+
+	if (ioctl(fd, DRM_IOCTL_GCN_DRAW_INDEXED_TEXTURED_TRIANGLES, &draw)) {
+		fail("draw indexed-textured RGB565 triangle batch");
+		goto out_sync;
+	}
+	{
+		uint32_t sync_handle = sync.handle;
+
+		sync_wait.handles = (uintptr_t)&sync_handle;
+		sync_wait.timeout_nsec = (int64_t)(monotonic_ns() +
+							  1000000000ULL);
+		sync_wait.count_handles = 1;
+		if (ioctl(fd, DRM_IOCTL_SYNCOBJ_WAIT, &sync_wait)) {
+			fail("wait for indexed-textured syncobj");
+			goto out_sync;
+		}
+	}
+
+	for (unsigned int y = 0; y < TEST_HEIGHT; y++) {
+		for (unsigned int x = 0; x < TEST_WIDTH; x++) {
+			bool inside = x >= draw.state.scissor_x &&
+				x < draw.state.scissor_x + draw.state.scissor_width &&
+				y >= draw.state.scissor_y &&
+				y < draw.state.scissor_y + draw.state.scissor_height;
+			uint16_t expected = inside ? source_pattern(x, y) : sentinel;
+			size_t pixel = tiled_rgb565_index(x, y, TEST_WIDTH);
+
+			if (inside)
+				checked_texture++;
+			else
+				checked_preserved++;
+			if (dst_map[pixel] != expected) {
+				fprintf(stderr,
+					"FAIL: indexed-textured mismatch at (%u,%u): got=0x%04x expected=0x%04x\n",
+					x, y, dst_map[pixel], expected);
+				failures++;
+				goto out_sync;
+			}
+		}
+	}
+	printf("DRAW: indexed textured batch matched %u sampled and %u preserved RGB565 pixels\n",
+	       checked_texture, checked_preserved);
+
+out_sync:
+	destroy.handle = sync.handle;
+	if (ioctl(fd, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy))
+		fail("destroy indexed-textured syncobj");
+out_ctx:
+	free_ctx.id = ctx.id;
+	if (ioctl(fd, DRM_IOCTL_GCN_CTX_FREE, &free_ctx))
+		fail("free indexed-textured context");
+out:
+	if (dst_map != MAP_FAILED && munmap(dst_map, dst.size))
+		fail("unmap indexed-textured destination");
+	if (src_map != MAP_FAILED && munmap(src_map, src.size))
+		fail("unmap indexed-textured source");
+	if (dst.handle && close_bo(fd, dst.handle))
+		fail("close indexed-textured destination");
+	if (src.handle && close_bo(fd, src.handle))
+		fail("close indexed-textured source");
+}
+
 static void test_wide_scaled_blit(int fd)
 {
 	struct drm_gcn_ctx_create ctx = {};
@@ -2992,6 +3179,12 @@ int main(int argc, char **argv)
 		else
 			fail_value("indexed triangle-batch render feature", features,
 				   DRM_GCN_FEATURE_DRAW_INDEXED_TRIANGLES_RGB565);
+		if (features &
+		    DRM_GCN_FEATURE_DRAW_INDEXED_TEXTURED_TRIANGLES_RGB565)
+			test_draw_indexed_textured_triangles(fd);
+		else
+			fail_value("indexed textured render feature", features,
+				   DRM_GCN_FEATURE_DRAW_INDEXED_TEXTURED_TRIANGLES_RGB565);
 		if (features & DRM_GCN_FEATURE_BLIT_SCALED_RGB565)
 			test_wide_scaled_blit(fd);
 		if (features & DRM_GCN_FEATURE_BLIT_SCALED_RGB565)

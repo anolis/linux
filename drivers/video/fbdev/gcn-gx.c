@@ -1477,6 +1477,21 @@ static void gx_setup_rgb565_texture_state_mode(u16 width, u16 height,
 	gx_load_identity_post_mtx();
 }
 
+static void
+gx_setup_indexed_rgb565_texture_state(u16 width, u16 height,
+				      const struct gcn_drm_draw_state *state)
+{
+	gx_setup_rgb565_texture_state_mode(width, height, true);
+	gx_set_viewport(state->viewport_x, state->viewport_y,
+			state->viewport_width, state->viewport_height);
+	gx_set_scissor(state->scissor_x, state->scissor_y,
+		       state->scissor_width, state->scissor_height);
+	/* Indexed8 XY/F32 position, RGBA8 colour, and ST/F32 TEX0. */
+	gx_load_cp_reg(0x50, 0x00004400);
+	gx_load_cp_reg(0x60, 0x00000002);
+	gx_load_cp_reg(0x70, 0x41216008);
+}
+
 static void gx_setup_rgb565_texture_state(u16 width, u16 height)
 {
 	gx_setup_rgb565_texture_state_mode(width, height,
@@ -1747,6 +1762,51 @@ gx_draw_indexed_color_triangles(const struct gcn_drm_color_vertex *vertices,
 	gx_wr8(0x90); /* GX_TRIANGLES | vtxfmt 0 */
 	gx_wr16be(index_count);
 	for (i = 0; i < index_count; i++) {
+		gx_wr8(indices[i]);
+		gx_wr8(indices[i]);
+	}
+}
+
+static void gx_draw_itex(const struct gcn_drm_texture_vertex *vertices,
+			 u32 vertex_count,
+		const u8 *indices, u32 triangle_count,
+		u16 texture_width, u16 texture_height)
+{
+	unsigned int index_count = triangle_count * 3;
+	__be32 *positions = gx_tex_buf_alt;
+	__be32 *texcoords = (__be32 *)((u8 *)positions +
+					      ALIGN(vertex_count * 8, 32));
+	u8 *colours = (u8 *)texcoords + ALIGN(vertex_count * 8, 32);
+	unsigned int i;
+
+	for (i = 0; i < vertex_count; i++) {
+		u32 s = gx_semantic_texcoord_bits(vertices[i].s, texture_width);
+		u32 t = gx_semantic_texcoord_bits(vertices[i].t, texture_height);
+
+		positions[i * 2] = cpu_to_be32(f32_from_u16(vertices[i].x));
+		positions[i * 2 + 1] = cpu_to_be32(f32_from_u16(vertices[i].y));
+		texcoords[i * 2] = cpu_to_be32(s);
+		texcoords[i * 2 + 1] = cpu_to_be32(t);
+		colours[i * 4] = 0xff;
+		colours[i * 4 + 1] = 0xff;
+		colours[i * 4 + 2] = 0xff;
+		colours[i * 4 + 3] = 0xff;
+	}
+	flush_dcache_range((unsigned long)positions,
+			   (unsigned long)colours + vertex_count * 4);
+	gx_wr8(0x48); /* GX_InvVtxCache after modifying indexed arrays. */
+
+	gx_load_cp_reg(0xa0, (u32)virt_to_phys(positions));
+	gx_load_cp_reg(0xb0, 8);
+	gx_load_cp_reg(0xa2, (u32)virt_to_phys(colours));
+	gx_load_cp_reg(0xb2, 4);
+	gx_load_cp_reg(0xa4, (u32)virt_to_phys(texcoords));
+	gx_load_cp_reg(0xb4, 8);
+
+	gx_wr8(0x90); /* GX_TRIANGLES | vtxfmt 0 */
+	gx_wr16be(index_count);
+	for (i = 0; i < index_count; i++) {
+		gx_wr8(indices[i]);
 		gx_wr8(indices[i]);
 		gx_wr8(indices[i]);
 	}
@@ -3145,7 +3205,8 @@ static int gcn_gx_drm_mem1_info(struct gcn_drm_mem1_info *info)
 			 DRM_GCN_FEATURE_DRAW_TRIANGLES_STATE_RGB565 |
 			 DRM_GCN_FEATURE_DRAW_TRIANGLES_DEPTH_RGB565 |
 			 DRM_GCN_FEATURE_DRAW_TEXTURED_TRIANGLES_RGB565 |
-			 DRM_GCN_FEATURE_DRAW_INDEXED_TRIANGLES_RGB565;
+			 DRM_GCN_FEATURE_DRAW_INDEXED_TRIANGLES_RGB565 |
+			 DRM_GCN_FEATURE_DRAW_INDEXED_TEXTURED_TRIANGLES_RGB565;
 	mutex_unlock(&gx_mem1_lock);
 	return 0;
 }
@@ -3900,6 +3961,116 @@ out_unlock:
 	return ret;
 }
 
+static int gcn_gx_drm_draw_itex(void *src_allocation, void *dst_allocation,
+				u16 src_width, u16 src_height,
+				u16 dst_width, u16 dst_height,
+		const struct gcn_drm_texture_vertex *vertices, u32 vertex_count,
+		const u8 *indices, u32 triangle_count,
+		const struct gcn_drm_draw_state *state)
+{
+	struct gx_mem1_allocation *src = src_allocation;
+	struct gx_mem1_allocation *dst = dst_allocation;
+	unsigned int index_count = triangle_count * 3;
+	u32 finish_count;
+	size_t src_bytes;
+	size_t dst_bytes;
+	long completed;
+	unsigned int i;
+	int ret;
+
+	if (!src || !dst || src == dst || !vertices || !indices || !state ||
+	    vertex_count < 3 || vertex_count > DRM_GCN_MAX_VERTICES ||
+	    !triangle_count || triangle_count > DRM_GCN_MAX_TRIANGLES ||
+	    !src_width || !src_height || !dst_width || !dst_height ||
+	    (src_width & 3) || (src_height & 3) ||
+	    (dst_width & 3) || (dst_height & 3) ||
+	    !state->viewport_width || !state->viewport_height ||
+	    state->viewport_x >= dst_width || state->viewport_y >= dst_height ||
+	    state->viewport_width > dst_width - state->viewport_x ||
+	    state->viewport_height > dst_height - state->viewport_y ||
+	    !state->scissor_width || !state->scissor_height ||
+	    state->scissor_x >= dst_width || state->scissor_y >= dst_height ||
+	    state->scissor_width > dst_width - state->scissor_x ||
+	    state->scissor_height > dst_height - state->scissor_y ||
+	    state->blend_mode != DRM_GCN_BLEND_NONE)
+		return -EINVAL;
+	for (i = 0; i < vertex_count; i++) {
+		if (vertices[i].x > dst_width || vertices[i].y > dst_height ||
+		    vertices[i].s > src_width || vertices[i].t > src_height)
+			return -EINVAL;
+	}
+	for (i = 0; i < index_count; i++) {
+		if (indices[i] >= vertex_count)
+			return -EINVAL;
+	}
+	for (i = 0; i < index_count; i += 3) {
+		const struct gcn_drm_texture_vertex *a = &vertices[indices[i]];
+		const struct gcn_drm_texture_vertex *b = &vertices[indices[i + 1]];
+		const struct gcn_drm_texture_vertex *c = &vertices[indices[i + 2]];
+		s64 area = (s64)(b->x - a->x) * (c->y - a->y) -
+			   (s64)(c->x - a->x) * (b->y - a->y);
+
+		if (!area)
+			return -EINVAL;
+	}
+
+	src_bytes = (size_t)src_width * src_height * sizeof(u16);
+	dst_bytes = (size_t)dst_width * dst_height * sizeof(u16);
+	if (src_bytes > src->size || dst_bytes > dst->size)
+		return -E2BIG;
+	if (!READ_ONCE(gx_accel_ready))
+		return -ENODEV;
+
+	mutex_lock(&gx_submit_lock);
+	flush_dcache_range((unsigned long)src->cpu_addr,
+			   (unsigned long)src->cpu_addr + src_bytes);
+	flush_dcache_range((unsigned long)dst->cpu_addr,
+			   (unsigned long)dst->cpu_addr + dst_bytes);
+
+	finish_count = READ_ONCE(gx_pe_finish_count);
+	fifo_pos = 0;
+	gx_load_libogc_init_preamble();
+	gx_setup_display_copy_state();
+
+	/* Restore destination colour before applying the indexed primitive. */
+	gx_setup_rgb565_texture_state_mode(dst_width, dst_height, false);
+	gx_setup_texture_rgb565(dst->cpu_addr, dst_width, dst_height);
+	gx_setup_texture_coordinate_scale(dst_width, dst_height, false, false);
+	gx_draw_color_quad(dst_width, dst_height, 0xff, 0xff, 0xff);
+	gx_load_bp_reg(0x45000002);
+	for (i = 0; i < 32; i++)
+		gx_wr8(0);
+
+	gx_setup_indexed_rgb565_texture_state(dst_width, dst_height, state);
+	gx_setup_texture_rgb565(src->cpu_addr, src_width, src_height);
+	gx_setup_texture_coordinate_scale(src_width, src_height, false, false);
+	gx_draw_itex(vertices, vertex_count, indices, triangle_count,
+		     src_width, src_height);
+	gx_load_bp_reg(0x45000002);
+	for (i = 0; i < 32; i++)
+		gx_wr8(0);
+
+	gx_set_copy_clear_rgb(0x00, 0x00, 0x00);
+	gx_copy_efb_to_rgb565_texture(dst->cpu_addr, dst_width, dst_height, true);
+	ret = gx_submit_cmds("render-draw-indexed-textured");
+	if (ret)
+		goto out_unlock;
+
+	completed = gx_wait_for_pe_finishes(finish_count, 1);
+	if (!completed) {
+		pr_warn_ratelimited("gcn-gx: indexed textured batch timed out waiting for final PE finish\n");
+		ret = -ETIMEDOUT;
+		goto out_unlock;
+	}
+
+	invalidate_dcache_range((unsigned long)dst->cpu_addr,
+				(unsigned long)dst->cpu_addr + dst_bytes);
+
+out_unlock:
+	mutex_unlock(&gx_submit_lock);
+	return ret;
+}
+
 static int
 gcn_gx_drm_draw_triangle_rgb565(void *dst_allocation, u16 width, u16 height,
 				const struct gcn_drm_color_vertex vertices[3])
@@ -4384,6 +4555,8 @@ static const struct gcn_drm_accel_ops gcn_gx_drm_accel_ops = {
 		gcn_gx_drm_draw_textured_rgb565,
 	.draw_indexed_triangles_rgb565 =
 		gcn_gx_drm_draw_indexed_rgb565,
+	.draw_indexed_textured_triangles_rgb565 =
+		gcn_gx_drm_draw_itex,
 };
 #endif
 
@@ -4880,7 +5053,7 @@ static int gcn_gx_probe(struct platform_device *pdev)
 		return ret;
 
 #if IS_ENABLED(CONFIG_DRM_GCN_GX)
-	ret = gcn_drm_register_accel_v5(&gcn_gx_drm_accel_ops);
+	ret = gcn_drm_register_accel_v6(&gcn_gx_drm_accel_ops);
 #else
 	ret = gcnfb_register_accel(&gcn_gx_accel_ops);
 #endif
@@ -4906,7 +5079,7 @@ static void gcn_gx_remove(struct platform_device *pdev)
 	cancel_work_sync(&gx_frame_work.work);
 	gcnfb_unregister_accel(&gcn_gx_accel_ops);
 #else
-	gcn_drm_unregister_accel_v5(&gcn_gx_drm_accel_ops);
+	gcn_drm_unregister_accel_v6(&gcn_gx_drm_accel_ops);
 #endif
 	gcn_gx_exit();
 }

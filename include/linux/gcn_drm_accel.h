@@ -139,9 +139,17 @@ struct gcn_drm_accel_ops {
 					     u32 vertex_count, const u8 *indices,
 					     u32 triangle_count,
 					     const struct gcn_drm_draw_state *state);
+	int (*draw_indexed_textured_triangles_rgb565)(void *src_allocation,
+						      void *dst_allocation,
+					     u16 src_width, u16 src_height,
+					     u16 dst_width, u16 dst_height,
+					     const struct gcn_drm_texture_vertex *vertices,
+					     u32 vertex_count, const u8 *indices,
+					     u32 triangle_count,
+					     const struct gcn_drm_draw_state *state);
 };
 
-int gcn_drm_register_accel_v5(const struct gcn_drm_accel_ops *ops);
-void gcn_drm_unregister_accel_v5(const struct gcn_drm_accel_ops *ops);
+int gcn_drm_register_accel_v6(const struct gcn_drm_accel_ops *ops);
+void gcn_drm_unregister_accel_v6(const struct gcn_drm_accel_ops *ops);
 
 #endif /* _LINUX_GCN_DRM_ACCEL_H */
