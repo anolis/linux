@@ -3281,8 +3281,8 @@ static int gcn_gx_drm_blit(const void *src, u32 src_pitch, u32 xfb_phys,
 		 * Generated frames signal once after rasterization and again after
 		 * the EFB-to-XFB copy.  Do not publish the page at the first marker.
 		 */
-		completed = gx_wait_for_pe_finishes(finish_count,
-						    GX_DRM_FRAME_PE_FINISHES);
+		/* The final token orders copyback; finish IRQs may coalesce. */
+		completed = gx_wait_for_pe_finishes(finish_count, 1);
 		if (!completed) {
 			pr_warn_ratelimited("gcn-gx: DRM frame timed out waiting for final PE finish\n");
 			ret = -ETIMEDOUT;
