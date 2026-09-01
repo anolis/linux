@@ -35,7 +35,9 @@ static void gcn_drm_render_uapi_layout(struct kunit *test)
 	KUNIT_EXPECT_EQ(test, sizeof(struct drm_gcn_texture_depth_vertex), 12U);
 	KUNIT_EXPECT_EQ(test,
 			sizeof(struct drm_gcn_draw_indexed_textured_depth), 96U);
-	KUNIT_EXPECT_EQ(test, DRM_GCN_NUM_IOCTLS, 16);
+	KUNIT_EXPECT_EQ(test, sizeof(struct drm_gcn_fixed_vertex), 16U);
+	KUNIT_EXPECT_EQ(test, sizeof(struct drm_gcn_draw_indexed_fixed), 96U);
+	KUNIT_EXPECT_EQ(test, DRM_GCN_NUM_IOCTLS, 17);
 	KUNIT_EXPECT_EQ(test, DRM_GCN_PARAM_FEATURES, 9);
 	KUNIT_EXPECT_EQ(test,
 			DRM_GCN_FEATURE_BLIT_RECT_RGB565_UNEQUAL_DIMS,
@@ -69,6 +71,8 @@ static void gcn_drm_render_uapi_layout(struct kunit *test)
 	KUNIT_EXPECT_EQ(test,
 			DRM_GCN_FEATURE_DRAW_INDEXED_TEXTURED_DEPTH_RGB565,
 			1ULL << 22);
+	KUNIT_EXPECT_EQ(test, DRM_GCN_FEATURE_DRAW_INDEXED_FIXED_RGB565,
+			1ULL << 23);
 }
 
 static void gcn_drm_render_validates_color_triangle(struct kunit *test)
@@ -588,6 +592,123 @@ static void gcn_drm_render_validates_itex_depth(struct kunit *test)
 	KUNIT_EXPECT_EQ(test, ret, -EINVAL);
 }
 
+static void gcn_drm_render_validates_fixed_draw(struct kunit *test)
+{
+	struct drm_gcn_draw_indexed_fixed args = {
+		.ctx_id = 1,
+		.src_handle = 2,
+		.dst_handle = 3,
+		.vertex_count = 5,
+		.triangle_count = 2,
+		.tev_mode = DRM_GCN_TEV_MODULATE,
+		.vertices_ptr = 0x1000,
+		.indices_ptr = 0x2000,
+		.state = {
+			.viewport_width = 640,
+			.viewport_height = 480,
+			.scissor_width = 640,
+			.scissor_height = 480,
+			.blend_mode = DRM_GCN_BLEND_NONE,
+		},
+		.depth = {
+			.test_enable = 1,
+			.compare = DRM_GCN_DEPTH_LESS,
+			.write_enable = 1,
+		},
+	};
+	struct drm_gcn_fixed_vertex vertices[5] = {
+		{ 0, 0, DRM_GCN_DEPTH_MAX,
+		  DRM_GCN_RGBA8(0, 0, 0xff, 0xff), 320, 192 },
+		{ 32, 40, 0, DRM_GCN_RGBA8(0, 0xff, 0xff, 0xff), 0, 0 },
+		{ 224, 40, DRM_GCN_DEPTH_MAX / 2,
+		  DRM_GCN_RGBA8(0xff, 0, 0xff, 0xff), 320, 0 },
+		{ 224, 216, DRM_GCN_DEPTH_MAX,
+		  DRM_GCN_RGBA8(0xff, 0, 0xff, 0xff), 320, 192 },
+		{ 32, 216, 1, DRM_GCN_RGBA8(0, 0xff, 0xff, 0xff), 0, 192 },
+	};
+	u16 indices[6] = { 1, 2, 3, 1, 3, 4 };
+	int ret;
+
+	ret = gcn_drm_fixed_args(&args);
+	KUNIT_EXPECT_EQ(test, ret, 0);
+	ret = gcn_drm_fixed_vertices(vertices, 5, indices, 2,
+				     DRM_GCN_TEV_MODULATE,
+				     320, 192, 640, 480, true);
+	KUNIT_EXPECT_EQ(test, ret, 0);
+
+	args.tev_mode = DRM_GCN_TEV_REPLACE_TEXTURE;
+	ret = gcn_drm_fixed_args(&args);
+	KUNIT_EXPECT_EQ(test, ret, 0);
+	vertices[4].rgba &= ~0xffU;
+	ret = gcn_drm_fixed_vertices(vertices, 5, indices, 2,
+				     DRM_GCN_TEV_REPLACE_TEXTURE,
+				     320, 192, 640, 480, true);
+	KUNIT_EXPECT_EQ(test, ret, 0);
+	vertices[4].rgba |= 0xff;
+
+	args.tev_mode = DRM_GCN_TEV_PASS_COLOR;
+	args.src_handle = 0;
+	vertices[0].s = 0;
+	vertices[0].t = 0;
+	vertices[2].s = 0;
+	vertices[3].s = 0;
+	vertices[3].t = 0;
+	vertices[4].t = 0;
+	ret = gcn_drm_fixed_args(&args);
+	KUNIT_EXPECT_EQ(test, ret, 0);
+	ret = gcn_drm_fixed_vertices(vertices, 5, indices, 2,
+				     DRM_GCN_TEV_PASS_COLOR,
+				     0, 0, 640, 480, true);
+	KUNIT_EXPECT_EQ(test, ret, 0);
+
+	args.src_handle = 2;
+	ret = gcn_drm_fixed_args(&args);
+	KUNIT_EXPECT_EQ(test, ret, -EINVAL);
+	args.src_handle = 0;
+	vertices[4].s = 1;
+	ret = gcn_drm_fixed_vertices(vertices, 5, indices, 2,
+				     DRM_GCN_TEV_PASS_COLOR,
+				     0, 0, 640, 480, true);
+	KUNIT_EXPECT_EQ(test, ret, -EINVAL);
+	vertices[4].s = 0;
+
+	args.tev_mode = DRM_GCN_TEV_MODULATE;
+	ret = gcn_drm_fixed_args(&args);
+	KUNIT_EXPECT_EQ(test, ret, -EINVAL);
+	args.src_handle = 2;
+	vertices[4].rgba &= ~0xffU;
+	ret = gcn_drm_fixed_vertices(vertices, 5, indices, 2,
+				     DRM_GCN_TEV_MODULATE,
+				     320, 192, 640, 480, true);
+	KUNIT_EXPECT_EQ(test, ret, -EINVAL);
+	ret = gcn_drm_fixed_vertices(vertices, 5, indices, 2,
+				     DRM_GCN_TEV_MODULATE,
+				     320, 192, 640, 480, false);
+	KUNIT_EXPECT_EQ(test, ret, 0);
+	vertices[4].rgba |= 0xff;
+
+	args.tev_mode = DRM_GCN_TEV_REPLACE_TEXTURE;
+	args.state.blend_mode = DRM_GCN_BLEND_SRC_ALPHA;
+	ret = gcn_drm_fixed_args(&args);
+	KUNIT_EXPECT_EQ(test, ret, -EINVAL);
+	args.state.blend_mode = DRM_GCN_BLEND_NONE;
+	indices[5] = 5;
+	ret = gcn_drm_fixed_vertices(vertices, 5, indices, 2,
+				     DRM_GCN_TEV_REPLACE_TEXTURE,
+				     320, 192, 640, 480, true);
+	KUNIT_EXPECT_EQ(test, ret, -EINVAL);
+	indices[5] = 4;
+	indices[1] = 1;
+	ret = gcn_drm_fixed_vertices(vertices, 5, indices, 2,
+				     DRM_GCN_TEV_REPLACE_TEXTURE,
+				     320, 192, 640, 480, true);
+	KUNIT_EXPECT_EQ(test, ret, -EINVAL);
+	indices[1] = 2;
+	args.depth.write_enable = 2;
+	ret = gcn_drm_fixed_args(&args);
+	KUNIT_EXPECT_EQ(test, ret, -EINVAL);
+}
+
 static void gcn_drm_render_validates_scaled_blit(struct kunit *test)
 {
 	struct drm_gcn_blit_scaled args = {
@@ -937,6 +1058,7 @@ static struct kunit_case gcn_drm_render_test_cases[] = {
 	KUNIT_CASE(gcn_drm_render_validates_indexed_triangle_batch),
 	KUNIT_CASE(gcn_drm_render_validates_indexed_textured),
 	KUNIT_CASE(gcn_drm_render_validates_itex_depth),
+	KUNIT_CASE(gcn_drm_render_validates_fixed_draw),
 	{}
 };
 

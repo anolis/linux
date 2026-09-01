@@ -1107,6 +1107,20 @@ submit_itex_depth(int fd, struct drm_gcn_draw_indexed_textured_depth *draw,
 	return ioctl(fd, DRM_IOCTL_SYNCOBJ_WAIT, &wait);
 }
 
+static int submit_fixed(int fd, struct drm_gcn_draw_indexed_fixed *draw,
+			uint32_t sync_handle)
+{
+	struct drm_syncobj_wait wait = {
+		.handles = (uintptr_t)&sync_handle,
+		.timeout_nsec = (int64_t)(monotonic_ns() + 1000000000ULL),
+		.count_handles = 1,
+	};
+
+	if (ioctl(fd, DRM_IOCTL_GCN_DRAW_INDEXED_FIXED, draw))
+		return -1;
+	return ioctl(fd, DRM_IOCTL_SYNCOBJ_WAIT, &wait);
+}
+
 static void test_draw_triangles_state(int fd)
 {
 	struct drm_syncobj_create sync = {};
@@ -2737,6 +2751,302 @@ out:
 		fail("close indexed-textured-depth source");
 }
 
+static void test_draw_indexed_fixed(int fd)
+{
+	const uint16_t sentinel = 0x39e7;
+	const uint16_t cyan = 0x07ff;
+	const uint16_t yellow = 0xffe0;
+	const uint16_t green = 0x07e0;
+	const uint16_t red = 0xf800;
+	struct drm_syncobj_create sync = {};
+	struct drm_syncobj_destroy destroy = {};
+	struct drm_gcn_ctx_create ctx = {};
+	struct drm_gcn_ctx_free free_ctx = {};
+	struct drm_gcn_gem_create src = {};
+	struct drm_gcn_gem_create dst = {};
+	struct drm_gcn_fixed_vertex vertices[9] = {
+		{ TEST_WIDTH / 2, TEST_HEIGHT / 2, DRM_GCN_DEPTH_MAX,
+		  DRM_GCN_RGBA8(0, 0, 0xff, 0xff), 64, 64 },
+		{ 0, 0, DRM_GCN_DEPTH_MAX / 8,
+		  DRM_GCN_RGBA8(0, 0xff, 0xff, 0xff), 0, 0 },
+		{ TEST_WIDTH, 0, DRM_GCN_DEPTH_MAX / 8,
+		  DRM_GCN_RGBA8(0, 0xff, 0xff, 0xff), TEST_WIDTH, 0 },
+		{ TEST_WIDTH, TEST_HEIGHT, DRM_GCN_DEPTH_MAX / 8,
+		  DRM_GCN_RGBA8(0, 0xff, 0xff, 0xff),
+		  TEST_WIDTH, TEST_HEIGHT },
+		{ 0, TEST_HEIGHT, DRM_GCN_DEPTH_MAX / 8,
+		  DRM_GCN_RGBA8(0, 0xff, 0xff, 0xff), 0, TEST_HEIGHT },
+		{ 0, 0, DRM_GCN_DEPTH_MAX * 3 / 4,
+		  DRM_GCN_RGBA8(0xff, 0, 0xff, 0xff), 0, 0 },
+		{ TEST_WIDTH, 0, DRM_GCN_DEPTH_MAX * 3 / 4,
+		  DRM_GCN_RGBA8(0xff, 0, 0xff, 0xff), TEST_WIDTH, 0 },
+		{ TEST_WIDTH, TEST_HEIGHT, DRM_GCN_DEPTH_MAX * 3 / 4,
+		  DRM_GCN_RGBA8(0xff, 0, 0xff, 0xff),
+		  TEST_WIDTH, TEST_HEIGHT },
+		{ 0, TEST_HEIGHT, DRM_GCN_DEPTH_MAX * 3 / 4,
+		  DRM_GCN_RGBA8(0xff, 0, 0xff, 0xff), 0, TEST_HEIGHT },
+	};
+	uint16_t indices[12] = { 1, 2, 3, 1, 3, 4, 5, 6, 7, 5, 7, 8 };
+	struct drm_gcn_draw_indexed_fixed draw = {
+		.vertex_count = ARRAY_SIZE(vertices),
+		.triangle_count = 4,
+		.tev_mode = DRM_GCN_TEV_MODULATE,
+		.vertices_ptr = (uintptr_t)vertices,
+		.indices_ptr = (uintptr_t)indices,
+		.state = {
+			.viewport_width = TEST_WIDTH,
+			.viewport_height = TEST_HEIGHT,
+			.scissor_x = 20,
+			.scissor_y = 24,
+			.scissor_width = 216,
+			.scissor_height = 208,
+			.blend_mode = DRM_GCN_BLEND_NONE,
+		},
+		.depth = {
+			.test_enable = 1,
+			.compare = DRM_GCN_DEPTH_LESS,
+			.write_enable = 1,
+		},
+	};
+	uint16_t *src_map = MAP_FAILED;
+	uint16_t *dst_map = MAP_FAILED;
+	unsigned int checked_pass = 0;
+	unsigned int checked_replace = 0;
+	unsigned int checked_depth = 0;
+	unsigned int checked_painter = 0;
+	unsigned int checked_preserved = 0;
+
+	if (create_bo(fd, &src) || create_bo(fd, &dst)) {
+		fail("create fixed-draw objects");
+		goto out;
+	}
+	src_map = map_bo(fd, &src);
+	dst_map = map_bo(fd, &dst);
+	if (src_map == MAP_FAILED || dst_map == MAP_FAILED) {
+		fail("map fixed-draw objects");
+		goto out;
+	}
+	if (ioctl(fd, DRM_IOCTL_GCN_CTX_CREATE, &ctx)) {
+		fail("create fixed-draw context");
+		goto out;
+	}
+	if (ioctl(fd, DRM_IOCTL_SYNCOBJ_CREATE, &sync)) {
+		fail("create fixed-draw syncobj");
+		goto out_ctx;
+	}
+
+	for (unsigned int y = 0; y < TEST_HEIGHT; y++) {
+		for (unsigned int x = 0; x < TEST_WIDTH; x++) {
+			size_t pixel = tiled_rgb565_index(x, y, TEST_WIDTH);
+
+			src_map[pixel] = yellow;
+			dst_map[pixel] = sentinel;
+		}
+	}
+
+	draw.ctx_id = ctx.id;
+	draw.src_handle = src.handle;
+	draw.dst_handle = dst.handle;
+	draw.out_syncobj = sync.handle;
+
+	draw.src_handle = 0;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_INDEXED_FIXED, &draw) ||
+	    errno != EINVAL)
+		fail("texture fixed draw without source should return EINVAL");
+	draw.src_handle = src.handle;
+	draw.tev_mode = DRM_GCN_TEV_REPLACE_TEXTURE;
+	draw.state.blend_mode = DRM_GCN_BLEND_SRC_ALPHA;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_INDEXED_FIXED, &draw) ||
+	    errno != EINVAL)
+		fail("blended replace fixed draw should return EINVAL");
+	draw.state.blend_mode = DRM_GCN_BLEND_NONE;
+	draw.tev_mode = DRM_GCN_TEV_MODULATE;
+	vertices[8].rgba &= ~0x7fU;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_INDEXED_FIXED, &draw) ||
+	    errno != EINVAL)
+		fail("nonopaque unblended fixed draw should return EINVAL");
+	vertices[8].rgba |= 0xff;
+	indices[0] = ARRAY_SIZE(vertices);
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_INDEXED_FIXED, &draw) ||
+	    errno != EINVAL)
+		fail("out-of-range fixed-draw index should return EINVAL");
+	indices[0] = 1;
+	indices[1] = 1;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_INDEXED_FIXED, &draw) ||
+	    errno != EINVAL)
+		fail("degenerate fixed draw should return EINVAL");
+	indices[1] = 2;
+	vertices[8].z = DRM_GCN_DEPTH_MAX + 1;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_INDEXED_FIXED, &draw) ||
+	    errno != EINVAL)
+		fail("out-of-range fixed depth should return EINVAL");
+	vertices[8].z = DRM_GCN_DEPTH_MAX * 3 / 4;
+	draw.vertices_ptr = 1;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_INDEXED_FIXED, &draw) ||
+	    errno != EFAULT)
+		fail("bad fixed-draw vertex pointer should return EFAULT");
+	draw.vertices_ptr = (uintptr_t)vertices;
+	draw.indices_ptr = 1;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_INDEXED_FIXED, &draw) ||
+	    errno != EFAULT)
+		fail("bad fixed-draw index pointer should return EFAULT");
+	draw.indices_ptr = (uintptr_t)indices;
+
+	draw.tev_mode = DRM_GCN_TEV_PASS_COLOR;
+	draw.src_handle = 0;
+	for (unsigned int i = 0; i < ARRAY_SIZE(vertices); i++) {
+		vertices[i].s = 0;
+		vertices[i].t = 0;
+	}
+	if (submit_fixed(fd, &draw, sync.handle)) {
+		fail("draw fixed pass-color control");
+		goto out_sync;
+	}
+	for (unsigned int y = 0; y < TEST_HEIGHT; y++) {
+		for (unsigned int x = 0; x < TEST_WIDTH; x++) {
+			bool inside = x >= draw.state.scissor_x &&
+				x < draw.state.scissor_x + draw.state.scissor_width &&
+				y >= draw.state.scissor_y &&
+				y < draw.state.scissor_y + draw.state.scissor_height;
+			uint16_t expected = inside ? cyan : sentinel;
+			size_t pixel = tiled_rgb565_index(x, y, TEST_WIDTH);
+
+			if (inside)
+				checked_pass++;
+			else
+				checked_preserved++;
+			if (dst_map[pixel] != expected) {
+				fprintf(stderr,
+					"FAIL: fixed pass-color mismatch at (%u,%u): got=0x%04x expected=0x%04x\n",
+					x, y, dst_map[pixel], expected);
+				failures++;
+				goto out_sync;
+			}
+		}
+	}
+
+	for (unsigned int y = 0; y < TEST_HEIGHT; y++)
+		for (unsigned int x = 0; x < TEST_WIDTH; x++)
+			dst_map[tiled_rgb565_index(x, y, TEST_WIDTH)] = sentinel;
+	draw.tev_mode = DRM_GCN_TEV_REPLACE_TEXTURE;
+	draw.src_handle = src.handle;
+	if (submit_fixed(fd, &draw, sync.handle)) {
+		fail("draw fixed replace-texture control");
+		goto out_sync;
+	}
+	for (unsigned int y = draw.state.scissor_y;
+	     y < draw.state.scissor_y + draw.state.scissor_height; y++) {
+		for (unsigned int x = draw.state.scissor_x;
+		     x < draw.state.scissor_x + draw.state.scissor_width; x++) {
+			size_t pixel = tiled_rgb565_index(x, y, TEST_WIDTH);
+
+			checked_replace++;
+			if (dst_map[pixel] != yellow) {
+				fprintf(stderr,
+					"FAIL: fixed replace mismatch at (%u,%u): got=0x%04x expected=0x%04x\n",
+					x, y, dst_map[pixel], yellow);
+				failures++;
+				goto out_sync;
+			}
+		}
+	}
+
+	for (unsigned int y = 0; y < TEST_HEIGHT; y++)
+		for (unsigned int x = 0; x < TEST_WIDTH; x++)
+			dst_map[tiled_rgb565_index(x, y, TEST_WIDTH)] = sentinel;
+	vertices[0].s = 64;
+	vertices[0].t = 64;
+	vertices[2].s = TEST_WIDTH;
+	vertices[3].s = TEST_WIDTH;
+	vertices[3].t = TEST_HEIGHT;
+	vertices[4].t = TEST_HEIGHT;
+	vertices[6].s = TEST_WIDTH;
+	vertices[7].s = TEST_WIDTH;
+	vertices[7].t = TEST_HEIGHT;
+	vertices[8].t = TEST_HEIGHT;
+	draw.tev_mode = DRM_GCN_TEV_MODULATE;
+	if (submit_fixed(fd, &draw, sync.handle)) {
+		fail("draw fixed modulated depth batch");
+		goto out_sync;
+	}
+	for (unsigned int y = 0; y < TEST_HEIGHT; y++) {
+		for (unsigned int x = 0; x < TEST_WIDTH; x++) {
+			bool inside = x >= draw.state.scissor_x &&
+				x < draw.state.scissor_x + draw.state.scissor_width &&
+				y >= draw.state.scissor_y &&
+				y < draw.state.scissor_y + draw.state.scissor_height;
+			uint16_t expected = inside ? green : sentinel;
+			size_t pixel = tiled_rgb565_index(x, y, TEST_WIDTH);
+
+			if (inside)
+				checked_depth++;
+			if (dst_map[pixel] != expected) {
+				fprintf(stderr,
+					"FAIL: fixed modulate-depth mismatch at (%u,%u): got=0x%04x expected=0x%04x\n",
+					x, y, dst_map[pixel], expected);
+				failures++;
+				goto out_sync;
+			}
+		}
+	}
+
+	for (unsigned int y = 0; y < TEST_HEIGHT; y++)
+		for (unsigned int x = 0; x < TEST_WIDTH; x++)
+			dst_map[tiled_rgb565_index(x, y, TEST_WIDTH)] = sentinel;
+	draw.depth.test_enable = 0;
+	draw.depth.compare = DRM_GCN_DEPTH_ALWAYS;
+	draw.depth.write_enable = 0;
+	if (submit_fixed(fd, &draw, sync.handle)) {
+		fail("draw fixed modulated painter-order control");
+		goto out_sync;
+	}
+	for (unsigned int y = draw.state.scissor_y;
+	     y < draw.state.scissor_y + draw.state.scissor_height; y++) {
+		for (unsigned int x = draw.state.scissor_x;
+		     x < draw.state.scissor_x + draw.state.scissor_width; x++) {
+			size_t pixel = tiled_rgb565_index(x, y, TEST_WIDTH);
+
+			checked_painter++;
+			if (dst_map[pixel] != red) {
+				fprintf(stderr,
+					"FAIL: fixed modulate-painter mismatch at (%u,%u): got=0x%04x expected=0x%04x\n",
+					x, y, dst_map[pixel], red);
+				failures++;
+				goto out_sync;
+			}
+		}
+	}
+	printf("DRAW fixed: pass=%u replace=%u near=%u painter=%u preserved=%u\n",
+	       checked_pass, checked_replace, checked_depth, checked_painter,
+	       checked_preserved);
+
+out_sync:
+	destroy.handle = sync.handle;
+	if (ioctl(fd, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy))
+		fail("destroy fixed-draw syncobj");
+out_ctx:
+	free_ctx.id = ctx.id;
+	if (ioctl(fd, DRM_IOCTL_GCN_CTX_FREE, &free_ctx))
+		fail("free fixed-draw context");
+out:
+	if (dst_map != MAP_FAILED && munmap(dst_map, dst.size))
+		fail("unmap fixed-draw destination");
+	if (src_map != MAP_FAILED && munmap(src_map, src.size))
+		fail("unmap fixed-draw source");
+	if (dst.handle && close_bo(fd, dst.handle))
+		fail("close fixed-draw destination");
+	if (src.handle && close_bo(fd, src.handle))
+		fail("close fixed-draw source");
+}
+
 static void test_wide_scaled_blit(int fd)
 {
 	struct drm_gcn_ctx_create ctx = {};
@@ -3449,6 +3759,11 @@ int main(int argc, char **argv)
 		else
 			fail_value("indexed textured depth render feature", features,
 				   DRM_GCN_FEATURE_DRAW_INDEXED_TEXTURED_DEPTH_RGB565);
+		if (features & DRM_GCN_FEATURE_DRAW_INDEXED_FIXED_RGB565)
+			test_draw_indexed_fixed(fd);
+		else
+			fail_value("indexed fixed-function render feature", features,
+				   DRM_GCN_FEATURE_DRAW_INDEXED_FIXED_RGB565);
 		if (features & DRM_GCN_FEATURE_BLIT_SCALED_RGB565)
 			test_wide_scaled_blit(fd);
 		if (features & DRM_GCN_FEATURE_BLIT_SCALED_RGB565)

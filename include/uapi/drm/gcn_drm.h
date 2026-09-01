@@ -51,6 +51,7 @@ enum drm_gcn_param {
 #define DRM_GCN_FEATURE_DRAW_INDEXED_TRIANGLES_RGB565	(1ULL << 20)
 #define DRM_GCN_FEATURE_DRAW_INDEXED_TEXTURED_TRIANGLES_RGB565	(1ULL << 21)
 #define DRM_GCN_FEATURE_DRAW_INDEXED_TEXTURED_DEPTH_RGB565	(1ULL << 22)
+#define DRM_GCN_FEATURE_DRAW_INDEXED_FIXED_RGB565	(1ULL << 23)
 
 struct drm_gcn_get_param {
 	__u32 param;
@@ -507,6 +508,51 @@ struct drm_gcn_draw_indexed_textured_depth {
 	__u64 pad1;
 };
 
+enum drm_gcn_tev_mode {
+	DRM_GCN_TEV_PASS_COLOR = 0,
+	DRM_GCN_TEV_REPLACE_TEXTURE = 1,
+	DRM_GCN_TEV_MODULATE = 2,
+};
+
+struct drm_gcn_fixed_vertex {
+	__u16 x;
+	__u16 y;
+	/* Screen-space depth: zero is near and DRM_GCN_DEPTH_MAX is far. */
+	__u32 z;
+	__u32 rgba;
+	__u16 s;
+	__u16 t;
+};
+
+/*
+ * Submit one bounded indexed fixed-function draw. PASS_COLOR requires a zero
+ * source handle and zero ST coordinates. Texture modes require a distinct
+ * tiled RGB565 source. No raw GX state or addresses are accepted.
+ */
+struct drm_gcn_draw_indexed_fixed {
+	__u32 ctx_id;
+	__u32 src_handle;
+	__u32 dst_handle;
+	/* Optional binary syncobj replaced with the completion fence. */
+	__u32 out_syncobj;
+	/* Must be zero. */
+	__u32 flags;
+	/* Inclusive range 3..DRM_GCN_MAX_VERTICES. */
+	__u32 vertex_count;
+	/* Inclusive range 1..DRM_GCN_MAX_TRIANGLES. */
+	__u32 triangle_count;
+	/* One of drm_gcn_tev_mode. */
+	__u32 tev_mode;
+	/* Userspace pointer to drm_gcn_fixed_vertex[vertex_count]. */
+	__u64 vertices_ptr;
+	/* Userspace pointer to __u16[triangle_count * 3]. */
+	__u64 indices_ptr;
+	struct drm_gcn_draw_state state;
+	struct drm_gcn_depth_state depth;
+	/* Must be zero. */
+	__u64 pad;
+};
+
 #define DRM_GCN_GET_PARAM	0x00
 #define DRM_GCN_GEM_CREATE	0x01
 #define DRM_GCN_GEM_MMAP	0x02
@@ -523,7 +569,8 @@ struct drm_gcn_draw_indexed_textured_depth {
 #define DRM_GCN_DRAW_INDEXED_TRIANGLES	0x0d
 #define DRM_GCN_DRAW_INDEXED_TEXTURED_TRIANGLES	0x0e
 #define DRM_GCN_DRAW_INDEXED_TEXTURED_DEPTH	0x0f
-#define DRM_GCN_NUM_IOCTLS	0x10
+#define DRM_GCN_DRAW_INDEXED_FIXED	0x10
+#define DRM_GCN_NUM_IOCTLS	0x11
 
 #define DRM_IOCTL_GCN_GET_PARAM \
 	DRM_IOWR(DRM_COMMAND_BASE + DRM_GCN_GET_PARAM, \
@@ -571,6 +618,9 @@ struct drm_gcn_draw_indexed_textured_depth {
 #define DRM_IOCTL_GCN_DRAW_INDEXED_TEXTURED_DEPTH \
 	DRM_IOW(DRM_COMMAND_BASE + DRM_GCN_DRAW_INDEXED_TEXTURED_DEPTH, \
 		 struct drm_gcn_draw_indexed_textured_depth)
+#define DRM_IOCTL_GCN_DRAW_INDEXED_FIXED \
+	DRM_IOW(DRM_COMMAND_BASE + DRM_GCN_DRAW_INDEXED_FIXED, \
+		 struct drm_gcn_draw_indexed_fixed)
 
 #if defined(__cplusplus)
 }

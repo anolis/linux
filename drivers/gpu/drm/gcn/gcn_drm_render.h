@@ -348,6 +348,82 @@ gcn_drm_itex_z_vertices(const struct drm_gcn_texture_depth_vertex *vertices,
 	return 0;
 }
 
+static inline int
+gcn_drm_fixed_args(const struct drm_gcn_draw_indexed_fixed *args)
+{
+	if (!args || !args->ctx_id || !args->dst_handle || args->flags ||
+	    args->vertex_count < 3 ||
+	    args->vertex_count > DRM_GCN_MAX_VERTICES ||
+	    !args->triangle_count ||
+	    args->triangle_count > DRM_GCN_MAX_TRIANGLES ||
+	    !args->vertices_ptr || !args->indices_ptr || args->state.pad ||
+	    args->depth.pad || args->pad ||
+	    args->tev_mode > DRM_GCN_TEV_MODULATE ||
+	    args->state.blend_mode > DRM_GCN_BLEND_SRC_ALPHA ||
+	    args->depth.test_enable > 1 || args->depth.write_enable > 1 ||
+	    args->depth.compare > DRM_GCN_DEPTH_ALWAYS)
+		return -EINVAL;
+
+	if (args->tev_mode == DRM_GCN_TEV_PASS_COLOR) {
+		if (args->src_handle)
+			return -EINVAL;
+	} else if (!args->src_handle || args->src_handle == args->dst_handle) {
+		return -EINVAL;
+	}
+	if (args->tev_mode == DRM_GCN_TEV_REPLACE_TEXTURE &&
+	    args->state.blend_mode != DRM_GCN_BLEND_NONE)
+		return -EINVAL;
+
+	return 0;
+}
+
+static inline int
+gcn_drm_fixed_vertices(const struct drm_gcn_fixed_vertex *vertices,
+		       u32 vertex_count, const u16 *indices,
+		       u32 triangle_count, u32 tev_mode,
+		       u16 src_width, u16 src_height,
+		       u16 dst_width, u16 dst_height,
+		       bool require_opaque)
+{
+	unsigned int index_count = triangle_count * 3;
+	unsigned int i;
+
+	if (!vertices || !indices)
+		return -EINVAL;
+
+	for (i = 0; i < vertex_count; i++) {
+		if (vertices[i].x > dst_width || vertices[i].y > dst_height ||
+		    vertices[i].z > DRM_GCN_DEPTH_MAX)
+			return -EINVAL;
+		if (tev_mode == DRM_GCN_TEV_PASS_COLOR) {
+			if (vertices[i].s || vertices[i].t)
+				return -EINVAL;
+		} else if (vertices[i].s > src_width ||
+			   vertices[i].t > src_height) {
+			return -EINVAL;
+		}
+		if (tev_mode != DRM_GCN_TEV_REPLACE_TEXTURE && require_opaque &&
+		    (vertices[i].rgba & 0xff) != 0xff)
+			return -EINVAL;
+	}
+	for (i = 0; i < index_count; i++) {
+		if (indices[i] >= vertex_count)
+			return -EINVAL;
+	}
+	for (i = 0; i < index_count; i += 3) {
+		const struct drm_gcn_fixed_vertex *a = &vertices[indices[i]];
+		const struct drm_gcn_fixed_vertex *b = &vertices[indices[i + 1]];
+		const struct drm_gcn_fixed_vertex *c = &vertices[indices[i + 2]];
+		s64 area = (s64)(b->x - a->x) * (c->y - a->y) -
+			   (s64)(c->x - a->x) * (b->y - a->y);
+
+		if (!area)
+			return -EINVAL;
+	}
+
+	return 0;
+}
+
 static inline int gcn_drm_validate_z(const struct drm_gcn_color_depth_vertex vertices[3],
 				     u16 dst_width, u16 dst_height,
 				     bool require_opaque)
