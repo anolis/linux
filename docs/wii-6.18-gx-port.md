@@ -14008,3 +14008,42 @@ oops, panic, machine check, reboot, capacity leak, stale pixel, or display
 corruption. Preserve any separately tracked one-sample scaler/conversion
 transient and require an immediate unchanged repeat without weakening the new
 or any retained exact oracle.
+
+Hardware result for candidate `29979df64`: accepted on boot ID
+`6f30cfd3-cd93-4359-854c-a44da9f36e26`. A read-only check of the actual boot
+partition verified the pinned `f41b1377...` image, live `/proc/kallsyms`
+exported only v8 registration, and no prior GX provider was loaded. Both
+checksum-identical invocations passed all five new exact oracles: 44,928
+scissored pixels were cyan for pass colour, yellow for texture replacement,
+near green for yellow-texture modulation under `LESS`, and far red for the
+depth-disabled painter-order control. All 20,608 exterior pixels preserved
+the destination sentinel. The conflicting unreferenced vertex had no effect.
+Every source-mode, blend, alpha, index, geometry, depth, and bad-pointer
+control returned its specified error.
+
+Both invocations passed the complete retained render-UAPI suite without a
+scaler or conversion transient. Every allocator, mapping, context, syncobj,
+copy, fill, rectangle, overlap, scale, colour/state/depth draw, textured draw,
+indexed draw, system-object, and XRGB8888 oracle passed exactly; both ended
+with `PASS: GCN render UAPI`. The authoritative repeat transcript is
+`/tmp/wii-fixed-function-final-output.txt`, SHA-256
+`73c44e2b521b1d19ec54ae2af28e83b64e6d50c2df4718f7d1335bc1752f321a`.
+
+Both provider intervals registered and unregistered normally, selected native
+GX chroma order, restored native CPU chroma order, rebound the VT console, and
+left the module absent. There was no test-interval PE/FIFO timeout, fallback,
+oops, panic, machine check, reboot, capacity leak, stale pixel, or display
+corruption. The complete post-test kernel log is
+`/tmp/wii-dmesg-fixed-function.txt`, SHA-256
+`b114ca440641ea93d249c786ccea096066201355d884e72983e5a7f0f606105e`.
+It retains the known boot-time PowerPC coherent-DMA alignment warning at
+`0.91s`; that warning occurred more than 249 seconds before the first provider
+load and is outside both candidate intervals.
+
+After acceptance, the checksum-identical v8 module was installed at
+`/lib/modules/6.18.40-wii+/kernel/drivers/video/fbdev/gcn-gx.ko` and `depmod`
+completed. Its installed SHA-256 is the pinned `52753aa8...` value above and
+its vermagic is `6.18.40-wii+ preempt mod_unload`. The accepted v7 module is
+retained at
+`gcn-gx.ko.backup.ccdd98ebcffe08ed25841f31b7e9893302dbc3bab9e6f0829209f1a3fcc14a18`
+with that exact SHA-256. The provider was left unloaded after installation.
