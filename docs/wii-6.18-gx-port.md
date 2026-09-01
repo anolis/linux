@@ -13936,3 +13936,75 @@ retained at
 with that exact SHA-256, so the installed provider and booted v7 core agree
 while the previous accepted provider remains recoverable. The provider was
 left unloaded after installation.
+
+#### Consolidated bounded indexed fixed-function draws
+
+- Candidate commit: `29979df64`
+- `zImage` / `dtbImage.wii` SHA-256:
+  `f41b13775c147a5e6d63ac31ff582b8913468a94316c9ea8049b9414327d6c3e`
+- `gcn-gx.ko` SHA-256:
+  `52753aa84cc6651efeb0ca00a20f6b7474d9538e1ba0ae0a4ff1f6f2e248975d`
+- static `wii-gcn-render-test` SHA-256:
+  `bb519052cacb0a63458ae6e406dbb033df9a3dc1b77e78fc76776fecf51dc2b5`
+- focused KUnit JSON SHA-256:
+  `9d85ee989c8821231a31a430553e0e96140804431f631e6e834119d4a01be0d7`
+
+Consolidate the independently accepted indexed colour, indexed texture, and
+indexed texture-depth paths into one bounded Gallium-facing fixed-function
+operation. The feature-gated ioctl accepts up to 192 shared semantic
+XYZ/RGBA/ST vertices, 64 triangles referenced by unsigned 16-bit indices,
+semantic viewport/scissor/blend/depth state, an optional output syncobj, and
+one of three explicit TEV modes: pass raster colour, replace with texture, or
+modulate raster colour and texture. Pass-colour draws require no source and
+zero ST coordinates. Texture modes require a distinct tiled MEM1 RGB565
+source. No raw GX packet, register, physical address, copy target, or
+unbounded count crosses the UAPI.
+
+The DRM core copies both arrays before object execution, validates every XY,
+U24 depth, mode-specific ST coordinate and raster alpha, validates every
+index, and resolves every triangle to reject degenerate geometry. It locks
+the source reservation only for textured modes, always locks and write-fences
+the destination, and adds a source-read fence when present. The private
+core/provider ABI advances from v7 to v8 by appending one callback.
+
+The provider retains the accepted two-submission depth initialization. It
+restores destination colour, selects the bounded semantic pipeline, uploads
+each shared XYZ/RGBA/ST element once, invalidates the GX vertex cache, emits
+the validated index stream for the active attributes, and copies EFB colour
+back only after the draw fence. `GX_MODULATE` uses the libogc-derived stage-0
+inputs `ZERO,TEXC,RASC,ZERO` and `ZERO,TEXA,RASA,ZERO`; texture replacement
+and pass colour reuse their already accepted state.
+
+The strict client first runs two independent positive controls. Pass colour
+must turn all 44,928 scissored pixels exact RGB565 cyan without a source;
+replace texture must turn them exact RGB565 yellow from a solid-yellow tiled
+source. The combined oracle then draws a near cyan quad and a far magenta quad
+through that yellow texture. With `LESS` depth and writes enabled, all 44,928
+scissored pixels must be exact green. With depth disabled, painter order must
+instead make all 44,928 pixels exact red. All 20,608 exterior pixels must
+preserve the destination sentinel. Vertex zero is valid but deliberately
+unreferenced and conflicting.
+
+Missing or forbidden sources, replace-texture blending, nonopaque raster
+colour without blending, an out-of-range index, resolved degenerate geometry,
+out-of-range depth, and invalid vertex or index pointers must return their
+specified errors before the positive controls run.
+
+Host validation passed `git diff --check`, strict patch checkpatch with zero
+errors, warnings, or checks across 1,232 lines, warning-free PowerPC
+`zImage modules -j16`, and static-client compilation with
+`-Wall -Wextra -Werror`. Focused KUnit passed all 24 tests: three
+`gcn_gx_mem1` tests and 21 `gcn_drm_render` tests, including the new layout and
+all three TEV-mode validation controls. Static symbols confirm that the
+provider imports only v8 registration and the matching kernel exports only v8
+registration.
+
+Boot the matching v8 kernel before loading the provider. Hardware acceptance
+requires the pass-colour, replace-texture, modulated-depth, painter-order, and
+preservation oracles in at least two checksum-identical invocations, every
+malformed-input control, the complete retained render-UAPI suite, normal
+provider unload and CPU-console restoration, and no PE/FIFO timeout, fallback,
+oops, panic, machine check, reboot, capacity leak, stale pixel, or display
+corruption. Preserve any separately tracked one-sample scaler/conversion
+transient and require an immediate unchanged repeat without weakening the new
+or any retained exact oracle.
