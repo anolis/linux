@@ -14047,3 +14047,71 @@ its vermagic is `6.18.40-wii+ preempt mod_unload`. The accepted v7 module is
 retained at
 `gcn-gx.ko.backup.ccdd98ebcffe08ed25841f31b7e9893302dbc3bab9e6f0829209f1a3fcc14a18`
 with that exact SHA-256. The provider was left unloaded after installation.
+
+#### Accept coalesced legacy DRM scanout completion and Mesa bootstrap
+
+- Scanout completion commit: `65d5a5296`
+- unchanged accepted v8 `zImage` SHA-256:
+  `f41b13775c147a5e6d63ac31ff582b8913468a94316c9ea8049b9414327d6c3e`
+- `gcn-gx.ko` SHA-256:
+  `f3aeee14dde22e3b9278067400b24749ed163f9c56dc1af48bd681ec587884b5`
+- Mesa bootstrap commits: `c0e2680`, `4fe6d6c`
+- private Mesa runtime bundle SHA-256:
+  `0ae03e61e8a0f11448e35db6fd770e51b8abda8b55c024ec5818ba0811caf407`
+- PowerPC EGL/GLES probe SHA-256:
+  `9091925c47caaca992248b1797aa85a3a9d63f5cd2731fde123efb0d0c7f33e6`
+
+The legacy DRM scanout callback still required two independently counted PE
+finish interrupts after one generated texture draw and EFB-to-XFB copy. This
+contradicted every accepted private render path. The final unique PE token
+already orders the entire stream through copyback, while adjacent BP `0x45`
+events are level-triggered and may coalesce into one handler invocation.
+Require one post-baseline finish event in `gcn_gx_drm_blit()` without changing
+any GX command byte, cache operation, fallback path, provider ABI, or UAPI.
+
+The old installed v8 module reproduced `DRM frame timed out waiting for final
+PE finish`, followed by `GX scanout failed (-110); using CPU conversion`.
+The checksum-pinned candidate was then loaded on the same accepted kernel and
+boot ID `6f30cfd3-cd93-4359-854c-a44da9f36e26`. It registered at timestamp
+`54265.030307` and subsequently advanced through 88,886 generated frames and
+177,741 PE finishes with no candidate-interval timeout, fallback, FIFO stall,
+oops, panic, machine check, or capacity leak. MEM1 remained exactly
+`524288/0/524288` bytes total/used/free.
+
+The first real Mesa bootstrap used the private `/opt/mesa-gcn` runtime rather
+than altering rootfs graphics libraries. Mesa selected the literal `gcn-vi`
+DRM driver, validated ABI version 1 and feature mask `0x00ffffff`, and reported
+that the current screen uses the explicit softpipe bootstrap. This is device
+selection and userspace plumbing validation, not a hardware OpenGL claim.
+
+The KMS softpipe winsys creates dumb buffers, so its GBM bootstrap must open
+the primary node `/dev/dri/card0`; render nodes intentionally reject the
+modesetting dumb-buffer ioctl. Big-endian Mesa advertised opaque 8:8:8:8
+fourcc `BX24` (`GBM_FORMAT_BGRX8888`, `0x34325842`) rather than `XR24`.
+With those two constraints, the checksum-pinned probe created a GBM surface,
+initialized EGL 1.5, created and bound an OpenGL ES context, and reported:
+
+```text
+MESA: info: gcn: ABI v1, features 0xffffff; using softpipe bootstrap
+GBM backend: drm
+EGL 1.5 vendor: Mesa Project
+EGL native format: 0x34325842
+GL vendor: Mesa
+GL renderer: softpipe
+GL version: OpenGL ES 3.1 Mesa 26.3.0-devel (git-c0e268063f)
+GL clear: PASS (0x0000)
+```
+
+Context initialization took 118 seconds on the 729 MHz single-core Wii, but
+completed without OOM: 27 MiB remained available and only 8 MiB of the 511 MiB
+swapfile was used afterward. During the exact probe interval PE finishes
+advanced from 177,081 to 177,500, a delta of 419, with no new GX timeout or CPU
+fallback. The private runtime includes its own `libdrm.so.2`, avoiding the
+failed attempt to install target graphics dependencies through `apt`.
+
+After acceptance, the candidate was installed at
+`/lib/modules/6.18.40-wii+/kernel/drivers/video/fbdev/gcn-gx.ko`, `depmod` and
+`sync` completed, and its installed SHA-256 matched the pinned `f3aeee14...`
+value. The prior accepted v8 module remains recoverable as
+`gcn-gx.ko.backup.52753aa84cc6651efeb0ca00a20f6b7474d9538e1ba0ae0a4ff1f6f2e248975d`
+with that exact checksum.
