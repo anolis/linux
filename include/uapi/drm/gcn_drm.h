@@ -52,6 +52,7 @@ enum drm_gcn_param {
 #define DRM_GCN_FEATURE_DRAW_INDEXED_TEXTURED_TRIANGLES_RGB565	(1ULL << 21)
 #define DRM_GCN_FEATURE_DRAW_INDEXED_TEXTURED_DEPTH_RGB565	(1ULL << 22)
 #define DRM_GCN_FEATURE_DRAW_INDEXED_FIXED_RGB565	(1ULL << 23)
+#define DRM_GCN_FEATURE_RASTER_CULL		(1ULL << 24)
 
 struct drm_gcn_get_param {
 	__u32 param;
@@ -277,6 +278,13 @@ enum drm_gcn_blend_mode {
 	DRM_GCN_BLEND_SRC_ALPHA = 1,
 };
 
+enum drm_gcn_cull_mode {
+	DRM_GCN_CULL_NONE = 0,
+	DRM_GCN_CULL_FRONT = 1,
+	DRM_GCN_CULL_BACK = 2,
+	DRM_GCN_CULL_ALL = 3,
+};
+
 struct drm_gcn_draw_state {
 	/* Destination-space viewport. Width and height must be nonzero. */
 	__u16 viewport_x;
@@ -290,8 +298,8 @@ struct drm_gcn_draw_state {
 	__u16 scissor_height;
 	/* One of drm_gcn_blend_mode. */
 	__u32 blend_mode;
-	/* Must be zero. */
-	__u32 pad;
+	/* One of drm_gcn_cull_mode. */
+	__u32 cull_mode;
 };
 
 /*

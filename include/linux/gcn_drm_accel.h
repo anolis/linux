@@ -37,6 +37,7 @@ struct gcn_drm_draw_state {
 	u16 scissor_width;
 	u16 scissor_height;
 	u32 blend_mode;
+	u32 cull_mode;
 };
 
 struct gcn_drm_color_depth_vertex {
@@ -186,7 +187,7 @@ struct gcn_drm_accel_ops {
 				 const struct gcn_drm_depth_state *depth);
 };
 
-int gcn_drm_register_accel_v8(const struct gcn_drm_accel_ops *ops);
-void gcn_drm_unregister_accel_v8(const struct gcn_drm_accel_ops *ops);
+int gcn_drm_register_accel_v9(const struct gcn_drm_accel_ops *ops);
+void gcn_drm_unregister_accel_v9(const struct gcn_drm_accel_ops *ops);
 
 #endif /* _LINUX_GCN_DRM_ACCEL_H */

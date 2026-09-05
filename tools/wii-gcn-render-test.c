@@ -2751,7 +2751,7 @@ out:
 		fail("close indexed-textured-depth source");
 }
 
-static void test_draw_indexed_fixed(int fd)
+static void test_draw_indexed_fixed(int fd, bool cull_supported)
 {
 	const uint16_t sentinel = 0x39e7;
 	const uint16_t cyan = 0x07ff;
@@ -2815,6 +2815,7 @@ static void test_draw_indexed_fixed(int fd)
 	unsigned int checked_depth = 0;
 	unsigned int checked_painter = 0;
 	unsigned int checked_preserved = 0;
+	unsigned int checked_culled = 0;
 
 	if (create_bo(fd, &src) || create_bo(fd, &dst)) {
 		fail("create fixed-draw objects");
@@ -2899,12 +2900,40 @@ static void test_draw_indexed_fixed(int fd)
 	    errno != EFAULT)
 		fail("bad fixed-draw index pointer should return EFAULT");
 	draw.indices_ptr = (uintptr_t)indices;
+	draw.state.cull_mode = DRM_GCN_CULL_ALL + 1;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_DRAW_INDEXED_FIXED, &draw) ||
+	    errno != EINVAL)
+		fail("invalid fixed-draw cull mode should return EINVAL");
+	draw.state.cull_mode = DRM_GCN_CULL_NONE;
 
 	draw.tev_mode = DRM_GCN_TEV_PASS_COLOR;
 	draw.src_handle = 0;
 	for (unsigned int i = 0; i < ARRAY_SIZE(vertices); i++) {
 		vertices[i].s = 0;
 		vertices[i].t = 0;
+	}
+	if (cull_supported) {
+		draw.state.cull_mode = DRM_GCN_CULL_ALL;
+		if (submit_fixed(fd, &draw, sync.handle)) {
+			fail("draw fixed cull-all control");
+			goto out_sync;
+		}
+		for (unsigned int y = 0; y < TEST_HEIGHT; y++) {
+			for (unsigned int x = 0; x < TEST_WIDTH; x++) {
+				size_t pixel = tiled_rgb565_index(x, y, TEST_WIDTH);
+
+				checked_culled++;
+				if (dst_map[pixel] != sentinel) {
+					fprintf(stderr,
+						"FAIL: fixed cull-all mismatch at (%u,%u): got=0x%04x expected=0x%04x\n",
+						x, y, dst_map[pixel], sentinel);
+					failures++;
+					goto out_sync;
+				}
+			}
+		}
+		draw.state.cull_mode = DRM_GCN_CULL_NONE;
 	}
 	if (submit_fixed(fd, &draw, sync.handle)) {
 		fail("draw fixed pass-color control");
@@ -3024,9 +3053,9 @@ static void test_draw_indexed_fixed(int fd)
 			}
 		}
 	}
-	printf("DRAW fixed: pass=%u replace=%u near=%u painter=%u preserved=%u\n",
+	printf("DRAW fixed: pass=%u replace=%u near=%u painter=%u preserved=%u culled=%u\n",
 	       checked_pass, checked_replace, checked_depth, checked_painter,
-	       checked_preserved);
+	       checked_preserved, checked_culled);
 
 out_sync:
 	destroy.handle = sync.handle;
@@ -3760,7 +3789,8 @@ int main(int argc, char **argv)
 			fail_value("indexed textured depth render feature", features,
 				   DRM_GCN_FEATURE_DRAW_INDEXED_TEXTURED_DEPTH_RGB565);
 		if (features & DRM_GCN_FEATURE_DRAW_INDEXED_FIXED_RGB565)
-			test_draw_indexed_fixed(fd);
+			test_draw_indexed_fixed(fd,
+				features & DRM_GCN_FEATURE_RASTER_CULL);
 		else
 			fail_value("indexed fixed-function render feature", features,
 				   DRM_GCN_FEATURE_DRAW_INDEXED_FIXED_RGB565);

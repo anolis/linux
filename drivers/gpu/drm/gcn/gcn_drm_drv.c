@@ -188,7 +188,7 @@ static int gcn_drm_set_accel_ave_locked(bool accel_active)
 	return 0;
 }
 
-int gcn_drm_register_accel_v8(const struct gcn_drm_accel_ops *ops)
+int gcn_drm_register_accel_v9(const struct gcn_drm_accel_ops *ops)
 {
 	int ret = 0;
 
@@ -215,9 +215,9 @@ out_unlock:
 			ops->name);
 	return ret;
 }
-EXPORT_SYMBOL_GPL(gcn_drm_register_accel_v8);
+EXPORT_SYMBOL_GPL(gcn_drm_register_accel_v9);
 
-void gcn_drm_unregister_accel_v8(const struct gcn_drm_accel_ops *ops)
+void gcn_drm_unregister_accel_v9(const struct gcn_drm_accel_ops *ops)
 {
 	int ret = 0;
 
@@ -234,7 +234,7 @@ void gcn_drm_unregister_accel_v8(const struct gcn_drm_accel_ops *ops)
 	pr_info("gcn-drm: unregistered scanout accelerator %s\n",
 		ops ? ops->name : "unknown");
 }
-EXPORT_SYMBOL_GPL(gcn_drm_unregister_accel_v8);
+EXPORT_SYMBOL_GPL(gcn_drm_unregister_accel_v9);
 
 int gcn_drm_provider_info(struct gcn_drm_mem1_info *info)
 {

@@ -1062,6 +1062,7 @@ static int gcn_drm_ioctl_draw_triangles_state(struct drm_device *drm, void *data
 	state.scissor_width = args->state.scissor_width;
 	state.scissor_height = args->state.scissor_height;
 	state.blend_mode = args->state.blend_mode;
+	state.cull_mode = args->state.cull_mode;
 
 	drm_exec_init(&exec, DRM_EXEC_INTERRUPTIBLE_WAIT, 1);
 	drm_exec_until_all_locked(&exec) {
@@ -1199,6 +1200,7 @@ static int gcn_drm_ioctl_draw_triangles_depth(struct drm_device *drm, void *data
 	state.scissor_width = args->state.scissor_width;
 	state.scissor_height = args->state.scissor_height;
 	state.blend_mode = args->state.blend_mode;
+	state.cull_mode = args->state.cull_mode;
 	depth.test_enable = args->depth.test_enable;
 	depth.compare = args->depth.compare;
 	depth.write_enable = args->depth.write_enable;
@@ -1343,6 +1345,7 @@ gcn_drm_ioctl_draw_textured_triangles(struct drm_device *drm,
 	state.scissor_width = args->state.scissor_width;
 	state.scissor_height = args->state.scissor_height;
 	state.blend_mode = args->state.blend_mode;
+	state.cull_mode = args->state.cull_mode;
 
 	drm_exec_init(&exec, DRM_EXEC_INTERRUPTIBLE_WAIT, 2);
 	drm_exec_until_all_locked(&exec) {
@@ -1497,6 +1500,7 @@ gcn_drm_ioctl_draw_indexed_triangles(struct drm_device *drm,
 	state.scissor_width = args->state.scissor_width;
 	state.scissor_height = args->state.scissor_height;
 	state.blend_mode = args->state.blend_mode;
+	state.cull_mode = args->state.cull_mode;
 
 	drm_exec_init(&exec, DRM_EXEC_INTERRUPTIBLE_WAIT, 1);
 	drm_exec_until_all_locked(&exec) {
@@ -1648,6 +1652,7 @@ static int gcn_drm_ioctl_draw_indexed_textured(struct drm_device *drm,
 	state.scissor_width = args->state.scissor_width;
 	state.scissor_height = args->state.scissor_height;
 	state.blend_mode = args->state.blend_mode;
+	state.cull_mode = args->state.cull_mode;
 
 	drm_exec_init(&exec, DRM_EXEC_INTERRUPTIBLE_WAIT, 2);
 	drm_exec_until_all_locked(&exec) {
@@ -1809,6 +1814,7 @@ static int gcn_drm_ioctl_draw_itex_depth(struct drm_device *drm, void *data,
 	state.scissor_width = args->state.scissor_width;
 	state.scissor_height = args->state.scissor_height;
 	state.blend_mode = args->state.blend_mode;
+	state.cull_mode = args->state.cull_mode;
 	depth.test_enable = args->depth.test_enable;
 	depth.compare = args->depth.compare;
 	depth.write_enable = args->depth.write_enable;
@@ -1984,6 +1990,7 @@ static int gcn_drm_ioctl_draw_fixed(struct drm_device *drm, void *data,
 	state.scissor_width = args->state.scissor_width;
 	state.scissor_height = args->state.scissor_height;
 	state.blend_mode = args->state.blend_mode;
+	state.cull_mode = args->state.cull_mode;
 	depth.test_enable = args->depth.test_enable;
 	depth.compare = args->depth.compare;
 	depth.write_enable = args->depth.write_enable;

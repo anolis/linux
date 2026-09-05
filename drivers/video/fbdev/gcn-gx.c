@@ -1399,7 +1399,11 @@ static void
 gx_setup_vertex_color_state_semantic(u16 width, u16 height,
 				     const struct gcn_drm_draw_state *state)
 {
+	static const u8 cull_to_hw[] = { 0, 2, 1, 3 };
+
 	gx_setup_vertex_color_state(width, height);
+	gx_load_bp_reg(0x00000010 |
+		       ((u32)cull_to_hw[state->cull_mode] << 14));
 	gx_set_viewport(state->viewport_x, state->viewport_y,
 			state->viewport_width, state->viewport_height);
 	gx_set_scissor(state->scissor_x, state->scissor_y,
@@ -1481,7 +1485,11 @@ static void
 gx_setup_indexed_rgb565_texture_state(u16 width, u16 height,
 				      const struct gcn_drm_draw_state *state)
 {
+	static const u8 cull_to_hw[] = { 0, 2, 1, 3 };
+
 	gx_setup_rgb565_texture_state_mode(width, height, true);
+	gx_load_bp_reg(0x00000011 |
+		       ((u32)cull_to_hw[state->cull_mode] << 14));
 	gx_set_viewport(state->viewport_x, state->viewport_y,
 			state->viewport_width, state->viewport_height);
 	gx_set_scissor(state->scissor_x, state->scissor_y,
@@ -3348,7 +3356,8 @@ static int gcn_gx_drm_mem1_info(struct gcn_drm_mem1_info *info)
 			 DRM_GCN_FEATURE_DRAW_INDEXED_TRIANGLES_RGB565 |
 			 DRM_GCN_FEATURE_DRAW_INDEXED_TEXTURED_TRIANGLES_RGB565 |
 			 DRM_GCN_FEATURE_DRAW_INDEXED_TEXTURED_DEPTH_RGB565 |
-			 DRM_GCN_FEATURE_DRAW_INDEXED_FIXED_RGB565;
+			 DRM_GCN_FEATURE_DRAW_INDEXED_FIXED_RGB565 |
+			 DRM_GCN_FEATURE_RASTER_CULL;
 	mutex_unlock(&gx_mem1_lock);
 	return 0;
 }
@@ -3731,7 +3740,8 @@ gcn_gx_drm_draw_triangles_state_rgb565(void *dst_allocation, u16 width,
 	    state->scissor_x >= width || state->scissor_y >= height ||
 	    state->scissor_width > width - state->scissor_x ||
 	    state->scissor_height > height - state->scissor_y ||
-	    state->blend_mode > DRM_GCN_BLEND_SRC_ALPHA)
+	    state->blend_mode > DRM_GCN_BLEND_SRC_ALPHA ||
+	    state->cull_mode > DRM_GCN_CULL_ALL)
 		return -EINVAL;
 	vertex_count = triangle_count * 3;
 	for (i = 0; i < vertex_count; i++) {
@@ -3818,6 +3828,7 @@ static int gcn_gx_drm_draw_depth_rgb565(void *dst_allocation, u16 width,
 	    state->scissor_width > width - state->scissor_x ||
 	    state->scissor_height > height - state->scissor_y ||
 	    state->blend_mode > DRM_GCN_BLEND_SRC_ALPHA ||
+	    state->cull_mode > DRM_GCN_CULL_ALL ||
 	    depth->compare > DRM_GCN_DEPTH_ALWAYS)
 		return -EINVAL;
 	vertex_count = triangle_count * 3;
@@ -3930,7 +3941,8 @@ gcn_gx_drm_draw_textured_rgb565(void *src_allocation,
 	    state->scissor_x >= dst_width || state->scissor_y >= dst_height ||
 	    state->scissor_width > dst_width - state->scissor_x ||
 	    state->scissor_height > dst_height - state->scissor_y ||
-	    state->blend_mode != DRM_GCN_BLEND_NONE)
+	    state->blend_mode != DRM_GCN_BLEND_NONE ||
+	    state->cull_mode > DRM_GCN_CULL_ALL)
 		return -EINVAL;
 
 	vertex_count = triangle_count * 3;
@@ -4028,7 +4040,8 @@ gcn_gx_drm_draw_indexed_rgb565(void *dst_allocation, u16 width, u16 height,
 	    state->scissor_x >= width || state->scissor_y >= height ||
 	    state->scissor_width > width - state->scissor_x ||
 	    state->scissor_height > height - state->scissor_y ||
-	    state->blend_mode > DRM_GCN_BLEND_SRC_ALPHA)
+	    state->blend_mode > DRM_GCN_BLEND_SRC_ALPHA ||
+	    state->cull_mode > DRM_GCN_CULL_ALL)
 		return -EINVAL;
 	for (i = 0; i < vertex_count; i++) {
 		if (vertices[i].x > width || vertices[i].y > height ||
@@ -4134,7 +4147,8 @@ static int gcn_gx_drm_draw_itex(void *src_allocation, void *dst_allocation,
 	    state->scissor_x >= dst_width || state->scissor_y >= dst_height ||
 	    state->scissor_width > dst_width - state->scissor_x ||
 	    state->scissor_height > dst_height - state->scissor_y ||
-	    state->blend_mode != DRM_GCN_BLEND_NONE)
+	    state->blend_mode != DRM_GCN_BLEND_NONE ||
+	    state->cull_mode > DRM_GCN_CULL_ALL)
 		return -EINVAL;
 	for (i = 0; i < vertex_count; i++) {
 		if (vertices[i].x > dst_width || vertices[i].y > dst_height ||
@@ -4248,6 +4262,7 @@ gcn_gx_drm_draw_itex_depth(void *src_allocation, void *dst_allocation,
 	    state->scissor_width > dst_width - state->scissor_x ||
 	    state->scissor_height > dst_height - state->scissor_y ||
 	    state->blend_mode != DRM_GCN_BLEND_NONE ||
+	    state->cull_mode > DRM_GCN_CULL_ALL ||
 	    depth->compare > DRM_GCN_DEPTH_ALWAYS)
 		return -EINVAL;
 	for (i = 0; i < vertex_count; i++) {
@@ -4385,6 +4400,7 @@ gcn_gx_drm_draw_fixed(void *src_allocation, void *dst_allocation,
 	    state->scissor_width > dst_width - state->scissor_x ||
 	    state->scissor_height > dst_height - state->scissor_y ||
 	    state->blend_mode > DRM_GCN_BLEND_SRC_ALPHA ||
+	    state->cull_mode > DRM_GCN_CULL_ALL ||
 	    depth->compare > DRM_GCN_DEPTH_ALWAYS)
 		return -EINVAL;
 	if (textured) {
@@ -5497,7 +5513,7 @@ static int gcn_gx_probe(struct platform_device *pdev)
 		return ret;
 
 #if IS_ENABLED(CONFIG_DRM_GCN_GX)
-	ret = gcn_drm_register_accel_v8(&gcn_gx_drm_accel_ops);
+	ret = gcn_drm_register_accel_v9(&gcn_gx_drm_accel_ops);
 #else
 	ret = gcnfb_register_accel(&gcn_gx_accel_ops);
 #endif
@@ -5523,7 +5539,7 @@ static void gcn_gx_remove(struct platform_device *pdev)
 	cancel_work_sync(&gx_frame_work.work);
 	gcnfb_unregister_accel(&gcn_gx_accel_ops);
 #else
-	gcn_drm_unregister_accel_v8(&gcn_gx_drm_accel_ops);
+	gcn_drm_unregister_accel_v9(&gcn_gx_drm_accel_ops);
 #endif
 	gcn_gx_exit();
 }

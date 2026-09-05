@@ -128,7 +128,8 @@ gcn_drm_render_validate_triangle_state_batch(const struct drm_gcn_draw_triangles
 	if (!args || !args->ctx_id || !args->dst_handle || args->flags ||
 	    !args->triangle_count ||
 	    args->triangle_count > DRM_GCN_MAX_TRIANGLES || args->pad0 ||
-	    !args->triangles_ptr || args->state.pad || args->pad1 ||
+	    !args->triangles_ptr ||
+	    args->state.cull_mode > DRM_GCN_CULL_ALL || args->pad1 ||
 	    args->state.blend_mode > DRM_GCN_BLEND_SRC_ALPHA)
 		return -EINVAL;
 
@@ -141,7 +142,8 @@ gcn_drm_render_validate_triangle_depth_batch(const struct drm_gcn_draw_triangles
 	if (!args || !args->ctx_id || !args->dst_handle || args->flags ||
 	    !args->triangle_count ||
 	    args->triangle_count > DRM_GCN_MAX_TRIANGLES || args->pad0 ||
-	    !args->triangles_ptr || args->state.pad || args->depth.pad ||
+	    !args->triangles_ptr ||
+	    args->state.cull_mode > DRM_GCN_CULL_ALL || args->depth.pad ||
 	    args->pad1 || args->state.blend_mode > DRM_GCN_BLEND_SRC_ALPHA ||
 	    args->depth.test_enable > 1 || args->depth.write_enable > 1 ||
 	    args->depth.compare > DRM_GCN_DEPTH_ALWAYS)
@@ -157,7 +159,8 @@ gcn_drm_render_validate_textured_triangle_batch(const struct drm_gcn_draw_textur
 	    args->src_handle == args->dst_handle || args->flags ||
 	    !args->triangle_count ||
 	    args->triangle_count > DRM_GCN_MAX_TRIANGLES ||
-	    !args->triangles_ptr || args->state.pad || args->pad ||
+	    !args->triangles_ptr ||
+	    args->state.cull_mode > DRM_GCN_CULL_ALL || args->pad ||
 	    args->state.blend_mode != DRM_GCN_BLEND_NONE)
 		return -EINVAL;
 
@@ -196,7 +199,8 @@ gcn_drm_render_validate_indexed_triangle_batch(const struct drm_gcn_draw_indexed
 	    args->vertex_count > DRM_GCN_MAX_VERTICES ||
 	    !args->triangle_count ||
 	    args->triangle_count > DRM_GCN_MAX_TRIANGLES ||
-	    !args->vertices_ptr || !args->indices_ptr || args->state.pad ||
+	    !args->vertices_ptr || !args->indices_ptr ||
+	    args->state.cull_mode > DRM_GCN_CULL_ALL ||
 	    args->pad || args->state.blend_mode > DRM_GCN_BLEND_SRC_ALPHA)
 		return -EINVAL;
 
@@ -247,7 +251,8 @@ gcn_drm_itex_args(const struct drm_gcn_draw_indexed_textured *args)
 	    args->vertex_count > DRM_GCN_MAX_VERTICES ||
 	    !args->triangle_count ||
 	    args->triangle_count > DRM_GCN_MAX_TRIANGLES || args->pad0 ||
-	    !args->vertices_ptr || !args->indices_ptr || args->state.pad ||
+	    !args->vertices_ptr || !args->indices_ptr ||
+	    args->state.cull_mode > DRM_GCN_CULL_ALL ||
 	    args->pad1 || args->state.blend_mode != DRM_GCN_BLEND_NONE)
 		return -EINVAL;
 
@@ -298,7 +303,8 @@ gcn_drm_itex_z_args(const struct drm_gcn_draw_indexed_textured_depth *args)
 	    args->vertex_count > DRM_GCN_MAX_VERTICES ||
 	    !args->triangle_count ||
 	    args->triangle_count > DRM_GCN_MAX_TRIANGLES || args->pad0 ||
-	    !args->vertices_ptr || !args->indices_ptr || args->state.pad ||
+	    !args->vertices_ptr || !args->indices_ptr ||
+	    args->state.cull_mode > DRM_GCN_CULL_ALL ||
 	    args->depth.pad || args->pad1 ||
 	    args->state.blend_mode != DRM_GCN_BLEND_NONE ||
 	    args->depth.test_enable > 1 || args->depth.write_enable > 1 ||
@@ -356,7 +362,8 @@ gcn_drm_fixed_args(const struct drm_gcn_draw_indexed_fixed *args)
 	    args->vertex_count > DRM_GCN_MAX_VERTICES ||
 	    !args->triangle_count ||
 	    args->triangle_count > DRM_GCN_MAX_TRIANGLES ||
-	    !args->vertices_ptr || !args->indices_ptr || args->state.pad ||
+	    !args->vertices_ptr || !args->indices_ptr ||
+	    args->state.cull_mode > DRM_GCN_CULL_ALL ||
 	    args->depth.pad || args->pad ||
 	    args->tev_mode > DRM_GCN_TEV_MODULATE ||
 	    args->state.blend_mode > DRM_GCN_BLEND_SRC_ALPHA ||

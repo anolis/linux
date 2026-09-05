@@ -73,6 +73,7 @@ static void gcn_drm_render_uapi_layout(struct kunit *test)
 			1ULL << 22);
 	KUNIT_EXPECT_EQ(test, DRM_GCN_FEATURE_DRAW_INDEXED_FIXED_RGB565,
 			1ULL << 23);
+	KUNIT_EXPECT_EQ(test, DRM_GCN_FEATURE_RASTER_CULL, 1ULL << 24);
 }
 
 static void gcn_drm_render_validates_color_triangle(struct kunit *test)
@@ -217,10 +218,13 @@ static void gcn_drm_render_validates_triangle_state_batch(struct kunit *test)
 	ret = gcn_drm_render_validate_triangle_state_batch(&args);
 	KUNIT_EXPECT_EQ(test, ret, -EINVAL);
 	args.state.blend_mode = DRM_GCN_BLEND_NONE;
-	args.state.pad = 1;
+	args.state.cull_mode = DRM_GCN_CULL_ALL;
+	ret = gcn_drm_render_validate_triangle_state_batch(&args);
+	KUNIT_EXPECT_EQ(test, ret, 0);
+	args.state.cull_mode = DRM_GCN_CULL_ALL + 1;
 	ret = gcn_drm_render_validate_triangle_state_batch(&args);
 	KUNIT_EXPECT_EQ(test, ret, -EINVAL);
-	args.state.pad = 0;
+	args.state.cull_mode = DRM_GCN_CULL_NONE;
 	args.pad1 = 1;
 	ret = gcn_drm_render_validate_triangle_state_batch(&args);
 	KUNIT_EXPECT_EQ(test, ret, -EINVAL);
@@ -355,10 +359,13 @@ static void gcn_drm_render_validates_textured_triangle_batch(struct kunit *test)
 	ret = gcn_drm_render_validate_textured_triangle_batch(&args);
 	KUNIT_EXPECT_EQ(test, ret, -EINVAL);
 	args.state.blend_mode = DRM_GCN_BLEND_NONE;
-	args.state.pad = 1;
+	args.state.cull_mode = DRM_GCN_CULL_ALL;
+	ret = gcn_drm_render_validate_textured_triangle_batch(&args);
+	KUNIT_EXPECT_EQ(test, ret, 0);
+	args.state.cull_mode = DRM_GCN_CULL_ALL + 1;
 	ret = gcn_drm_render_validate_textured_triangle_batch(&args);
 	KUNIT_EXPECT_EQ(test, ret, -EINVAL);
-	args.state.pad = 0;
+	args.state.cull_mode = DRM_GCN_CULL_NONE;
 	args.pad = 1;
 	ret = gcn_drm_render_validate_textured_triangle_batch(&args);
 	KUNIT_EXPECT_EQ(test, ret, -EINVAL);
