@@ -3357,7 +3357,8 @@ static int gcn_gx_drm_mem1_info(struct gcn_drm_mem1_info *info)
 			 DRM_GCN_FEATURE_DRAW_INDEXED_TEXTURED_TRIANGLES_RGB565 |
 			 DRM_GCN_FEATURE_DRAW_INDEXED_TEXTURED_DEPTH_RGB565 |
 			 DRM_GCN_FEATURE_DRAW_INDEXED_FIXED_RGB565 |
-			 DRM_GCN_FEATURE_RASTER_CULL;
+			 DRM_GCN_FEATURE_RASTER_CULL |
+			 DRM_GCN_FEATURE_SYSTEM_RENDER_RGB565;
 	mutex_unlock(&gx_mem1_lock);
 	return 0;
 }
@@ -3633,6 +3634,89 @@ static int gcn_gx_drm_fill_rect_rgb565(void *dst_allocation, u16 width,
 
 	invalidate_dcache_range((unsigned long)dst->cpu_addr,
 				(unsigned long)dst->cpu_addr + bytes);
+
+out_unlock:
+	mutex_unlock(&gx_submit_lock);
+	return ret;
+}
+
+static int gcn_gx_drm_fill_system_rgb565(void *dst, u16 width, u16 height,
+					 u32 dst_layout, u16 x, u16 y,
+					 u16 rect_width, u16 rect_height,
+					 u16 color)
+{
+	u8 r5 = (color >> 11) & 0x1f;
+	u8 g6 = (color >> 5) & 0x3f;
+	u8 b5 = color & 0x1f;
+	u8 r = (r5 << 3) | (r5 >> 2);
+	u8 g = (g6 << 2) | (g6 >> 4);
+	u8 b = (b5 << 3) | (b5 >> 2);
+	bool full = !x && !y && rect_width == width && rect_height == height;
+	void *render_dst = gx_tex_buf_alt;
+	u32 finish_count;
+	size_t bytes;
+	long completed;
+	int ret;
+	int i;
+
+	if (!dst || dst_layout != DRM_GCN_GEM_LAYOUT_LINEAR || !width ||
+	    !height || (width & 3) || (height & 3) || !rect_width ||
+	    !rect_height || x >= width || y >= height ||
+	    rect_width > width - x || rect_height > height - y)
+		return -EINVAL;
+	bytes = (size_t)width * height * sizeof(u16);
+	if (bytes > GX_TEX_BUF_SLOT_SIZE)
+		return -E2BIG;
+	if (!READ_ONCE(gx_accel_ready))
+		return -ENODEV;
+
+	mutex_lock(&gx_submit_lock);
+	if (full)
+		memset(render_dst, 0, bytes);
+	else
+		gx_copy_rect_to_tiled(dst, width, 0, 0, dst_layout, render_dst,
+				      width, height, width, height);
+	flush_dcache_range((unsigned long)render_dst,
+			   (unsigned long)render_dst + bytes);
+
+	finish_count = READ_ONCE(gx_pe_finish_count);
+	fifo_pos = 0;
+	gx_load_libogc_init_preamble();
+	gx_setup_display_copy_state();
+
+	if (!full) {
+		gx_setup_rgb565_texture_state(width, height);
+		gx_setup_texture_rgb565(render_dst, width, height);
+		gx_draw_color_quad(width, height, 0xff, 0xff, 0xff);
+		gx_load_bp_reg(0x45000002);
+		for (i = 0; i < 32; i++)
+			gx_wr8(0);
+	}
+
+	gx_setup_vertex_color_state(width, height);
+	gx_set_scissor(x, y, rect_width, rect_height);
+	gx_draw_color_quad(width, height, r, g, b);
+	gx_load_bp_reg(0x45000002);
+	for (i = 0; i < 32; i++)
+		gx_wr8(0);
+
+	gx_set_copy_clear_rgb(0x00, 0x00, 0x00);
+	gx_copy_efb_to_rgb565_texture(render_dst, width, height, true);
+	ret = gx_submit_cmds(full ? "render-fill-system" :
+					"render-fill-rect-system");
+	if (ret)
+		goto out_unlock;
+
+	completed = gx_wait_for_pe_finishes(finish_count, 1);
+	if (!completed) {
+		pr_warn_ratelimited("gcn-gx: system fill timed out waiting for final PE finish\n");
+		ret = -ETIMEDOUT;
+		goto out_unlock;
+	}
+
+	invalidate_dcache_range((unsigned long)render_dst,
+				(unsigned long)render_dst + bytes);
+	gx_copy_tiled_to_layout(render_dst, dst, width, height, dst_layout);
 
 out_unlock:
 	mutex_unlock(&gx_submit_lock);
@@ -4366,19 +4450,19 @@ out_unlock:
 }
 
 static int
-gcn_gx_drm_draw_fixed(void *src_allocation, void *dst_allocation,
-		      u16 src_width, u16 src_height,
-		      u16 dst_width, u16 dst_height,
-		      const struct gcn_drm_fixed_vertex *vertices,
-		      u32 vertex_count, const u8 *indices,
-		      u32 triangle_count, u32 tev_mode,
-		      const struct gcn_drm_draw_state *state,
-		      const struct gcn_drm_depth_state *depth)
+gcn_gx_drm_draw_fixed_core(const void *src_addr, size_t src_size,
+			   void *dst_addr, size_t dst_size, bool system_dst,
+			   u32 dst_layout, u16 src_width, u16 src_height,
+			   u16 dst_width, u16 dst_height,
+			   const struct gcn_drm_fixed_vertex *vertices,
+			   u32 vertex_count, const u8 *indices,
+			   u32 triangle_count, u32 tev_mode,
+			   const struct gcn_drm_draw_state *state,
+			   const struct gcn_drm_depth_state *depth)
 {
-	struct gx_mem1_allocation *src = src_allocation;
-	struct gx_mem1_allocation *dst = dst_allocation;
 	unsigned int index_count = triangle_count * 3;
 	bool textured = tev_mode != DRM_GCN_TEV_PASS_COLOR;
+	void *render_dst;
 	u32 finish_count;
 	size_t src_bytes = 0;
 	size_t dst_bytes;
@@ -4386,7 +4470,7 @@ gcn_gx_drm_draw_fixed(void *src_allocation, void *dst_allocation,
 	unsigned int i;
 	int ret;
 
-	if (!dst || !vertices || !indices || !state || !depth ||
+	if (!dst_addr || !vertices || !indices || !state || !depth ||
 	    vertex_count < 3 || vertex_count > DRM_GCN_MAX_VERTICES ||
 	    !triangle_count || triangle_count > DRM_GCN_MAX_TRIANGLES ||
 	    !dst_width || !dst_height || (dst_width & 3) || (dst_height & 3) ||
@@ -4404,12 +4488,14 @@ gcn_gx_drm_draw_fixed(void *src_allocation, void *dst_allocation,
 	    depth->compare > DRM_GCN_DEPTH_ALWAYS)
 		return -EINVAL;
 	if (textured) {
-		if (!src || src == dst || !src_width || !src_height ||
+		if (!src_addr || src_addr == dst_addr || !src_width || !src_height ||
 		    (src_width & 3) || (src_height & 3))
 			return -EINVAL;
-	} else if (src || src_width || src_height) {
+	} else if (src_addr || src_width || src_height) {
 		return -EINVAL;
 	}
+	if (system_dst && dst_layout != DRM_GCN_GEM_LAYOUT_LINEAR)
+		return -EINVAL;
 	if (tev_mode == DRM_GCN_TEV_REPLACE_TEXTURE &&
 	    state->blend_mode != DRM_GCN_BLEND_NONE)
 		return -EINVAL;
@@ -4447,21 +4533,28 @@ gcn_gx_drm_draw_fixed(void *src_allocation, void *dst_allocation,
 
 	if (textured) {
 		src_bytes = (size_t)src_width * src_height * sizeof(u16);
-		if (src_bytes > src->size)
+		if (src_bytes > src_size)
 			return -E2BIG;
 	}
 	dst_bytes = (size_t)dst_width * dst_height * sizeof(u16);
-	if (dst_bytes > dst->size)
+	if (dst_bytes > dst_size || (system_dst && dst_bytes > GX_TEX_BUF_SLOT_SIZE))
 		return -E2BIG;
 	if (!READ_ONCE(gx_accel_ready))
 		return -ENODEV;
 
 	mutex_lock(&gx_submit_lock);
+	render_dst = dst_addr;
+	if (system_dst) {
+		render_dst = gx_tex_buf_alt;
+		gx_copy_rect_to_tiled(dst_addr, dst_width, 0, 0, dst_layout,
+				      render_dst, dst_width, dst_height,
+				      dst_width, dst_height);
+	}
 	if (textured)
-		flush_dcache_range((unsigned long)src->cpu_addr,
-				   (unsigned long)src->cpu_addr + src_bytes);
-	flush_dcache_range((unsigned long)dst->cpu_addr,
-			   (unsigned long)dst->cpu_addr + dst_bytes);
+		flush_dcache_range((unsigned long)src_addr,
+				   (unsigned long)src_addr + src_bytes);
+	flush_dcache_range((unsigned long)render_dst,
+			   (unsigned long)render_dst + dst_bytes);
 
 	finish_count = READ_ONCE(gx_pe_finish_count);
 	fifo_pos = 0;
@@ -4488,7 +4581,7 @@ gcn_gx_drm_draw_fixed(void *src_allocation, void *dst_allocation,
 	fifo_pos = 0;
 
 	gx_setup_rgb565_texture_state_mode(dst_width, dst_height, false);
-	gx_setup_texture_rgb565(dst->cpu_addr, dst_width, dst_height);
+	gx_setup_texture_rgb565(render_dst, dst_width, dst_height);
 	gx_setup_texture_coordinate_scale(dst_width, dst_height, false, false);
 	gx_draw_color_quad(dst_width, dst_height, 0xff, 0xff, 0xff);
 	gx_load_bp_reg(0x45000002);
@@ -4497,7 +4590,7 @@ gcn_gx_drm_draw_fixed(void *src_allocation, void *dst_allocation,
 
 	gx_setup_fixed_state(dst_width, dst_height, tev_mode, state, depth);
 	if (textured) {
-		gx_setup_texture_rgb565(src->cpu_addr, src_width, src_height);
+		gx_setup_texture_rgb565((void *)src_addr, src_width, src_height);
 		gx_setup_texture_coordinate_scale(src_width, src_height,
 						  false, false);
 	}
@@ -4508,7 +4601,7 @@ gcn_gx_drm_draw_fixed(void *src_allocation, void *dst_allocation,
 		gx_wr8(0);
 
 	gx_set_copy_clear_rgb(0x00, 0x00, 0x00);
-	gx_copy_efb_to_rgb565_texture(dst->cpu_addr, dst_width, dst_height, true);
+	gx_copy_efb_to_rgb565_texture(render_dst, dst_width, dst_height, true);
 	ret = gx_submit_cmds("render-draw-fixed");
 	if (ret)
 		goto out_unlock;
@@ -4520,12 +4613,56 @@ gcn_gx_drm_draw_fixed(void *src_allocation, void *dst_allocation,
 		goto out_unlock;
 	}
 
-	invalidate_dcache_range((unsigned long)dst->cpu_addr,
-				(unsigned long)dst->cpu_addr + dst_bytes);
+	invalidate_dcache_range((unsigned long)render_dst,
+				(unsigned long)render_dst + dst_bytes);
+	if (system_dst)
+		gx_copy_tiled_to_layout(render_dst, dst_addr, dst_width,
+					dst_height, dst_layout);
 
 out_unlock:
 	mutex_unlock(&gx_submit_lock);
 	return ret;
+}
+
+static int
+gcn_gx_drm_draw_fixed(void *src_allocation, void *dst_allocation,
+		      u16 src_width, u16 src_height,
+		      u16 dst_width, u16 dst_height,
+		      const struct gcn_drm_fixed_vertex *vertices,
+		      u32 vertex_count, const u8 *indices,
+		      u32 triangle_count, u32 tev_mode,
+		      const struct gcn_drm_draw_state *state,
+		      const struct gcn_drm_depth_state *depth)
+{
+	struct gx_mem1_allocation *src = src_allocation;
+	struct gx_mem1_allocation *dst = dst_allocation;
+
+	return gcn_gx_drm_draw_fixed_core(src ? src->cpu_addr : NULL,
+			src ? src->size : 0, dst ? dst->cpu_addr : NULL,
+			dst ? dst->size : 0, false,
+			DRM_GCN_GEM_LAYOUT_TILED_4X4, src_width, src_height,
+			dst_width, dst_height, vertices, vertex_count, indices,
+			triangle_count, tev_mode, state, depth);
+}
+
+static int
+gcn_gx_drm_draw_fixed_system(void *src_allocation, void *dst,
+			     u16 src_width, u16 src_height,
+			     u16 dst_width, u16 dst_height, u32 dst_layout,
+			     const struct gcn_drm_fixed_vertex *vertices,
+			     u32 vertex_count, const u8 *indices,
+			     u32 triangle_count, u32 tev_mode,
+			     const struct gcn_drm_draw_state *state,
+			     const struct gcn_drm_depth_state *depth)
+{
+	struct gx_mem1_allocation *src = src_allocation;
+	size_t dst_size = (size_t)dst_width * dst_height * sizeof(u16);
+
+	return gcn_gx_drm_draw_fixed_core(src ? src->cpu_addr : NULL,
+			src ? src->size : 0, dst, dst_size, true, dst_layout,
+			src_width, src_height, dst_width, dst_height, vertices,
+			vertex_count, indices, triangle_count, tev_mode, state,
+			depth);
 }
 
 static int
@@ -5017,6 +5154,8 @@ static const struct gcn_drm_accel_ops gcn_gx_drm_accel_ops = {
 	.draw_itex_depth_rgb565 =
 		gcn_gx_drm_draw_itex_depth,
 	.draw_fixed_rgb565 = gcn_gx_drm_draw_fixed,
+	.draw_fixed_system_rgb565 = gcn_gx_drm_draw_fixed_system,
+	.fill_system_rgb565 = gcn_gx_drm_fill_system_rgb565,
 };
 #endif
 
@@ -5513,7 +5652,7 @@ static int gcn_gx_probe(struct platform_device *pdev)
 		return ret;
 
 #if IS_ENABLED(CONFIG_DRM_GCN_GX)
-	ret = gcn_drm_register_accel_v9(&gcn_gx_drm_accel_ops);
+	ret = gcn_drm_register_accel_v10(&gcn_gx_drm_accel_ops);
 #else
 	ret = gcnfb_register_accel(&gcn_gx_accel_ops);
 #endif
@@ -5539,7 +5678,7 @@ static void gcn_gx_remove(struct platform_device *pdev)
 	cancel_work_sync(&gx_frame_work.work);
 	gcnfb_unregister_accel(&gcn_gx_accel_ops);
 #else
-	gcn_drm_unregister_accel_v9(&gcn_gx_drm_accel_ops);
+	gcn_drm_unregister_accel_v10(&gcn_gx_drm_accel_ops);
 #endif
 	gcn_gx_exit();
 }

@@ -74,6 +74,7 @@ static void gcn_drm_render_uapi_layout(struct kunit *test)
 	KUNIT_EXPECT_EQ(test, DRM_GCN_FEATURE_DRAW_INDEXED_FIXED_RGB565,
 			1ULL << 23);
 	KUNIT_EXPECT_EQ(test, DRM_GCN_FEATURE_RASTER_CULL, 1ULL << 24);
+	KUNIT_EXPECT_EQ(test, DRM_GCN_FEATURE_SYSTEM_RENDER_RGB565, 1ULL << 25);
 }
 
 static void gcn_drm_render_validates_color_triangle(struct kunit *test)

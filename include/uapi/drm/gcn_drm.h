@@ -53,6 +53,7 @@ enum drm_gcn_param {
 #define DRM_GCN_FEATURE_DRAW_INDEXED_TEXTURED_DEPTH_RGB565	(1ULL << 22)
 #define DRM_GCN_FEATURE_DRAW_INDEXED_FIXED_RGB565	(1ULL << 23)
 #define DRM_GCN_FEATURE_RASTER_CULL		(1ULL << 24)
+#define DRM_GCN_FEATURE_SYSTEM_RENDER_RGB565	(1ULL << 25)
 
 struct drm_gcn_get_param {
 	__u32 param;
@@ -169,7 +170,9 @@ enum drm_gcn_render_op {
 	  DRM_GCN_BLIT_HEIGHT_SHIFT))
 
 /*
- * Submit one validated operation between driver-owned MEM1 GEM objects.
+ * Submit one validated operation between driver-owned GEM objects. Copy and
+ * blit operations require MEM1 objects; fill operations also accept a linear
+ * RGB565 system object when DRM_GCN_FEATURE_SYSTEM_RENDER_RGB565 is present.
  * No command bytes, register values, or physical addresses are accepted.
  */
 struct drm_gcn_submit {

@@ -3076,6 +3076,198 @@ out:
 		fail("close fixed-draw source");
 }
 
+static void test_full_system_render(int fd)
+{
+	const uint16_t blue = 0x001f;
+	const uint16_t green = 0x07e0;
+	const uint16_t red = 0xf800;
+	struct drm_syncobj_create sync = {};
+	struct drm_syncobj_destroy destroy = {};
+	struct drm_gcn_ctx_create ctx = {};
+	struct drm_gcn_ctx_free free_ctx = {};
+	struct drm_gcn_gem_create dst = {};
+	struct drm_gcn_gem_create wrong_format = {};
+	struct drm_gcn_fixed_vertex vertices[4] = {
+		{ 0, 0, DRM_GCN_DEPTH_MAX, DRM_GCN_RGBA8(0xff, 0, 0, 0xff), 0, 0 },
+		{ FULL_DST_WIDTH, 0, DRM_GCN_DEPTH_MAX,
+		  DRM_GCN_RGBA8(0xff, 0, 0, 0xff), 0, 0 },
+		{ FULL_DST_WIDTH, FULL_DST_HEIGHT, DRM_GCN_DEPTH_MAX,
+		  DRM_GCN_RGBA8(0xff, 0, 0, 0xff), 0, 0 },
+		{ 0, FULL_DST_HEIGHT, DRM_GCN_DEPTH_MAX,
+		  DRM_GCN_RGBA8(0xff, 0, 0, 0xff), 0, 0 },
+	};
+	uint16_t indices[6] = { 0, 1, 2, 0, 2, 3 };
+	struct drm_gcn_draw_indexed_fixed draw = {
+		.vertex_count = ARRAY_SIZE(vertices),
+		.triangle_count = 2,
+		.tev_mode = DRM_GCN_TEV_PASS_COLOR,
+		.vertices_ptr = (uintptr_t)vertices,
+		.indices_ptr = (uintptr_t)indices,
+		.state = {
+			.viewport_width = FULL_DST_WIDTH,
+			.viewport_height = FULL_DST_HEIGHT,
+			.scissor_x = 96,
+			.scissor_y = 80,
+			.scissor_width = 448,
+			.scissor_height = 320,
+			.blend_mode = DRM_GCN_BLEND_NONE,
+		},
+		.depth = {
+			.compare = DRM_GCN_DEPTH_ALWAYS,
+		},
+	};
+	struct drm_gcn_submit fill = {
+		.op = DRM_GCN_RENDER_OP_FILL_RGB565,
+		.data = blue,
+	};
+	uint16_t *map = MAP_FAILED;
+	uint64_t free_before = 0;
+	uint64_t free_during = 0;
+	uint64_t free_after = 0;
+	unsigned int checked;
+
+	if (get_param(fd, DRM_GCN_PARAM_MEM1_FREE_BYTES, &free_before)) {
+		fail("query MEM1 before full-screen system render");
+		return;
+	}
+	if (create_bo_size_layout_flags(fd, &dst, FULL_DST_WIDTH,
+					FULL_DST_HEIGHT,
+					DRM_GCN_GEM_LAYOUT_LINEAR,
+					DRM_GCN_GEM_CREATE_SYSTEM)) {
+		fail("create full-screen system render destination");
+		goto out;
+	}
+	if (get_param(fd, DRM_GCN_PARAM_MEM1_FREE_BYTES, &free_during)) {
+		fail("query MEM1 during full-screen system render");
+		goto out;
+	}
+	if (free_during != free_before) {
+		fail_value("system render object changed MEM1 free bytes",
+			   free_during, free_before);
+		goto out;
+	}
+	map = map_bo(fd, &dst);
+	if (map == MAP_FAILED) {
+		fail("map full-screen system render destination");
+		goto out;
+	}
+	if (ioctl(fd, DRM_IOCTL_GCN_CTX_CREATE, &ctx)) {
+		fail("create full-screen system render context");
+		goto out;
+	}
+	if (ioctl(fd, DRM_IOCTL_SYNCOBJ_CREATE, &sync)) {
+		fail("create full-screen system render syncobj");
+		goto out_ctx;
+	}
+
+	fill.ctx_id = ctx.id;
+	fill.dst_handle = dst.handle;
+	fill.out_syncobj = sync.handle;
+	if (ioctl(fd, DRM_IOCTL_GCN_SUBMIT, &fill)) {
+		fail("fill full-screen linear system RGB565 destination");
+		goto out_sync;
+	}
+	for (checked = 0; checked < FULL_DST_WIDTH * FULL_DST_HEIGHT; checked++) {
+		if (map[checked] != blue) {
+			fprintf(stderr,
+				"FAIL: system full fill mismatch at %u: got=0x%04x expected=0x%04x\n",
+				checked, map[checked], blue);
+			failures++;
+			goto out_sync;
+		}
+	}
+
+	fill.op = DRM_GCN_RENDER_OP_FILL_RECT_RGB565;
+	fill.data = DRM_GCN_RECT_DATA(green, 64, 48, 128, 96);
+	if (ioctl(fd, DRM_IOCTL_GCN_SUBMIT, &fill)) {
+		fail("fill rectangle in linear system RGB565 destination");
+		goto out_sync;
+	}
+	for (unsigned int y = 0; y < FULL_DST_HEIGHT; y++) {
+		for (unsigned int x = 0; x < FULL_DST_WIDTH; x++) {
+			uint16_t expected = x >= 64 && x < 192 && y >= 48 && y < 144 ?
+					    green : blue;
+
+			if (map[y * FULL_DST_WIDTH + x] != expected) {
+				fprintf(stderr,
+					"FAIL: system rect fill mismatch at (%u,%u): got=0x%04x expected=0x%04x\n",
+					x, y, map[y * FULL_DST_WIDTH + x], expected);
+				failures++;
+				goto out_sync;
+			}
+		}
+	}
+
+	draw.ctx_id = ctx.id;
+	draw.dst_handle = dst.handle;
+	draw.out_syncobj = sync.handle;
+	if (submit_fixed(fd, &draw, sync.handle)) {
+		fail("draw pass-color quad into linear system RGB565 destination");
+		goto out_sync;
+	}
+	for (unsigned int y = 0; y < FULL_DST_HEIGHT; y++) {
+		for (unsigned int x = 0; x < FULL_DST_WIDTH; x++) {
+			bool inside = x >= draw.state.scissor_x &&
+				x < draw.state.scissor_x + draw.state.scissor_width &&
+				y >= draw.state.scissor_y &&
+				y < draw.state.scissor_y + draw.state.scissor_height;
+			uint16_t expected;
+
+			if (inside)
+				expected = red;
+			else if (x >= 64 && x < 192 && y >= 48 && y < 144)
+				expected = green;
+			else
+				expected = blue;
+			if (map[y * FULL_DST_WIDTH + x] != expected) {
+				fprintf(stderr,
+					"FAIL: system fixed draw mismatch at (%u,%u): got=0x%04x expected=0x%04x\n",
+					x, y, map[y * FULL_DST_WIDTH + x], expected);
+				failures++;
+				goto out_sync;
+			}
+		}
+	}
+
+	if (create_bo_size_format_layout_flags(fd, &wrong_format, 64, 64,
+					       DRM_GCN_GEM_FORMAT_XRGB8888,
+					       DRM_GCN_GEM_LAYOUT_LINEAR,
+					       DRM_GCN_GEM_CREATE_SYSTEM)) {
+		fail("create wrong-format system render control");
+		goto out_sync;
+	}
+	fill.op = DRM_GCN_RENDER_OP_FILL_RGB565;
+	fill.dst_handle = wrong_format.handle;
+	fill.data = red;
+	errno = 0;
+	if (!ioctl(fd, DRM_IOCTL_GCN_SUBMIT, &fill) || errno != EINVAL)
+		fail("RGB565 fill into XRGB8888 system object should return EINVAL");
+
+	puts("SYSTEM RENDER: 640x480 linear fill, rectangle, and fixed draw matched every pixel");
+
+out_sync:
+	if (wrong_format.handle && close_bo(fd, wrong_format.handle))
+		fail("close wrong-format system render control");
+	destroy.handle = sync.handle;
+	if (ioctl(fd, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy))
+		fail("destroy full-screen system render syncobj");
+out_ctx:
+	free_ctx.id = ctx.id;
+	if (ioctl(fd, DRM_IOCTL_GCN_CTX_FREE, &free_ctx))
+		fail("free full-screen system render context");
+out:
+	if (map != MAP_FAILED && munmap(map, dst.size))
+		fail("unmap full-screen system render destination");
+	if (dst.handle && close_bo(fd, dst.handle))
+		fail("close full-screen system render destination");
+	if (get_param(fd, DRM_GCN_PARAM_MEM1_FREE_BYTES, &free_after)) {
+		fail("query MEM1 after full-screen system render");
+	} else if (free_after != free_before) {
+		fail_value("full-screen system render leaked MEM1", free_after,
+			   free_before);
+	}
+}
+
 static void test_wide_scaled_blit(int fd)
 {
 	struct drm_gcn_ctx_create ctx = {};
@@ -3794,6 +3986,11 @@ int main(int argc, char **argv)
 		else
 			fail_value("indexed fixed-function render feature", features,
 				   DRM_GCN_FEATURE_DRAW_INDEXED_FIXED_RGB565);
+		if (features & DRM_GCN_FEATURE_SYSTEM_RENDER_RGB565)
+			test_full_system_render(fd);
+		else
+			fail_value("system RGB565 render feature", features,
+				   DRM_GCN_FEATURE_SYSTEM_RENDER_RGB565);
 		if (features & DRM_GCN_FEATURE_BLIT_SCALED_RGB565)
 			test_wide_scaled_blit(fd);
 		if (features & DRM_GCN_FEATURE_BLIT_SCALED_RGB565)

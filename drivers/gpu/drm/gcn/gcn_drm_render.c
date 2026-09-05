@@ -430,10 +430,13 @@ static int gcn_drm_ioctl_submit(struct drm_device *drm, void *data,
 	struct drm_syncobj *out_syncobj = NULL;
 	struct dma_fence *fence = NULL;
 	struct gcn_drm_bo *src = NULL;
-	struct gcn_drm_bo *dst;
+	struct gcn_drm_bo *dst = NULL;
+	struct gcn_drm_system_bo *system_dst = NULL;
 	struct gcn_drm_render_rect rect;
 	struct gcn_drm_render_blit_rect blit_rect;
 	struct drm_exec exec;
+	u16 dst_width;
+	u16 dst_height;
 	int ret;
 
 	(void)drm;
@@ -457,42 +460,59 @@ static int gcn_drm_ioctl_submit(struct drm_device *drm, void *data,
 		ret = -ENOENT;
 		goto out_put;
 	}
-	if ((src_gem && !gcn_drm_is_mem1_bo(src_gem)) ||
-	    !gcn_drm_is_mem1_bo(dst_gem)) {
+	if (src_gem && !gcn_drm_is_mem1_bo(src_gem)) {
 		ret = -EINVAL;
 		goto out_put;
 	}
 
-	dst = to_gcn_drm_bo(dst_gem);
-	if (dst->format != DRM_GCN_GEM_FORMAT_RGB565 ||
-	    dst->layout != DRM_GCN_GEM_LAYOUT_TILED_4X4) {
+	if (gcn_drm_is_mem1_bo(dst_gem)) {
+		dst = to_gcn_drm_bo(dst_gem);
+		if (dst->format != DRM_GCN_GEM_FORMAT_RGB565 ||
+		    dst->layout != DRM_GCN_GEM_LAYOUT_TILED_4X4) {
+			ret = -EINVAL;
+			goto out_put;
+		}
+		dst_width = dst->width;
+		dst_height = dst->height;
+	} else if (gcn_drm_is_system_bo(dst_gem) &&
+		   (args->op == DRM_GCN_RENDER_OP_FILL_RGB565 ||
+		    args->op == DRM_GCN_RENDER_OP_FILL_RECT_RGB565)) {
+		system_dst = to_gcn_drm_system_bo(dst_gem);
+		if (system_dst->format != DRM_GCN_GEM_FORMAT_RGB565 ||
+		    system_dst->layout != DRM_GCN_GEM_LAYOUT_LINEAR) {
+			ret = -EINVAL;
+			goto out_put;
+		}
+		dst_width = system_dst->width;
+		dst_height = system_dst->height;
+	} else {
 		ret = -EINVAL;
 		goto out_put;
 	}
 	if (args->op == DRM_GCN_RENDER_OP_FILL_RECT_RGB565) {
-		ret = gcn_drm_render_validate_rect(args->data, dst->width,
-						   dst->height);
+		ret = gcn_drm_render_validate_rect(args->data, dst_width,
+						   dst_height);
 		if (ret)
 			goto out_put;
 		gcn_drm_render_decode_rect(args->data, &rect);
 	}
 	if (src_gem) {
 		src = to_gcn_drm_bo(src_gem);
-		if (src->provider != dst->provider ||
+		if (!dst || src->provider != dst->provider ||
 		    src->format != dst->format || src->layout != dst->layout) {
 			ret = -EINVAL;
 			goto out_put;
 		}
 		if (args->op == DRM_GCN_RENDER_OP_COPY_RGB565 &&
-		    (src->width != dst->width || src->height != dst->height)) {
+		    (src->width != dst_width || src->height != dst_height)) {
 			ret = -EINVAL;
 			goto out_put;
 		}
 	}
 	if (args->op == DRM_GCN_RENDER_OP_BLIT_RECT_RGB565) {
 		ret = gcn_drm_render_validate_blit_rect(args->data, src->width,
-							src->height, dst->width,
-							dst->height);
+							src->height, dst_width,
+							dst_height);
 		if (ret)
 			goto out_put;
 		gcn_drm_render_decode_blit_rect(args->data, &blit_rect);
@@ -523,24 +543,46 @@ static int gcn_drm_ioctl_submit(struct drm_device *drm, void *data,
 		goto out_exec;
 	}
 
-	if (args->op == DRM_GCN_RENDER_OP_COPY_RGB565)
+	if (system_dst) {
+		struct iosys_map map = IOSYS_MAP_INIT_VADDR(NULL);
+
+		ret = drm_gem_shmem_vmap_locked(&system_dst->shmem, &map);
+		if (ret)
+			goto out_exec;
+		if (map.is_iomem) {
+			ret = -EINVAL;
+		} else if (args->op == DRM_GCN_RENDER_OP_FILL_RGB565) {
+			ret = gcn_drm_provider_fill_system(map.vaddr, dst_width,
+							   dst_height,
+							   system_dst->layout, 0, 0,
+							   dst_width, dst_height,
+							   (u16)args->data);
+		} else {
+			ret = gcn_drm_provider_fill_system(map.vaddr, dst_width,
+							   dst_height,
+							   system_dst->layout,
+							   rect.x, rect.y, rect.width,
+							   rect.height, rect.color);
+		}
+		drm_gem_shmem_vunmap_locked(&system_dst->shmem, &map);
+	} else if (args->op == DRM_GCN_RENDER_OP_COPY_RGB565)
 		ret = gcn_drm_provider_copy(src->provider, src->allocation,
 					    dst->allocation, src->width,
 					    src->height);
 	else if (args->op == DRM_GCN_RENDER_OP_FILL_RGB565)
 		ret = gcn_drm_provider_fill(dst->provider, dst->allocation,
-					    dst->width, dst->height,
+					    dst_width, dst_height,
 					    (u16)args->data);
 	else if (args->op == DRM_GCN_RENDER_OP_FILL_RECT_RGB565)
 		ret = gcn_drm_provider_fill_rect(dst->provider, dst->allocation,
-						 dst->width, dst->height,
+						 dst_width, dst_height,
 						 rect.x, rect.y, rect.width,
 						 rect.height, rect.color);
 	else
 		ret = gcn_drm_provider_blit_rect(src->provider, src->allocation,
 						 dst->allocation, src->width,
-						 src->height, dst->width,
-						 dst->height, blit_rect.src_x,
+						 src->height, dst_width,
+						 dst_height, blit_rect.src_x,
 						 blit_rect.src_y, blit_rect.dst_x,
 						 blit_rect.dst_y, blit_rect.width,
 						 blit_rect.height);
@@ -1883,12 +1925,15 @@ static int gcn_drm_ioctl_draw_fixed(struct drm_device *drm, void *data,
 	struct gcn_drm_draw_state state;
 	struct gcn_drm_depth_state depth;
 	struct gcn_drm_bo *src = NULL;
-	struct gcn_drm_bo *dst;
+	struct gcn_drm_bo *dst = NULL;
+	struct gcn_drm_system_bo *system_dst = NULL;
 	struct drm_exec exec;
 	u16 *user_indices = NULL;
 	u8 *indices = NULL;
 	unsigned int index_count;
 	unsigned int i;
+	u16 dst_width;
+	u16 dst_height;
 	bool textured;
 	int ret;
 
@@ -1931,25 +1976,43 @@ static int gcn_drm_ioctl_draw_fixed(struct drm_device *drm, void *data,
 		ret = -ENOENT;
 		goto out_put;
 	}
-	if (!gcn_drm_is_mem1_bo(dst_gem) ||
-	    (textured && !gcn_drm_is_mem1_bo(src_gem))) {
+	if (textured && !gcn_drm_is_mem1_bo(src_gem)) {
 		ret = -EINVAL;
 		goto out_put;
 	}
 
-	dst = to_gcn_drm_bo(dst_gem);
 	if (textured)
 		src = to_gcn_drm_bo(src_gem);
-	if (dst->format != DRM_GCN_GEM_FORMAT_RGB565 ||
-	    dst->layout != DRM_GCN_GEM_LAYOUT_TILED_4X4 ||
-	    (src && (src->provider != dst->provider ||
-		     src->format != DRM_GCN_GEM_FORMAT_RGB565 ||
-		     src->layout != DRM_GCN_GEM_LAYOUT_TILED_4X4))) {
+	if (src && (src->format != DRM_GCN_GEM_FORMAT_RGB565 ||
+		    src->layout != DRM_GCN_GEM_LAYOUT_TILED_4X4)) {
 		ret = -EINVAL;
 		goto out_put;
 	}
-	ret = gcn_drm_render_validate_draw_state(&args->state, dst->width,
-						 dst->height);
+	if (gcn_drm_is_mem1_bo(dst_gem)) {
+		dst = to_gcn_drm_bo(dst_gem);
+		if (dst->format != DRM_GCN_GEM_FORMAT_RGB565 ||
+		    dst->layout != DRM_GCN_GEM_LAYOUT_TILED_4X4 ||
+		    (src && src->provider != dst->provider)) {
+			ret = -EINVAL;
+			goto out_put;
+		}
+		dst_width = dst->width;
+		dst_height = dst->height;
+	} else if (gcn_drm_is_system_bo(dst_gem)) {
+		system_dst = to_gcn_drm_system_bo(dst_gem);
+		if (system_dst->format != DRM_GCN_GEM_FORMAT_RGB565 ||
+		    system_dst->layout != DRM_GCN_GEM_LAYOUT_LINEAR) {
+			ret = -EINVAL;
+			goto out_put;
+		}
+		dst_width = system_dst->width;
+		dst_height = system_dst->height;
+	} else {
+		ret = -EINVAL;
+		goto out_put;
+	}
+	ret = gcn_drm_render_validate_draw_state(&args->state, dst_width,
+						 dst_height);
 	if (ret)
 		goto out_put;
 	ret = gcn_drm_fixed_vertices(user_vertices, args->vertex_count,
@@ -1957,7 +2020,7 @@ static int gcn_drm_ioctl_draw_fixed(struct drm_device *drm, void *data,
 				     args->tev_mode,
 				     src ? src->width : 0,
 				     src ? src->height : 0,
-				     dst->width, dst->height,
+				     dst_width, dst_height,
 				     args->state.blend_mode == DRM_GCN_BLEND_NONE);
 	if (ret)
 		goto out_put;
@@ -2017,15 +2080,41 @@ static int gcn_drm_ioctl_draw_fixed(struct drm_device *drm, void *data,
 		goto out_exec;
 	}
 
-	ret = gcn_drm_provider_draw_fixed(dst->provider,
-					  src ? src->allocation : NULL,
-					  dst->allocation,
-					  src ? src->width : 0,
-					  src ? src->height : 0,
-					  dst->width, dst->height, vertices,
-					  args->vertex_count, indices,
-					  args->triangle_count, args->tev_mode,
-					  &state, &depth);
+	if (system_dst) {
+		struct iosys_map map = IOSYS_MAP_INIT_VADDR(NULL);
+		const struct gcn_drm_accel_ops *provider =
+			src ? src->provider : NULL;
+
+		ret = drm_gem_shmem_vmap_locked(&system_dst->shmem, &map);
+		if (ret)
+			goto out_exec;
+		if (map.is_iomem) {
+			ret = -EINVAL;
+		} else {
+			ret = gcn_drm_provider_draw_fixed_system(provider,
+								 src ? src->allocation : NULL,
+								 map.vaddr,
+								 src ? src->width : 0,
+								 src ? src->height : 0,
+								 dst_width, dst_height,
+								 system_dst->layout, vertices,
+								 args->vertex_count, indices,
+								 args->triangle_count,
+								 args->tev_mode, &state,
+								 &depth);
+		}
+		drm_gem_shmem_vunmap_locked(&system_dst->shmem, &map);
+	} else {
+		ret = gcn_drm_provider_draw_fixed(dst->provider,
+						  src ? src->allocation : NULL,
+						  dst->allocation,
+						  src ? src->width : 0,
+						  src ? src->height : 0,
+						  dst_width, dst_height, vertices,
+						  args->vertex_count, indices,
+						  args->triangle_count,
+						  args->tev_mode, &state, &depth);
+	}
 	if (ret)
 		goto out_exec;
 
