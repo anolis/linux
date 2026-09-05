@@ -1907,10 +1907,11 @@ gx_draw_itex_depth(const struct gcn_drm_itex_depth_vertex *vertices,
 static void
 gx_draw_fixed(const struct gcn_drm_fixed_vertex *vertices,
 	      u32 vertex_count, const u8 *indices, u32 triangle_count,
-	      u16 texture_width, u16 texture_height, bool textured)
+	      u16 texture_width, u16 texture_height, bool textured,
+	      void *vertex_workspace)
 {
 	unsigned int index_count = triangle_count * 3;
-	__be32 *positions = gx_tex_buf_alt;
+	__be32 *positions = vertex_workspace;
 	__be32 *texcoords = (__be32 *)((u8 *)positions +
 					      ALIGN(vertex_count * 12, 32));
 	u8 *colours = textured ?
@@ -4595,7 +4596,8 @@ gcn_gx_drm_draw_fixed_core(const void *src_addr, size_t src_size,
 						  false, false);
 	}
 	gx_draw_fixed(vertices, vertex_count, indices, triangle_count,
-		      src_width, src_height, textured);
+		      src_width, src_height, textured,
+		      system_dst ? gx_tex_buf : gx_tex_buf_alt);
 	gx_load_bp_reg(0x45000002);
 	for (i = 0; i < 32; i++)
 		gx_wr8(0);
