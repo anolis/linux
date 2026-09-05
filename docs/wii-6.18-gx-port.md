@@ -14253,3 +14253,34 @@ Require two complete checksum-identical strict-client passes, including every
 pixel of the new system-render oracle and all retained cases, followed by normal
 provider unload. The same timeout, fallback, crash, corruption, and capacity
 acceptance criteria above remain in force.
+
+Hardware result for workspace-fix candidate `2e91c91edf3`: accepted on boot ID
+`9467217d-9ba0-4d6c-8a00-ccca83a42780`. The booted v10 image, corrected module,
+and unchanged strict client matched the pinned checksums. Both independent
+checksum-identical invocations passed the complete 640 by 480 system-render
+oracle: all 307,200 pixels matched after the blue full fill, bounded green
+rectangle, and scissored red fixed draw, including exact preservation outside
+each operation. The malformed XRGB8888 destination was rejected as required,
+and public MEM1 remained exactly 524,288 bytes free before and after each run.
+
+Both runs also passed every retained allocator, mapping, context, syncobj, copy,
+fill, rectangle, overlap, scale, colour/state/depth draw, textured draw, indexed
+draw, system-object, and XRGB8888 oracle, ending with
+`PASS: GCN render UAPI`. Each provider interval registered and unregistered
+normally. The boot ID remained unchanged, no module remained loaded afterward,
+and the complete post-test log contains no PE/FIFO timeout, fallback, oops,
+panic, machine check, reboot, or capacity leak.
+
+The authoritative two-run transcript is
+`/media/anolis/dev/wii-gcn-system-render-accepted.txt`, SHA-256
+`a611065f98cf14ec8182c3e2fbca2d20252efcba9bfa0fb5f8730dae7c15a72f`.
+The complete post-test kernel log is
+`/media/anolis/dev/wii-gcn-system-render-dmesg.txt`, SHA-256
+`394fc4b88534dc43e395d06461a107fc332410b03b8766811817545f16d6c6be`.
+
+After acceptance, the corrected provider was installed at
+`/lib/modules/6.18.40-wii+/kernel/drivers/video/fbdev/gcn-gx.ko`; `depmod` and
+`sync` completed and its installed SHA-256 is the pinned `7355edd8...` value.
+The prior accepted v9 provider remains recoverable as
+`gcn-gx.ko.backup.1d42ba2f2688e535a175eff272181080d86ca9e943bf03fafa9fbd24cbce0258`
+with that exact checksum. The accepted v10 provider was left unloaded.
