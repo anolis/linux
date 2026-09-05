@@ -14215,3 +14215,24 @@ provider normally with CPU-console restoration. Reject the candidate for any
 PE/FIFO timeout, fallback, oops, panic, machine check, reboot, capacity leak,
 stale pixel, or display corruption. Record the full transcript and post-test
 kernel log before beginning Mesa scanout-resource integration.
+
+Hardware run 1 rejected candidate `2e5e25ddc48` on boot ID
+`9467217d-9ba0-4d6c-8a00-ccca83a42780`. The live boot image, module, and
+client matched the pinned checksums, and the kernel exported v10 registration
+with no old provider loaded. The full 640 by 480 system fill and bounded
+rectangle fill passed their exact all-pixel oracles, as did every retained test.
+The following fixed draw failed immediately at pixel `(0,0)`: it read `0x0000`
+instead of the preserved blue `0x001f`. The provider then unregistered normally;
+the boot ID remained unchanged and the interval contained no PE/FIFO timeout,
+fallback, oops, panic, machine check, or capacity leak.
+
+Static inspection identified a private-workspace alias rather than a GX state
+failure. The system destination was staged in `gx_tex_buf_alt`, while
+`gx_draw_fixed()` independently used the beginning of that same slot for its
+indexed position and colour arrays. Building the FIFO therefore overwrote the
+first destination tiles before GX restored them to EFB. Existing MEM1 draws did
+not expose the bug because their destination allocations never alias the fixed
+vertex workspace. The corrective test must pass an explicit vertex workspace
+to `gx_draw_fixed()`: retain `gx_tex_buf_alt` for established MEM1 draws, but use
+`gx_tex_buf` for a system-destination draw after the first depth-clear submission
+has completed and no longer needs that slot.
