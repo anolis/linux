@@ -14236,3 +14236,20 @@ vertex workspace. The corrective test must pass an explicit vertex workspace
 to `gx_draw_fixed()`: retain `gx_tex_buf_alt` for established MEM1 draws, but use
 `gx_tex_buf` for a system-destination draw after the first depth-clear submission
 has completed and no longer needs that slot.
+
+The corrective provider is staged for an immediate same-boot confirmation:
+
+- workspace-fix commit: `2e91c91edf31d1241b8f7248dcc3f35d5e511050`
+- unchanged booted v10 `zImage` SHA-256:
+  `1e6e9297c7c222eb60f796a37ee9a60ff780710b2d210d11c2ef7af09f35d882`
+- corrected `gcn-gx.ko` SHA-256:
+  `7355edd87a2743f75e45421556b3d672b404bd80d83baa95b95a23f8f3cac588`
+- unchanged strict client SHA-256:
+  `6dab19b25423250d05e4ec95de25661efd2a742e01603d04fc8122d8937eb260`
+
+Only the provider changed, so retain boot ID
+`9467217d-9ba0-4d6c-8a00-ccca83a42780` and hot-load the corrected v10 module.
+Require two complete checksum-identical strict-client passes, including every
+pixel of the new system-render oracle and all retained cases, followed by normal
+provider unload. The same timeout, fallback, crash, corruption, and capacity
+acceptance criteria above remain in force.
