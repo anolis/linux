@@ -14153,3 +14153,65 @@ normally and left no GX timeout, scanout fallback, FIFO error, oops, panic, or
 MEM1 leak. Two boot-time unknown-symbol messages are expected: the old
 installed v8 module was rejected by the new v9 core before the checksum-pinned
 candidate was loaded manually.
+
+#### Stage full-size linear system RGB565 rendering
+
+- implementation commit: `2e5e25ddc48df14c6c483e1270c2d9da2684c2b5`
+- `zImage` / `dtbImage.wii` SHA-256:
+  `1e6e9297c7c222eb60f796a37ee9a60ff780710b2d210d11c2ef7af09f35d882`
+- `gcn-gx.ko` SHA-256:
+  `98ceab9ef75cc285e4cc13b1fe21b2780eb1cb73a4afbfe9436da5285620ac83`
+- static `wii-gcn-render-test` SHA-256:
+  `6dab19b25423250d05e4ec95de25661efd2a742e01603d04fc8122d8937eb260`
+- focused KUnit JSON SHA-256:
+  `17da4d030a9e4e30bde014d2b60b25eb7cb0bb99901dc5197dae3589f325d4dd`
+
+Enable native-size Mesa and KMS resources without expanding the accepted
+512 KiB public MEM1 render pool. Feature bit 25 advertises full and rectangular
+fills plus consolidated fixed-function draws into marked, linear RGB565 system
+GEM objects. Existing copy and rectangular blit submissions remain confined to
+tiled MEM1 objects. Textured fixed draws continue to require a distinct tiled
+MEM1 source, while pass-colour draws require no source.
+
+The DRM core accepts only driver-created render objects with exact RGB565 and
+linear layout, locks their reservation, maps shmem for the synchronous provider
+call, and adds the existing destination-write fence. The private provider ABI
+advances from v9 to v10 by appending system-fill and system-fixed-draw callbacks.
+An old provider therefore cannot bind to the new core, and the candidate
+provider cannot bind to an old core.
+
+The GX provider stages the system destination through the existing private
+768 KiB alternate texture workspace under `gx_submit_lock`. Bounded operations
+convert the original linear destination to tiled RGB565 before restoring EFB;
+full fills do not need that restore. Each operation uses the accepted GX state,
+draw, copyback, token, and PE-completion path, invalidates the private workspace,
+then converts the result back to the linear system object. No public MEM1
+allocation, physical address, raw register, or raw command byte is exposed, and
+the relocated-FDT area remains untouched.
+
+The strict client adds a 640 by 480 linear-system positive control. Its 614,400
+bytes exceed the public MEM1 pool, so successful creation also proves the
+intended allocation class. It checks all 307,200 pixels after an exact blue
+full fill, a bounded green rectangle fill that preserves every exterior pixel,
+and a scissored red pass-colour quad that preserves the prior blue/green state
+outside the scissor. It also requires an RGB565 fill into a system XRGB8888
+object to fail with `EINVAL`, and verifies MEM1 free bytes before, during, and
+after the test.
+
+Host validation passed all 24 focused GCN KUnit tests, the complete PowerPC
+`zImage modules -j16` build, warning-clean `W=1` builds of every changed kernel
+object, and static client compilation with `-Wall -Wextra -Werror`. Strict
+checkpatch reports zero errors, warnings, or checks across 917 changed lines;
+`git diff --check` passes. The provider imports only v10 registration and the
+matching kernel exports v10 registration and unregistration.
+
+This candidate is not yet hardware-accepted. Boot the checksum-pinned v10
+kernel before loading its provider. First verify the live boot-image checksum,
+boot ID, v10 exported symbol, and absence of an already loaded provider. Run
+the checksum-pinned strict client at least twice. Both invocations must pass the
+new 640 by 480 system render oracle and every retained render test, finish with
+`PASS: GCN render UAPI`, preserve all 524,288 public MEM1 bytes, and unload the
+provider normally with CPU-console restoration. Reject the candidate for any
+PE/FIFO timeout, fallback, oops, panic, machine check, reboot, capacity leak,
+stale pixel, or display corruption. Record the full transcript and post-test
+kernel log before beginning Mesa scanout-resource integration.
