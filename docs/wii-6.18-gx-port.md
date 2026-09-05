@@ -14115,3 +14115,41 @@ After acceptance, the candidate was installed at
 value. The prior accepted v8 module remains recoverable as
 `gcn-gx.ko.backup.52753aa84cc6651efeb0ca00a20f6b7474d9538e1ba0ae0a4ff1f6f2e248975d`
 with that exact checksum.
+
+#### Validate semantic raster culling
+
+- implementation commit: `b0dc883b67536d44bc959666942802cd456b255f`
+- `zImage` SHA-256:
+  `1c31bfbf242ae3871938c429a0edbdd38423daede8f575ba7f1588cca8010092`
+- `gcn-gx.ko` SHA-256:
+  `1d42ba2f2688e535a175eff272181080d86ca9e943bf03fafa9fbd24cbce0258`
+- PowerPC render client SHA-256:
+  `cc22772018c865d2ea8aca0b0eb774679c288a9c67200018ac07058cff34ed3e`
+- hardware boot ID: `9dfec071-2bb2-4b30-b2e4-c7329737a48e`
+
+The former 32-bit padding member at the end of `drm_gcn_draw_state` now holds
+one of four semantic cull modes, preserving the structure's 24-byte layout.
+Feature bit 24 advertises the new state. Every draw ioctl validates and copies
+the mode into the private provider state, and the GX provider maps semantic
+none/front/back/all to libogc's verified BP `GENMODE` bits 14--15 encoding
+`0/2/1/3`. The private provider registration symbol advances from v8 to v9 so
+a new module cannot load against an old core with the shorter internal state.
+
+An exact-commit UML build passed all 24 focused GCN KUnit tests: three MEM1
+allocator tests and 21 render/UAPI tests. The complete PowerPC `zImage modules`
+build and all four render clients passed with `-j16`.
+
+The first hardware run proved the new behavior: a known-good pass-color batch
+under `DRM_GCN_CULL_ALL` preserved all 65,536 sentinel pixels, then the same
+geometry under `DRM_GCN_CULL_NONE` produced the expected 44,928 cyan pixels
+inside the scissor and preserved 20,608 outside pixels. Every draw test passed.
+One unrelated same-object opposed-scale sample differed by one RGB565 green
+bit, so that aggregate run returned failure.
+
+The checksum-identical confirmation run passed that scaling case and the full
+render UAPI suite, again reporting `culled=65536`, and ended with
+`PASS: GCN render UAPI`. Both candidate intervals registered and unregistered
+normally and left no GX timeout, scanout fallback, FIFO error, oops, panic, or
+MEM1 leak. Two boot-time unknown-symbol messages are expected: the old
+installed v8 module was rejected by the new v9 core before the checksum-pinned
+candidate was loaded manually.
