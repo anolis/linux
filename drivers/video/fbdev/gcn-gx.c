@@ -604,12 +604,18 @@ static u32 gx_direct_center_texcoord_bits(u16 extent)
 	return numerator < 0 ? F32_NEG(bits) : bits;
 }
 
-static u32 gx_semantic_texcoord_bits(u16 coordinate, u16 extent)
+static u32 gx_semantic_texcoord_bits_phase(u16 coordinate, u16 extent,
+					   s32 phase_eighths)
 {
-	s32 numerator = (u32)coordinate * 8 - 2;
+	s32 numerator = (u32)coordinate * 8 + phase_eighths;
 	u32 bits = f32_div_u32(abs(numerator), (u32)extent * 8);
 
 	return numerator < 0 ? F32_NEG(bits) : bits;
+}
+
+static u32 gx_semantic_texcoord_bits(u16 coordinate, u16 extent)
+{
+	return gx_semantic_texcoord_bits_phase(coordinate, extent, -2);
 }
 
 static u16 gx_nearest_source_index(u16 dst_index, u16 src_extent,
@@ -1929,7 +1935,7 @@ gx_draw_fixed(const struct gcn_drm_fixed_vertex *vertices,
 		positions[i * 3 + 2] = cpu_to_be32(F32_NEG(z));
 		if (textured) {
 			s = gx_semantic_texcoord_bits(vertices[i].s, texture_width);
-			t = gx_semantic_texcoord_bits(vertices[i].t, texture_height);
+			t = gx_semantic_texcoord_bits_phase(vertices[i].t, texture_height, -1);
 			texcoords[i * 2] = cpu_to_be32(s);
 			texcoords[i * 2 + 1] = cpu_to_be32(t);
 		}
