@@ -14380,3 +14380,10 @@ The exact final kernel audit contains no GX/DRM timeout, stalled submission,
 failure, fallback, oops, panic, machine check, or kernel bug. Accept the
 asymmetric fixed texture phase as the v10 provider behavior: S remains at
 negative one-quarter texel and T uses negative one-eighth texel.
+
+After acceptance, module SHA-256 `17ef4c1c...` was installed at
+`/lib/modules/6.18.40-wii+/kernel/drivers/video/fbdev/gcn-gx.ko`; `depmod` and
+`sync` completed and the installed checksum was verified. Provider
+`7355edd8...` remains recoverable beside it as
+`gcn-gx.ko.backup.7355edd87a2743f75e45421556b3d672b404bd80d83baa95b95a23f8f3cac588`.
+The accepted provider was left unloaded with CPU scanout active.
