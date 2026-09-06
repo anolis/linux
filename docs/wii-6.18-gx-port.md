@@ -14327,3 +14327,23 @@ complete Mesa regression suite. Require full MEM1 recovery, an unchanged
 kernel outside the checksum-pinned module, and identical before/after kernel
 fault logs. Reject any geometry change, remaining 5/3 split, new horizontal
 error, timeout, provider loss, or memory leak.
+
+Focused hardware result for `110d1238c`: passed. The checksum-verified module
+ran on kernel `6.18.40-wii+`, boot ID
+`f4cb4be7-542b-49b4-8a81-8ed60fdf86ff`, with Mesa driver `6b20e7f` and map
+probe `d8f151d`. The strict MVP-texture oracle now matched all 256 pixels,
+proving the corrected 4/4 vertical split without changing the exact 8 by 8
+geometry or horizontal split. MVP-color, one-to-one texture replacement,
+texture-uniform modulation, and lifecycle controls all returned zero. MEM1
+returned to `524288/524288`, before/after logs were byte-identical, and module
+unload restored CPU scanout.
+
+```
+5888199e96691e070abf719ff79322f82c1d6f2361a11f23c7eeb92f605d0c21  /media/anolis/dev/mvp-texture-t-phase-110d1238c.txt
+63f4046bbea9fe24cb466439f4a83f6b304cb2f6992ae06731f4fd6e7d7ac993  /media/anolis/dev/mvp-texture-t-phase-before-110d1238c.txt
+63f4046bbea9fe24cb466439f4a83f6b304cb2f6992ae06731f4fd6e7d7ac993  /media/anolis/dev/mvp-texture-t-phase-after-110d1238c.txt
+```
+
+This accepts the phase hypothesis but not yet the provider change. Run the
+complete Mesa functional regression, including KMS stress and the new
+MVP-texture mode, against the same module before promoting it.
