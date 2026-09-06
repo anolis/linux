@@ -14347,3 +14347,36 @@ unload restored CPU scanout.
 This accepts the phase hypothesis but not yet the provider change. Run the
 complete Mesa functional regression, including KMS stress and the new
 MVP-texture mode, against the same module before promoting it.
+
+Final hardware result for `110d1238c`: accepted. The uninterrupted Mesa suite
+returned zero for all 31 functional modes plus lifecycle. This includes the
+new exact MVP-texture composition, every retained direct Gallium and GLES
+oracle, native fence import/export, and both KMS presentation modes. Sustained
+KMS reached frame 121 with two buffers. Final lifecycle restored
+`MEM1=524288/524288`; logs captured immediately before and after the suite
+were byte-identical:
+
+```
+270a497a7c503d242c0b2b918f9ececfa9fa20dcb5e74566372c541d631514e2  /media/anolis/dev/mvp-texture-suite-110d1238c.txt
+c52736832fcfb5a18530b21888a8ba130798741a5667d98adab897090b53b8e0  /media/anolis/dev/mvp-texture-suite-before-110d1238c.txt
+c52736832fcfb5a18530b21888a8ba130798741a5667d98adab897090b53b8e0  /media/anolis/dev/mvp-texture-suite-after-110d1238c.txt
+```
+
+The checksum-pinned static v10 render-UAPI client then passed twice across
+clean module load/unload cycles. Every allocator, copy, fill, overlap,
+arbitrary-ratio scale, color/state/depth draw, indexed texture, consolidated
+fixed draw, full-size system-render, and XRGB8888 oracle passed. The two
+complete transcripts are byte-identical. The provider was absent afterward
+and the installed prior provider remained unchanged during testing.
+
+```
+6dab19b25423250d05e4ec95de25661efd2a742e01603d04fc8122d8937eb260  /media/anolis/dev/wii-gcn-system-render-clients/wii-gcn-render-test
+03008db1da8b0dfc24b0ce7d92f054c8eec8728aca03ff7fb23291dd4de70e7c  /media/anolis/dev/wii-gcn-t-phase-render-cycle-1-110d1238c.txt
+03008db1da8b0dfc24b0ce7d92f054c8eec8728aca03ff7fb23291dd4de70e7c  /media/anolis/dev/wii-gcn-t-phase-render-cycle-2-110d1238c.txt
+ba56413caf3661fab879f7da7bb19f18a00000a27fcf059730a67194c8a558a8  /media/anolis/dev/wii-gcn-t-phase-final-dmesg-110d1238c.txt
+```
+
+The exact final kernel audit contains no GX/DRM timeout, stalled submission,
+failure, fallback, oops, panic, machine check, or kernel bug. Accept the
+asymmetric fixed texture phase as the v10 provider behavior: S remains at
+negative one-quarter texel and T uses negative one-eighth texel.
