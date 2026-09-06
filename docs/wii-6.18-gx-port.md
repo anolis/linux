@@ -14284,3 +14284,46 @@ After acceptance, the corrected provider was installed at
 The prior accepted v9 provider remains recoverable as
 `gcn-gx.ko.backup.1d42ba2f2688e535a175eff272181080d86ca9e943bf03fafa9fbd24cbce0258`
 with that exact checksum. The accepted v10 provider was left unloaded.
+## 2026-09-06: Stage asymmetric fixed-draw texture phase
+
+- Test branch: `test/wii-gx-semantic-t-phase`
+
+Mesa's composed MVP plus texture-replacement probe exposed a scaling defect in
+the accepted v10 fixed-draw texture contract. Driver `6b20e7f` and diagnostic
+probe `d8f151d` produced an exact centered 8 by 8 quad from a 4 by 4 RGB565
+texture. Geometry covered the expected destination rectangle and the
+horizontal texture boundary split 4/4, but the vertical boundary split 5/3:
+the first lower-half sample appeared at destination row 9 instead of row 8.
+The same strict all-pixel oracle passes under softpipe. Complete evidence is:
+
+```
+6e2d1929790e4dd0d00f1d94272985201d0e8e99c11d840afbe808c200008b02  /media/anolis/dev/mvp-texture-map-d8f151d.txt
+69fee79b7ced03ef73171fb948d9c8639f0ca7588e701a676175434db493ebed  /media/anolis/dev/mvp-texture-map-before-d8f151d.txt
+69fee79b7ced03ef73171fb948d9c8639f0ca7588e701a676175434db493ebed  /media/anolis/dev/mvp-texture-map-after-d8f151d.txt
+```
+
+The provider converts each semantic integer texel-edge coordinate to GX F32
+with a fixed `-2/8` texel phase. At exact 2x enlargement, that places the
+middle destination sample on a nearest-filter boundary. Hardware resolves the
+T-axis tie toward the upper source texel, accounting for the observed fifth
+top-half row. Commit `110d1238c` changes only the consolidated fixed-draw T
+phase to `-1/8`; S and every legacy texture entry point retain `-2/8`. This
+should move the T tie to the lower source texel while preserving one-to-one
+nearest samples.
+
+Patch-scoped strict checkpatch reports zero diagnostics. Focused PowerPC
+compilation and the complete PowerPC `zImage modules` build pass with `-j16`.
+The post-commit module is staged at
+`/media/anolis/dev/wii-gx-t-phase-110d1238c-stage` and has SHA-256:
+
+```
+17ef4c1c9a953222cffd1a04fa0295755ffbd2a73c1409734c34a8920aeca53f  lib/modules/6.18.40-wii+/kernel/drivers/video/fbdev/gcn-gx.ko
+```
+
+Hardware acceptance must first rerun the exact Mesa MVP-texture oracle and
+require the complete 16 by 16 map to match. Then run the accepted one-to-one
+texture, texture-uniform, MVP-color, and lifecycle controls, followed by the
+complete Mesa regression suite. Require full MEM1 recovery, an unchanged
+kernel outside the checksum-pinned module, and identical before/after kernel
+fault logs. Reject any geometry change, remaining 5/3 split, new horizontal
+error, timeout, provider loss, or memory leak.
