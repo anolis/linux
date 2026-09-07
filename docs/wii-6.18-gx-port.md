@@ -14442,3 +14442,46 @@ errno, allocation leak, PE/FIFO timeout, stalled submission, CPU fallback,
 provider loss, oops, panic, machine check, or failure to restore CPU scanout.
 Only after that gate passes should Mesa expose RGBA8 sampler resources through
 the hardware winsys.
+
+Initial hardware result for `95698272f`: RGBA8 passed its focused oracle, but
+the v11 provider is rejected pending a copy-completion correction. The staged
+image booted successfully as `6.18.40-wii+` with boot ID
+`3081c7f2-15c8-4445-b177-b1f820125ed9`; `/proc/kallsyms` exposed the expected
+v11 registration pair. Both checksum-identical invocations of the new strict
+client reported `RGBA8 TEXTURE: 64 alpha-composited pixels matched`. The
+negative allocation cases did not fail, system rendering continued to pass,
+and each failed cycle unloaded the provider and restored CPU scanout.
+
+The complete suite nevertheless failed once per run in the retained 640-wide
+RGB565 reduction. Run 1 read `0x2f19` instead of `0x2f59` at `(108,60)`; run 2
+read `0x429b` instead of `0x42db` at `(45,64)`. Both differences are one moving
+green-channel bit rather than a stable sampling-boundary error. An independently
+checksum-pinned v10 client, which does not allocate or sample RGBA8 at all, was
+then run against the same v11 provider. It also failed at one moving pixel, this
+time reading `0xdc9a` instead of `0xdc9e` at `(317,352)` in the full-screen
+system scale. This control rules out RGBA8 format state or tile encoding as the
+cause and exposes a latent scaled-copy completion race whose timing changed
+with the new provider build.
+
+```
+59932f101498d92fa1412eec6c93e5dff2542b52d21181551de1449d1e5d99c6  /media/anolis/dev/wii-gcn-rgba8-v11-cycle-1.txt
+6a56b85c585d530ec36699f986d6bb761cae8c15e092462169c8174fa0872f09  /media/anolis/dev/wii-gcn-rgba8-v11-cycle-2.txt
+a4ed5037c89fa235e316b2ab1329f7b01ddab5699d33035c19b8c7dbdca797fe  /media/anolis/dev/wii-gcn-rgba8-v11-v10-client-control.txt
+5c6762be35689c07d5669eb99b61e892c388e939208373ccaaff074508012466  /media/anolis/dev/wii-gcn-rgba8-v11-after-cycle-1.txt
+```
+
+The archived post-run log contains no test-time PE/FIFO timeout, fallback,
+oops, panic, machine check, or reboot. It does contain expected early-boot
+unknown-v10-symbol messages because the root filesystem still holds the prior
+v10 provider; replace that installed module only after v11 acceptance.
+
+The next single-variable candidate is grounded in libogc's documented
+`GX_CopyTex()` synchronization rule. `GX_PixModeSync()` writes the current BP
+`0x43` PE-control value and is specifically required after a texture copy and
+before consuming the copied texture. The scaled path currently submits
+copy-to-texture operations, observes its later token/finish path, and then
+samples or CPU-reads the result without an explicit post-copy pixel-mode sync
+in the same command stream. Add the known current value `BP 0x43 = 0x000040`
+immediately after each texture-copy execute command and before its final
+draw-done marker. Require the RGBA8 oracle and all retained scaled tests to pass
+twice before accepting either the synchronization fix or v11.
