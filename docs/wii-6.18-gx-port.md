@@ -14767,3 +14767,29 @@ every one of the 23 small-object scaled cases, both 640-wide directions, both
 full-screen system paths, and XRGB8888 conversion must match every pixel. Also
 require the 64-pixel linear oracle, exact MEM1 recovery, clean unload, and no
 timeout or kernel fault.
+
+Hardware result for `daf00bccd`: rejected as the scaled-copy repair. The first
+attempt reported a 640-wide reduction mismatch in the live terminal, but its
+saved file was byte-identical to the earlier exact-token run because the cycle
+command had captured stdout without stderr. Do not use that file as evidence.
+All subsequent hardware transcripts must merge stderr into stdout before
+checksuming so that a client failure and its exact pixel diagnostic are
+self-contained.
+
+With complete transcript capture, two consecutive full suites passed every
+operation. The third reproduced the exact earlier 640-wide reduction failure at
+`(108,60)`: `0x2f19` instead of `0x2f59`. Every preceding small-object scale
+case, the 64-pixel linear oracle, and all following full-system paths passed.
+The provider unloaded normally after every run, restored CPU scanout, and the
+post-run audit contains no timeout, FIFO stall, fallback, oops, panic, machine
+check, or kernel bug. Waiting for a unique post-copy finish after each crop,
+horizontal, and final stage therefore does not prevent the moving single-bit
+error. Revert this candidate before the next experiment, while retaining exact
+PE token equality from `643bac019`.
+
+```
+4f5d22acdbeb0a3ee34cf7c7c77b338c94254737fbd17bca9dca641c5cea5f92  /media/anolis/dev/wii-gcn-linear-v12-staged-finish-full-2.txt
+4f5d22acdbeb0a3ee34cf7c7c77b338c94254737fbd17bca9dca641c5cea5f92  /media/anolis/dev/wii-gcn-linear-v12-staged-finish-full-3.txt
+171b594dcc56298a4c8ecc857777e4613e0de2d5ca7e61db8ba4e34cb0b1e61e  /media/anolis/dev/wii-gcn-linear-v12-staged-finish-full-4.txt
+27c9bec3cfd08a312e092df63a63c33dcbf6f13b80b7140cefcb529ec6381971  /media/anolis/dev/wii-gcn-linear-v12-staged-finish-audit.txt
+```
