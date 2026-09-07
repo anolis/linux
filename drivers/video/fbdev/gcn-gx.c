@@ -2469,18 +2469,18 @@ static int gx_submit_cmds(const char *phase)
 	/*
 	 * Positive control for PE event delivery. The command stream contains
 	 * libogc's exact BP 0x48/BP 0x47 draw-sync sequence with a new token each
-	 * frame. Poll both PE token status and the token-value register so either
-	 * independently observable effect can validate downstream BP execution.
+	 * frame. Require the token-value register to match this submission; the
+	 * status bit alone does not identify which token asserted it.
 	 */
 	pe_timeout = 2000;
 	do {
 		pe_status = pe_read(PE_REG_INTR_STATUS);
 		pe_token = pe_read(PE_REG_TOKEN);
-		if ((pe_status & PE_TOKEN_BIT) || pe_token == gx_expected_token)
+		if (pe_token == gx_expected_token)
 			break;
 		udelay(10);
 	} while (--pe_timeout);
-	token_seen = (pe_status & PE_TOKEN_BIT) || pe_token == gx_expected_token;
+	token_seen = pe_token == gx_expected_token;
 
 	if (pe_status & PE_TOKEN_BIT) {
 		/* Leave finish asserted for the PE IRQ completion handler. */
