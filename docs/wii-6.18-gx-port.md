@@ -15071,3 +15071,24 @@ for all iterations validate the simplified final path; any final mismatch
 places the fault in the direct vertical runs or their EFB result rather than
 the removed restore/state transition. A clean focused run still requires five
 complete strict-suite passes before acceptance.
+
+Hardware result for full-target restore-bypass commit `b65b4dc69` and provider
+`9986e83a`: rejected as the corruption fix. The focused loop passed 14 exact
+pixel comparisons, then iteration 15 read `0x39cd` instead of `0x38cd` at
+`(166,113)`. Iteration 14 had already changed the horizontal hash from
+`22ce6dc5` to `d760c525`, although that iteration's final hash and exhaustive
+destination comparison still matched. Iteration 15 changed horizontal again
+to `591094c5` and final to `b0303cc5`. Source and crop remained stable.
+
+```
+7e35871c266608e0ed03af47ba72620eddfafecb8e2e95579b58a659a9a3728d  /media/anolis/dev/wii-gcn-wide-reduce-no-restore-client.txt
+6ae3a3f99ec6e112a31338fc06492e9a229b160d73e8e8eac18dc11bc1f5c759  /media/anolis/dev/wii-gcn-wide-reduce-no-restore-kernel.txt
+```
+
+The failure survives with no destination restore and can first appear in the
+horizontal many-run raster. Run decomposition remains necessary because the
+earlier fixed-point campaign proved that one affine quad cannot implement the
+exact center-nearest contract across all ratios. Keep the exact direct-TEX0
+run quads, but place every quad for a stage under one `GX_QUADS` begin/count
+packet. This removes hundreds of primitive boundaries while retaining the
+same geometry, source-index function, phase, and stage synchronization.
