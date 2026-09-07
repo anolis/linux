@@ -14720,3 +14720,28 @@ all scaled pixels exact, all 64 linear-filter pixels exact, full MEM1 recovery,
 clean unload, and no timeout or hardware fault. Any moving scaled mismatch
 rejects exact-token polling as sufficient and advances to isolated per-stage
 finish markers.
+
+Hardware result for `643bac019`: rejected as sufficient completion repair. The
+first full strict cycle passed every operation. The second cycle passed all
+small-object scale cases and the linear-filter oracle, then the 640-wide
+reduction read `0x2f19` instead of `0x2f59` at `(108,60)`. This is another new
+location and repeats a value pair first seen at a different coordinate during
+the initial v11 investigation. Exact PE token equality therefore does not by
+itself guarantee that every scaled intermediate/final copy is complete when
+consumed or read. Keep exact equality because it is strictly stronger than an
+anonymous status bit, but do not claim that it fixes the race.
+
+```
+4f5d22acdbeb0a3ee34cf7c7c77b338c94254737fbd17bca9dca641c5cea5f92  /media/anolis/dev/wii-gcn-linear-v12-exact-token-full-1.txt
+f18da458ebcc99096f439b65c83e36150fa9bc3de02ee72dae8d912f6743c068  /media/anolis/dev/wii-gcn-linear-v12-exact-token-full-2.txt
+```
+
+The scaled path currently emits an early `BP 0x45` after raster work and a
+second `BP 0x45` after each EFB texture copy, while intermediate submissions
+advance without waiting for their finish event. A final `count + 1` wait can
+therefore be satisfied by an earlier marker or a delayed interrupt from the
+previous stage. The next candidate removes only the pre-copy markers from the
+three scaled command streams, leaving one marker after each copy, and waits for
+that marker before reusing the crop or horizontal intermediate. Retain all
+command padding, texture invalidation, pixel-mode synchronization, exact-token
+polling, geometry, and cache operations unchanged.
