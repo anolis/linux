@@ -16173,3 +16173,44 @@ scale_cpu_alt=1 scale_cpu_rgba8=1 scale_cpu_uniform=1 scale_direct_color=1
 scale_single_quad=1`; leave clear-only off. If 100 iterations pass, extend to
 500 more. A reproduced bad EFB pixel shows row decomposition is not necessary;
 a passing control does not establish correctness of spatial scaling.
+
+Hardware result for `1ecf1e803`: the single direct-color rectangle passed
+600 iterations (initial 100 plus five additional 100-iteration cycles). All
+23040000 EFB pixels matched source and copy, with final authored fingerprint
+`d0808d64` throughout. All six audits verified candidate `b490b6bd...`, uniform
+client `8a5c7030...`, installed accepted provider `a2e7df8e...`, boot
+`444193a6-aee4-4ae3-a619-4f6dd90fccf1`, normal unload and CPU restoration.
+There were no timeout, stall or kernel fault messages during the intervals.
+
+A same-module positive failure control followed immediately, with only
+`scale_single_quad` disabled. The restored 120-row-quad stream had its previous
+fingerprint `b5e83197` and failed at iteration 28 at `(206,31)`: raw EFB
+`009ce36f`, EFB/copied RGB565 `9f0d`, expected `9f1d`. The full EFB comparison
+had zero copy mismatches and one source mismatch. Final/delayed hashes were
+`5860c4b5`. Source/crop, horizontal and full uniform fixture hashes remained
+exact. The candidate/client checksums and boot ID matched the passing runs,
+and unload again restored CPU scanout with the installed provider unchanged.
+
+This accepts the single rectangle as a sustained diagnostic positive control
+and reproduces the contrasting row failure under the same binary and boot.
+Primitive decomposition/command length or timing now distinguishes these
+controls. This does not prove a specific raster edge or FIFO defect, and a
+uniform single quad does not implement general exact nearest scaling.
+
+All 21 client/kernel/audit artifact checksums are recorded in:
+
+```
+6e8e7723c018673720d4dbf021cf159e27061cce1b2d1f7d8290d54fa4ddfccd  /media/anolis/dev/wii-gcn-single-quad-600-row-recheck.sha256
+```
+
+Artifact stems are `wii-gcn-wide-reduce-single-quad-100`,
+`wii-gcn-wide-reduce-single-quad-extend-1` through `-extend-5`, and
+`wii-gcn-wide-reduce-row-recheck`, under `/media/anolis/dev/`.
+
+Next bounded control: retain the exact 120 row quads but submit and positively
+fence each row separately, keeping state and color fixed. This distinguishes
+rapid adjacent primitive submission from the row geometry itself. Preserve a
+fingerprint of the whole authored row sequence, full EFB comparison, explicit
+uniform oracle and failure cleanup; document the extra 120 completion points.
+Do not present serializing every row as a production performance solution.
+No per-row-fenced candidate has yet been implemented.
