@@ -15520,3 +15520,33 @@ Run the unchanged 100-iteration trace client at `10.3.10.59` with
 sequence with its buffer hashes. This is a diagnostic, not a corruption fix;
 hash equality is evidence of stable authored commands, not proof of identical
 hardware fetches or immunity to hash collisions.
+
+Hardware result for `a534ddaab`: command fingerprints remained stable across
+all 32 iterations (`horizontal=03506e62`, `final=9dfcb1dc`). Iteration 32
+reproduced `(206,31) = 0x9f0d` instead of `0x9f1d`, with exact horizontal
+output and `final=final_delayed=8b4301b5`. Sequences 16 and 18 had horizontal
+`71218605`; sequence 28 had `d760c525`; their final outputs were exact. All
+immediate/delayed buffer pairs matched, and source/crop remained exact.
+
+The authored draw streams therefore have stable fingerprints on both passing
+and failing sequences. This gives no evidence for changing CPU-side draw
+construction; it does not validate CP memory fetches, copy-command bytes, or
+hidden hardware state. Do not treat the additional hashing or quiet delays as
+a fix. The same boot, checksum-pinned client, and render-only mode were used.
+The temporary provider unloaded normally, restored CPU scanout, and left the
+installed accepted provider at `a2e7df8e...`. No timeout, stall, or kernel fault
+appeared in the captured candidate interval.
+
+```
+4270ffa1511aa03b27e978583f0a0b629137b5411b1c805aa9fd2905b53f8541  /media/anolis/dev/wii-gcn-wide-reduce-command-hash-100-client.txt
+11b08b43ec13756146b2d7e4704d2212fdb2a10de8daa62d352ad0b0427a6e30  /media/anolis/dev/wii-gcn-wide-reduce-command-hash-100-kernel.txt
+593f9d465054134f3d0612eb885c5327ae1a0207c814e96a349d70e68e167158  /media/anolis/dev/wii-gcn-wide-reduce-command-hash-100-kernel-raw.txt
+```
+
+Next diagnostic boundary: distinguish the EFB raster result from its texture
+copy. Establish a read-only EFB color-access positive control using verified
+hardware address/format definitions, then compare EFB pixels before copy with
+the corresponding copied RGB565 pixels. Account explicitly for RGB8-to-RGB565
+quantization. Retain the current source/command/output detectors and avoid
+repeating rejected replay-count, scanout-isolation, dithering, or copy-clear
+fixes. No EFB-access candidate has yet been implemented or hardware-validated.
