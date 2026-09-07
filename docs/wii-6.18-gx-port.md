@@ -15182,6 +15182,27 @@ cache invalidation submission, followed by BP `0x45`, exact token, CPU finish
 wait, and only then the raster submission. Apply it before both horizontal and
 vertical consumers; keep the replay diagnostic as the positive control.
 
+Commit `02e387942` implements the isolated texture-cache fence. The exact
+libogc `GX_InvalidateTexAll()` sequence is factored without changing the
+ordinary texture-bind stream. After the crop is prepared and again after the
+horizontal intermediate is copied, a separate submission emits that sequence
+plus BP `0x45`; the CPU requires its exact token, command-idle state, and PE
+finish before the corresponding consumer draw begins. The existing bind-time
+invalidation remains, and the trace-only final-raster replay stays enabled as
+the positive control.
+
+Strict checkpatch and the PowerPC `W=1` module build pass with `-j16`:
+
+```
+c4364c4de06dc5d39355e07d49ce0308e7922be251f06d1d469df4119a3a0d3e  /media/anolis/dev/wii-gcn-linear-v12-build/drivers/video/fbdev/gcn-gx.ko
+```
+
+Run the focused loop with `scale_trace=1 render_only=1`. The first gate is 100
+exact iterations with stable stage and replay hashes. If that passes, extend
+to at least 500 iterations before accepting the fence, because the unfenced
+direct-run candidates survived as many as 59 iterations. Any mismatch rejects
+the isolated invalidation; compare `final` and `replay` on that same event.
+
 Commit `049bf80d0` implements one primitive per scaled axis. It counts the
 nearest-neighbour runs first, emits one `GX_QUADS` header with four vertices
 per run, then appends the same direct-TEX0 run vertices as the previous
