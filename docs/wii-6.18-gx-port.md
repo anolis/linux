@@ -14844,3 +14844,20 @@ mismatch localize it to final raster/copy or CPU visibility.
 170248a32c4c302358cdcd1bd158e73b1b3b6d15e184ba90195a35fd42d93d50  /media/anolis/dev/wii-gcn-linear-v12-no-dither-full-2.txt
 bbea583c2147b06d699201890a42c74d951681756d31910b597cfe3fd03f1efe  /media/anolis/dev/wii-gcn-linear-v12-no-dither-audit.txt
 ```
+
+Commit `0ed17caab` adds the focused diagnostic control. The render client now
+accepts `--wide-reduce-only`, repeats the deterministic 640x240-to-320x120
+RGB565 reduction up to 100 times, and stops at the first mismatch. The normal
+render-cycle harness accepts validated `--client-args`, preserving checksum
+verification, Wii-console status, module lifecycle, and CPU-scanout restoration
+for focused modes. Its client-build scratch tree now resides under the selected
+dev-drive output directory rather than host `/tmp`.
+
+```
+be7240460c5fad49745052b4473c1fd561a73689912051c725e8592e47e1eb33  /media/anolis/dev/wii-gcn-linear-v12-oracle-clients/wii-gcn-render-test
+```
+
+Run the focused mode against unchanged provider `699b92f9...` as a positive
+control. It must reproduce a moving 640-wide mismatch without exercising the
+rest of the suite before per-stage hashing is added. Capture merged stdout and
+stderr and retain the iteration number and exact pixel/value pair.
