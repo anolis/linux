@@ -15092,3 +15092,21 @@ exact center-nearest contract across all ratios. Keep the exact direct-TEX0
 run quads, but place every quad for a stage under one `GX_QUADS` begin/count
 packet. This removes hundreds of primitive boundaries while retaining the
 same geometry, source-index function, phase, and stage synchronization.
+
+Commit `049bf80d0` implements one primitive per scaled axis. It counts the
+nearest-neighbour runs first, emits one `GX_QUADS` header with four vertices
+per run, then appends the same direct-TEX0 run vertices as the previous
+candidate. At the supported limits the largest stage contains 2560 vertices
+and still fits in the 64 KiB command FIFO. No sampling coordinate, rectangle
+boundary, scissor, workspace, copy, or completion behavior changes.
+
+Strict checkpatch and the PowerPC `W=1` module build pass with `-j16`:
+
+```
+9e597a0436c3c9d23903837ad9a1a10ff180625868aa7ff0b85d33fdd64a7555  /media/anolis/dev/wii-gcn-linear-v12-build/drivers/video/fbdev/gcn-gx.ko
+```
+
+Run the focused trace for 100 iterations. Acceptance requires exact output,
+stable stage hashes, no FIFO stall, and no timeout throughout. If focused
+testing passes, run five complete strict suites before deciding whether the
+primitive-boundary reduction resolves the moving scale corruption.
