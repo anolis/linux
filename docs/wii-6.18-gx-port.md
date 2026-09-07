@@ -16248,3 +16248,38 @@ completed rows on every successful iteration, stable aggregate command hashes,
 and exact full EFB/source/copy agreement. If 100 iterations pass, extend to
 500 more and recheck unfenced rows under the same binary before interpreting
 the contrast. A failure rejects positive per-row completion as sufficient.
+
+Hardware result for `aafba5860`: separate positive completion for every row
+is rejected as a sufficient correction. Iterations 1--71 passed. Iteration 72
+reported all 120 completed rows with aggregate authored hash `74b457a8`, then
+failed at `(206,31)`: raw EFB `009ce36f`, quantized EFB/copied `9f0d`, expected
+`9f1d`. Full EFB comparison had zero copy mismatches and one source mismatch.
+All 72 iterations had exactly 120 completed rows and the same aggregate hash.
+Source/crop, horizontal and uniform padded fixture hashes remained exact; final
+and delayed were both `5860c4b5` in the failing frame.
+
+This failure does not require back-to-back rows in one primitive packet or
+unfenced submissions. The same thin-row geometry can fail despite individual
+PE finishes, while the prior full-rectangle control passed 600 iterations.
+It does not prove an exact raster-edge mechanism or rule out all state/fetch
+issues. Do not add per-row fences as a scaler fix.
+
+Candidate `20529f04...` and client `8a5c7030...` checksums matched on boot
+`444193a6-aee4-4ae3-a619-4f6dd90fccf1`, target `10.3.10.59`. Provider
+unload restored CPU scanout; installed accepted provider stayed `a2e7df8e...`.
+No timeout, stall or kernel fault appeared during the candidate interval.
+A later ordinary b43 group-key refresh is outside the test result.
+
+```
+22d7faaa092bf5f8fef85239715809947d700abbf08a54b5077eeca32a77747b  /media/anolis/dev/wii-gcn-wide-reduce-row-fence-100-client.txt
+c9aed12bf6b7fc7a5206ca15623b3f44919bafc2f4cab6525591424ab8a1b3c3  /media/anolis/dev/wii-gcn-wide-reduce-row-fence-100-kernel.txt
+2c8300905b2aed587c2991f18e8b3b4fc27495948eddef9afb229b900091244b  /media/anolis/dev/wii-gcn-wide-reduce-row-fence-100-audit.txt
+```
+
+Next bounded geometry control: use two-row-high direct-color bands instead of
+one-row-high quads, preserving uniform color, total coverage, state, normal
+single-stream submission and full EFB oracle. Log the band height and primitive
+count explicitly; handle any final partial band without changing coverage.
+This tests thin-primitive/edge dependence after submission pacing failed to
+fix it. A passing uniform band test is not an implementation of arbitrary
+nearest-neighbor scaling. No band-height control has yet been implemented.
