@@ -15583,3 +15583,26 @@ Run the checksum-pinned focused client on `10.3.10.59` with
 agree with quantized EFB reads, reject the readback interpretation. If the
 control works, compare a sampled failing pixel before and after copy. No
 production behavior is accepted on the basis of this diagnostic.
+
+Hardware result for `4cf85fe28`: the color-read control passed all 324 samples
+across 81 iterations. Quantized EFB, copied output, and source oracle agreed
+at all four positions. Example raw RGB values were `005108`, `39186b`,
+`9ce3ef`, and `52ffff`, quantizing to `0281`, `38cd`, `9f1d`, and `57ff`.
+Unlike the rejected depth aperture, color readback has a positive control.
+
+Iteration 81 failed at the unsampled coordinate `(28,48)`: `e2b9` instead of
+`f2b9`. Horizontal stayed exact and final/delayed were both `fc76cdc5`.
+Draw fingerprints remained `03506e62`/`9dfcb1dc`. The sampled pixels cannot
+classify that failure. Extend the opt-in diagnostic to a full 320x120 snapshot
+before copy, then compare every quantized EFB pixel to the copy and source
+oracle. Do not merely add this latest failure coordinate to a small sample.
+
+The checksum-pinned candidate and client ran on the same recorded v12 boot.
+The provider unloaded and CPU scanout returned; the installed provider stayed
+`a2e7df8e...`. No timeout or kernel fault appeared in the candidate interval.
+
+```
+3eceef311fc1ea5dca4c2af10532fd505d59cee458b01a7fcd4e0ec20efab2a5  /media/anolis/dev/wii-gcn-wide-reduce-efb-peek-100-client.txt
+7676dbb6c09b77e28fafa84f2c7d7271f0cf30b166d841518147c804464842b3  /media/anolis/dev/wii-gcn-wide-reduce-efb-peek-100-kernel.txt
+ef212f62840030ac7a8a52055ddf0912d2d2d45881f83e4764357a9f926e59b9  /media/anolis/dev/wii-gcn-wide-reduce-efb-peek-100-kernel-raw.txt
+```
