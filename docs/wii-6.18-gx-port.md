@@ -15827,3 +15827,40 @@ hash changes because the texture base changes), and complete EFB/copy/source
 comparisons. Any corruption rejects source relocation as a sufficient fix;
 a repeat of the same failing pixel would constrain source-base dependence.
 If 100 focused iterations pass, extend to 500 more before interpreting it.
+
+Hardware result for `9d7a0e773`: alternate-slot relocation is rejected as a
+sufficient fix. All 61 CPU-source fixtures verified `expected=published=22ce6dc5`
+at base `013c0000`. Iterations 1--60 passed. Iteration 61 failed at `(51,23)`:
+raw EFB `0073ba39`, quantized EFB and copied output `75c7`, expected `75e7`.
+The EFB comparison had zero copy mismatches and exactly one source mismatch.
+Final/delayed hashes were both `7100ae25`; original horizontal was exact
+`22ce6dc5` and source/crop were exact `a2c385c5`. Authored commands stayed
+`horizontal=03506e62 final=9d43ed7c` throughout, the expected changed final
+fingerprint for the alternate texture binding.
+
+Both private source slots can therefore feed a failing final draw from exact
+CPU-generated input. This does not rule out address-dependent failure patterns:
+the failing coordinate differs from the original-slot result. It does rule out
+moving the texture as a sufficient correction. The pre-copy EFB observation
+again places this occurrence before final copy or CPU destination visibility.
+
+Provider `674dd8e9...` and client `5d63411f...` checksums were verified on
+boot `444193a6-aee4-4ae3-a619-4f6dd90fccf1`, target `10.3.10.59`. The
+provider unloaded cleanly and restored CPU scanout. The installed accepted
+provider remained `a2e7df8e...`. No timeout, stall, or kernel fault appeared
+in the complete candidate interval.
+
+```
+8805f5c1c8e3cd880a843a4da320ed7ed329050170e8d5eb25a0e0ace0db8149  /media/anolis/dev/wii-gcn-wide-reduce-cpu-alt-100-client.txt
+f4aca6eebf73c499d932da5bdeacdb0229b990a7cf19eca9c85b0b70bf02ca01  /media/anolis/dev/wii-gcn-wide-reduce-cpu-alt-100-kernel.txt
+fad8a6fd739b178f1b34585ce751493b4475c912d7aee601264896fa1bddeb5c  /media/anolis/dev/wii-gcn-wide-reduce-cpu-alt-100-audit.txt
+```
+
+Next isolate texture interpretation rather than repeat buffer relocation.
+Prepare an equivalent RGBA8 CPU-source control using the accepted native
+RGBA8 texture-binding path, preserving logical RGB565 colors through exact
+bit replication, the same geometry, nearest filtering and full EFB oracle.
+Verify layout, source hash and format-specific command changes before testing.
+This compares source-format/decode paths; it is not a proposal to replace the
+production scaler or claim RGB565 decoding is already proven faulty. No RGBA8
+scale-source control has yet been implemented.
