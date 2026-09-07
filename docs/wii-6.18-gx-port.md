@@ -15760,3 +15760,42 @@ scale_efb_full=1 scale_cpu_source=1`; leave `scale_cpu_publish` off. A bad final
 EFB from verified exact CPU input localizes the failure beyond the original
 horizontal producer and its publication. A passing run is only a diagnostic
 control and does not accept CPU substitution as the production scale path.
+
+Hardware result for `2133dacce`: exact CPU-generated horizontal input does not
+prevent the final-draw corruption. All 80 published CPU-source hashes were
+exactly `22ce6dc5`, matching their independently accumulated expected hashes.
+8 iterations replaced an already-noncanonical GPU horizontal output; those
+original hashes remain explicitly recorded. Iterations 1--79 passed the full
+userspace comparison. Iteration 80 failed at `(206,31)`: pre-copy EFB
+`009ce36f`, quantized EFB and copied output `9f0d`, expected `9f1d`.
+The full EFB comparison had zero copy mismatches and exactly one source
+mismatch. This iteration's original horizontal was also exact, and final and
+delayed output hashes were both `8b4301b5`. Both authored draw fingerprints
+remained `03506e62`/`9dfcb1dc`.
+
+The final draw can therefore produce the previously observed bad blue bit
+from verified CPU-generated, flushed texture input. GPU production of that
+texture and its publication are not necessary causes of this occurrence.
+The experiment does not separate texture memory/fetch/cache, fetched command
+bytes, interpolation, TEV, or EFB raster writes. It rejects CPU republication
+or CPU source substitution as sufficient correctness fixes.
+
+The candidate `f82423bb...` and unchanged client `5d63411f...` checksums were
+verified on boot `444193a6-aee4-4ae3-a619-4f6dd90fccf1` at `10.3.10.59`.
+The provider unloaded, CPU scanout returned, the installed accepted provider
+remained `a2e7df8e...`, and no timeout, stall, or kernel fault appeared during
+the complete captured candidate interval.
+
+```
+25e1dd5cf515b5497971e04481cac7ef63b343e6e9af2b34f2c33328bd405191  /media/anolis/dev/wii-gcn-wide-reduce-cpu-source-100-client.txt
+b734573a163e7a35842ca5ce25ac107cea1de62ad8b7e8511bf394655c14891c  /media/anolis/dev/wii-gcn-wide-reduce-cpu-source-100-kernel.txt
+9c3d77a1451beb3e524ba7b939f7ead412f653c1a0521cf95661a8890abdd9eb  /media/anolis/dev/wii-gcn-wide-reduce-cpu-source-100-audit.txt
+```
+
+Next bounded control: move the exact CPU-generated final texture input to the
+other private MEM1 texture slot (the crop workspace is free at this boundary),
+keeping layout, dimensions, content, coordinates, and final state identical.
+Verify input hashes and account for the expected texture-base command change.
+Retain full EFB comparison. This tests whether the fault depends on the source
+physical address; it must not be interpreted as a fix merely because a short
+run passes. No relocation candidate has yet been implemented.
