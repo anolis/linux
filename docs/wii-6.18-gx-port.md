@@ -15466,3 +15466,36 @@ component repositories on the dev drive before reporting progress:
 The architecture overview's old claim that no Mesa driver exists is obsolete.
 Use the Mesa acceptance ledger for userspace capability and regression status,
 and distinguish that accepted baseline from ongoing v12 kernel experiments.
+
+#### Delayed-hash hardware result and current target (2026-09-07)
+
+The Wii is at `10.3.10.59`, as already recorded in the recent test transcripts.
+The earlier `10.3.10.12` connectivity failures used an obsolete default and do
+not establish a hardware availability blocker. Read the latest target address
+from the notes/transcripts and pass `--host` explicitly.
+
+Provider `27262fd5...` and client `5d63411f...` were checksum-verified on boot
+`444193a6-aee4-4ae3-a619-4f6dd90fccf1`, kernel `6.18.40-wii+`. With
+`scale_trace=1 render_only=1`, iteration 21 failed at `(206,31)` with
+`0x9f0d` instead of `0x9f1d`. All 21 horizontal and final immediate/delayed
+hash pairs matched. Sequences 10 and 15 had stable bad horizontal hashes
+`d953123f` and `d760c525` but exact final output. Sequence 21 had exact
+horizontal `22ce6dc5` and stable bad final `8b4301b5`. Source and crop stayed
+`a2c385c5`. No late change was observed during the quiet intervals; the bad
+result existed by the first sample. This does not exclude an earlier visibility
+fault or a texture-fetch/raster/copy problem.
+
+The provider unloaded and CPU scanout was restored. The candidate interval
+contained no timeout or stall. The installed accepted provider remained
+checksum-identical at `a2e7df8e...`; only the temporary module was tested.
+
+```
+abe6f058ba9a02ac180cbb0d9fd0508947050e27845fab5268b978d434c05737  /media/anolis/dev/wii-gcn-wide-reduce-delayed-hash-100-client.txt
+5c443126bad8bfab5c73ae9a9456c3e2a6a2d15fdf68ead15ecb516bd14c70bc  /media/anolis/dev/wii-gcn-wide-reduce-delayed-hash-100-kernel.txt
+c20a02b35f53a2265110e10c5b3d443316a8a62ec00a81af0aae9cab6055741f  /media/anolis/dev/wii-gcn-wide-reduce-delayed-hash-100-kernel-raw.txt
+```
+
+Next, fingerprint both producer draw streams before submission, excluding the
+changing submission token added by the submit helper. Stable command hashes
+with varying output constrain CPU-side command construction, but cannot prove
+what the CP actually fetched. Retain the paired buffer hashes as detectors.
