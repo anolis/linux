@@ -16110,3 +16110,42 @@ The direct-color option stays off. First require uniform EFB and copied output
 for all 38400 pixels; if 100 iterations pass, extend to 500 more. A reproduced
 error means final primitive rasterization is not necessary, but does not by
 itself prove faulty physical EFB storage or eliminate earlier state effects.
+
+Hardware result for `f64a5b588`: the clear-only final-stage control passed
+600 focused iterations: the initial 100 plus five additional 100-iteration
+load/test/unload cycles. Every one of 23040000 EFB pixels matched its source
+oracle and copied output. All six intervals retained authored hashes
+`horizontal=03506e62 final=a73590f6`; no EFB/source or EFB/copy mismatch
+occurred. The earlier horizontal producer had 3 noncanonical hashes,
+yet the later uniform clear/readout remained exact in those iterations too.
+
+All six audits verified the identical candidate `e9b88347...`, client
+`8a5c7030...`, installed accepted provider `a2e7df8e...`, and boot ID
+`444193a6-aee4-4ae3-a619-4f6dd90fccf1` at `10.3.10.59`. Every provider
+unload restored CPU scanout. No timeout, stall, or kernel fault appeared in
+the complete candidate intervals. The extension runner stopped on any client
+failure, missing log interval, incomplete EFB row count or nonzero mismatch;
+all five runs completed successfully.
+
+Checksums for all 18 client/kernel/audit artifacts are recorded in:
+
+```
+57fb129456ff2eef55600e29228a64621f29e28f4703b1e0092df265a43e4a2c  /media/anolis/dev/wii-gcn-clear-color-600.sha256
+```
+
+Artifact stems are `wii-gcn-wide-reduce-clear-color-100` and
+`wii-gcn-wide-reduce-clear-color-extend-1` through `-extend-5`, each under
+`/media/anolis/dev/` with `-client.txt`, `-kernel.txt` and `-audit.txt` suffixes.
+
+This accepts the repeated uniform clear/readout as a diagnostic positive
+control, not as a scaler fix. Under the tested conditions, clear-produced EFB
+color stays exact while both textured and direct-color row primitives have
+produced pre-copy single-pixel errors. This points the next isolation toward
+primitive rasterization and its state/command path. It does not prove all EFB
+storage is fault-free or identify a physical hardware defect.
+
+Next bounded control: replace the 120 direct-color row quads with one
+full-rectangle direct-color quad, keeping uniform color, state, coverage and
+EFB oracle. This tests dependence on row-quad decomposition/edges, with the
+known change in vertex count and authored command fingerprint documented.
+No single-quad control has yet been implemented.
