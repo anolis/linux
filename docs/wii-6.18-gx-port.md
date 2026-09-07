@@ -15313,6 +15313,28 @@ Do not extend replay-count workarounds. Return to synchronization and command-
 stream diagnosis around the render-to-texture producer itself, using the
 per-pass hashes only as a validated detector.
 
+Commit `8f9b5ed48` isolates the EFB copy-clear operation. It removes both
+rejected replay paths and, only for the exact full-frame trace, disables the
+clear bit on the crop, horizontal, and final EFB-to-texture copies. Every
+meaningful copied region is fully overwritten by its preceding draw, so the
+clear is unnecessary in this diagnostic. Normal non-trace operation retains
+all existing copy-clear behavior.
+
+This tests whether the copy engine's asynchronous post-copy EFB clear races
+the following raster despite token and PE-finish waits. The source, crop,
+horizontal, and final hashes remain the independent stage detectors.
+
+Strict checkpatch and the PowerPC `W=1` module build pass with `-j16`:
+
+```
+22d1e4b88e6bd534b9273fd3b39fe461d82601743b631d58a7d04d9b1bf3c5a7  /media/anolis/dev/wii-gcn-linear-v12-build/drivers/video/fbdev/gcn-gx.ko
+```
+
+Run 100 focused iterations with `scale_trace=1 render_only=1`. Acceptance
+requires exact userspace output and stable hashes after initialization, with
+no timeout or FIFO stall. If that passes, run at least 500 additional focused
+iterations before accepting copy-clear overlap as the root cause.
+
 Commit `049bf80d0` implements one primitive per scaled axis. It counts the
 nearest-neighbour runs first, emits one `GX_QUADS` header with four vertices
 per run, then appends the same direct-TEX0 run vertices as the previous
