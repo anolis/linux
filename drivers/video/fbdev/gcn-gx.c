@@ -184,6 +184,10 @@ static u32 gx_rgb888_timing_frames;
 
 #if IS_ENABLED(CONFIG_DRM_GCN_GX)
 static bool gx_scale_trace;
+static bool gx_scale_direct_color;
+module_param_named(scale_direct_color, gx_scale_direct_color, bool, 0444);
+MODULE_PARM_DESC(scale_direct_color,
+		 "Use untextured row quads for the focused uniform final draw");
 static bool gx_scale_cpu_uniform;
 module_param_named(scale_cpu_uniform, gx_scale_cpu_uniform, bool, 0444);
 MODULE_PARM_DESC(scale_cpu_uniform,
@@ -1856,16 +1860,13 @@ static void __maybe_unused gx_draw_pos_quad(u16 width, u16 height)
 	wg_f32_bits(0x40800000); wg_f32_bits(0xC0800000); wg_f32_bits(F32_ZERO); /* ( 4, -4, 0) */
 }
 
-static void gx_draw_color_rect(u16 x0, u16 y0, u16 x1, u16 y1,
+static void gx_emit_color_rect(u16 x0, u16 y0, u16 x1, u16 y1,
 			       u8 r, u8 g, u8 b)
 {
 	u32 fx0 = f32_from_u16(x0);
 	u32 fy0 = f32_from_u16(y0);
 	u32 fx1 = f32_from_u16(x1);
 	u32 fy1 = f32_from_u16(y1);
-
-	gx_wr8(0x80);			/* GX_QUADS | vtxfmt 0 */
-	gx_wr16be(4);
 
 	wg_f32_bits(fx0); wg_f32_bits(fy0);
 	gx_wr8(r); gx_wr8(g); gx_wr8(b); gx_wr8(0xff);
@@ -1878,6 +1879,14 @@ static void gx_draw_color_rect(u16 x0, u16 y0, u16 x1, u16 y1,
 
 	wg_f32_bits(fx0); wg_f32_bits(fy1);
 	gx_wr8(r); gx_wr8(g); gx_wr8(b); gx_wr8(0xff);
+}
+
+static void gx_draw_color_rect(u16 x0, u16 y0, u16 x1, u16 y1,
+			       u8 r, u8 g, u8 b)
+{
+	gx_wr8(0x80); /* GX_QUADS | vtxfmt 0 */
+	gx_wr16be(4);
+	gx_emit_color_rect(x0, y0, x1, y1, r, g, b);
 }
 
 #if IS_ENABLED(CONFIG_DRM_GCN_GX)
@@ -5209,6 +5218,12 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		dst_rect_width == 320 && dst_rect_height == 120;
 	if (trace)
 		trace_sequence = ++gx_scale_trace_sequence;
+	if (trace && gx_scale_direct_color &&
+	    (!gx_scale_cpu_source || !gx_scale_cpu_uniform)) {
+		ret = -EINVAL;
+		goto out_unlock;
+	}
+
 	if (trace && gx_scale_efb_full) {
 		efb_snapshot = kvmalloc_array(320 * 120, sizeof(*efb_snapshot),
 					      GFP_KERNEL);
@@ -5443,16 +5458,35 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 			gx_wr8(0);
 	}
 
-	gx_setup_rgb565_texture_state_mode(dst_width, dst_height, true);
-	gx_setup_texture(final_texture, horizontal_width, crop_height,
-			 final_texture_format, DRM_GCN_TEXTURE_FILTER_NEAREST);
-	gx_setup_texture_coordinate_scale(horizontal_width, crop_height,
-					  false, false);
-	gx_set_scissor(dst_x, dst_y, dst_rect_width, dst_rect_height);
-	gx_draw_nearest_vertical_runs(dst_x, dst_y, dst_rect_width,
-				      horizontal_width, src_rect_height,
-				      crop_height,
-				      dst_rect_height);
+	if (trace && gx_scale_direct_color) {
+		u16 color = ((const u16 *)src_addr)[0];
+		u8 r = (color >> 11) & 31;
+		u8 g = (color >> 5) & 63;
+		u8 b = color & 31;
+		u16 y;
+
+		r = (r << 3) | (r >> 2);
+		g = (g << 2) | (g >> 4);
+		b = (b << 3) | (b >> 2);
+		gx_setup_vertex_color_state(dst_width, dst_height);
+		gx_set_scissor(0, 0, dst_width, dst_height);
+		/* Exact 2:1 trace: one full-width quad per destination row. */
+		gx_wr8(0x80);
+		gx_wr16be(4 * dst_height);
+		for (y = 0; y < dst_height; y++)
+			gx_emit_color_rect(0, y, dst_width, y + 1, r, g, b);
+	} else {
+		gx_setup_rgb565_texture_state_mode(dst_width, dst_height, true);
+		gx_setup_texture(final_texture, horizontal_width, crop_height,
+				 final_texture_format, DRM_GCN_TEXTURE_FILTER_NEAREST);
+		gx_setup_texture_coordinate_scale(horizontal_width, crop_height,
+						  false, false);
+		gx_set_scissor(dst_x, dst_y, dst_rect_width, dst_rect_height);
+		gx_draw_nearest_vertical_runs(dst_x, dst_y, dst_rect_width,
+					      horizontal_width, src_rect_height,
+					      crop_height,
+					      dst_rect_height);
+	}
 	gx_load_bp_reg(0x45000002);
 	if (trace)
 		final_command_hash = gx_hash_pending_commands();

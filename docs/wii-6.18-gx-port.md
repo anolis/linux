@@ -16006,3 +16006,37 @@ for changed state/vertex commands and retain full EFB/source/copy comparison.
 Run the explicit uniform client oracle. A reproduced error without texture
 sampling would further localize the issue to shared command/raster/TEV/EFB
 behavior. No direct-color scaled control has yet been implemented.
+
+#### Stage untextured final row-quad control (2026-09-07)
+
+`scale_direct_color=1` replaces only the focused uniform final draw with
+established direct XY/F32 plus RGBA8 pass-color state. It requires the
+CPU-source and uniform options in the exact trace gate, reusing the validated
+source-uniformity check. It expands the source RGB565 color exactly as the
+RGBA8 fixture does and emits one `GX_QUADS` packet with 480 vertices: one
+full-width quad for each of the 120 destination rows, preserving the preceding
+2:1 vertical-run geometry, winding, and primitive count. The final draw has no
+texture coordinates, texgens or enabled texture sampling. Prior horizontal
+work and CPU fixture preparation remain as controls; the entire transaction
+is not texture-free.
+
+The existing color-rectangle writer is split into a vertex emitter and its
+original four-vertex packet wrapper. Existing callers emit the same bytes.
+Final EFB snapshot, source/copy oracle and completion behavior remain in place.
+Changing from textured to direct-color state changes authored commands and
+attribute stride; this is a pipeline-isolation control, not a single-register
+repair.
+
+Strict checkpatch, `git diff --check`, and PowerPC `W=1` module build pass
+with `-j16`. Candidate SHA-256:
+
+```
+85ecabf0fcc81d91c514f118dd28f076ac960bb620d8c721437579eef002cc40  /media/anolis/dev/wii-gcn-linear-v12-build/drivers/video/fbdev/gcn-gx.ko
+```
+
+Run the checksum-pinned uniform client `8a5c7030...` on `10.3.10.59` with
+`scale_trace=1 render_only=1 scale_efb_full=1 scale_cpu_source=1
+scale_cpu_alt=1 scale_cpu_rgba8=1 scale_cpu_uniform=1 scale_direct_color=1`.
+A reproduced bad pre-copy pixel proves final-draw texture sampling is not
+necessary. If 100 iterations pass, extend to 500 more before interpreting the
+control; no spatial scaling correctness is established by uniform-color passes.
