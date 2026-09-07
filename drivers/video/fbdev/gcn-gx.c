@@ -3182,6 +3182,23 @@ static long gx_wait_for_pe_finishes(u32 baseline, u32 required)
 				  msecs_to_jiffies(50));
 }
 
+static int gx_submit_and_wait_finish(const char *phase)
+{
+	u32 finish_count = READ_ONCE(gx_pe_finish_count);
+	int ret;
+
+	ret = gx_submit_cmds(phase);
+	if (ret)
+		return ret;
+	if (!gx_wait_for_pe_finishes(finish_count, 1)) {
+		pr_warn_ratelimited("gcn-gx: %s timed out waiting for PE finish\n",
+				    phase);
+		return -ETIMEDOUT;
+	}
+
+	return 0;
+}
+
 static int gx_drm_offscreen_capture(u16 width, u16 height)
 {
 	const u32 sentinel = 0xa55aa55a;
@@ -4905,7 +4922,6 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 {
 	void *crop = gx_tex_buf_alt;
 	void *horizontal = gx_tex_buf;
-	u32 finish_count;
 	u16 crop_height;
 	u16 crop_copy_width;
 	u16 crop_width;
@@ -4915,12 +4931,10 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	size_t dst_bytes;
 	size_t horizontal_bytes;
 	size_t src_bytes;
-	long completed;
 	bool trace;
 	u32 crop_hash = 0;
 	u32 final_hash = 0;
 	u32 horizontal_hash = 0;
-	u32 shadow_hash = 0;
 	u32 source_hash = 0;
 	u32 trace_sequence = 0;
 	int ret;
@@ -5020,8 +5034,6 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		flush_dcache_range((unsigned long)crop,
 				   (unsigned long)crop + crop_bytes);
 	} else {
-		if (trace)
-			finish_count = READ_ONCE(gx_pe_finish_count);
 		fifo_pos = 0;
 		gx_load_libogc_init_preamble();
 		gx_setup_display_copy_state();
@@ -5032,23 +5044,22 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		gx_set_scissor(0, 0, src_rect_width, src_rect_height);
 		gx_draw_color_quad(src_width, src_height, 0xff, 0xff, 0xff);
 		gx_load_bp_reg(0x45000002);
-		for (i = 0; i < 32; i++)
-			gx_wr8(0);
+		ret = gx_submit_and_wait_finish("render-blit-scaled-crop-draw");
+		if (ret)
+			goto out_unlock;
+
+		fifo_pos = 0;
+		gx_load_libogc_init_preamble();
+		gx_setup_display_copy_state();
 		gx_set_copy_clear_rgb(0x00, 0x00, 0x00);
 		gx_copy_efb_rect_to_rgb565_texture_stride(crop, 0, 0,
 							  crop_copy_width,
 							  crop_height,
 							  crop_width, true);
-		ret = gx_submit_cmds("render-blit-scaled-crop");
+		ret = gx_submit_and_wait_finish("render-blit-scaled-crop-copy");
 		if (ret)
 			goto out_unlock;
 		if (trace) {
-			completed = gx_wait_for_pe_finishes(finish_count, 2);
-			if (!completed) {
-				pr_warn("gcn-gx: scale trace timed out after crop\n");
-				ret = -ETIMEDOUT;
-				goto out_unlock;
-			}
 			invalidate_dcache_range((unsigned long)crop,
 						(unsigned long)crop + crop_bytes);
 			crop_hash = gx_hash_tiled_region(crop, crop_width,
@@ -5058,8 +5069,6 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	}
 
 	/* Expand or reduce source columns exactly into a private intermediate. */
-	if (trace)
-		finish_count = READ_ONCE(gx_pe_finish_count);
 	fifo_pos = 0;
 	gx_load_libogc_init_preamble();
 	gx_setup_display_copy_state();
@@ -5073,23 +5082,22 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 					src_rect_height, crop_height,
 					dst_rect_width);
 	gx_load_bp_reg(0x45000002);
-	for (i = 0; i < 32; i++)
-		gx_wr8(0);
+	ret = gx_submit_and_wait_finish("render-blit-scaled-horizontal-draw");
+	if (ret)
+		goto out_unlock;
+
+	fifo_pos = 0;
+	gx_load_libogc_init_preamble();
+	gx_setup_display_copy_state();
 	gx_set_copy_clear_rgb(0x00, 0x00, 0x00);
 	gx_copy_efb_rect_to_rgb565_texture_stride(horizontal, 0, 0,
 						  horizontal_copy_width,
 						  crop_height,
 						  horizontal_width, true);
-	ret = gx_submit_cmds("render-blit-scaled-horizontal");
+	ret = gx_submit_and_wait_finish("render-blit-scaled-horizontal-copy");
 	if (ret)
 		goto out_unlock;
 	if (trace) {
-		completed = gx_wait_for_pe_finishes(finish_count, 2);
-		if (!completed) {
-			pr_warn("gcn-gx: scale trace timed out after horizontal stage\n");
-			ret = -ETIMEDOUT;
-			goto out_unlock;
-		}
 		invalidate_dcache_range((unsigned long)horizontal,
 					(unsigned long)horizontal + horizontal_bytes);
 		horizontal_hash = gx_hash_tiled_region(horizontal,
@@ -5107,8 +5115,6 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 				   (unsigned long)crop + dst_bytes);
 	}
 
-	/* gx_submit_cmds() observed the token ordered after the intermediate. */
-	finish_count = READ_ONCE(gx_pe_finish_count);
 	fifo_pos = 0;
 	gx_load_libogc_init_preamble();
 	gx_setup_display_copy_state();
@@ -5116,7 +5122,6 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	gx_setup_texture_rgb565(system_memory ? crop : dst_addr,
 				dst_width, dst_height);
 	gx_draw_color_quad(dst_width, dst_height, 0xff, 0xff, 0xff);
-	gx_load_bp_reg(0x45000002);
 	for (i = 0; i < 32; i++)
 		gx_wr8(0);
 
@@ -5130,28 +5135,19 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 				      crop_height,
 				      dst_rect_height);
 	gx_load_bp_reg(0x45000002);
-	for (i = 0; i < 32; i++)
-		gx_wr8(0);
-
-	gx_set_copy_clear_rgb(0x00, 0x00, 0x00);
-	if (trace) {
-		gx_copy_efb_to_rgb565_texture(dst_addr, dst_width, dst_height,
-					      false);
-		gx_copy_efb_to_rgb565_texture(crop, dst_width, dst_height, true);
-	} else {
-		gx_copy_efb_to_rgb565_texture(system_memory ? crop : dst_addr,
-					      dst_width, dst_height, true);
-	}
-	ret = gx_submit_cmds("render-blit-scaled");
+	ret = gx_submit_and_wait_finish("render-blit-scaled-final-draw");
 	if (ret)
 		goto out_unlock;
 
-	completed = gx_wait_for_pe_finishes(finish_count, trace ? 4 : 1);
-	if (!completed) {
-		pr_warn_ratelimited("gcn-gx: scaled blit timed out waiting for final PE finish\n");
-		ret = -ETIMEDOUT;
+	fifo_pos = 0;
+	gx_load_libogc_init_preamble();
+	gx_setup_display_copy_state();
+	gx_set_copy_clear_rgb(0x00, 0x00, 0x00);
+	gx_copy_efb_to_rgb565_texture(system_memory ? crop : dst_addr,
+				      dst_width, dst_height, true);
+	ret = gx_submit_and_wait_finish("render-blit-scaled-final-copy");
+	if (ret)
 		goto out_unlock;
-	}
 
 	if (system_memory) {
 		invalidate_dcache_range((unsigned long)crop,
@@ -5161,15 +5157,11 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		invalidate_dcache_range((unsigned long)dst_addr,
 					(unsigned long)dst_addr + dst_bytes);
 		if (trace) {
-			invalidate_dcache_range((unsigned long)crop,
-						(unsigned long)crop + dst_bytes);
 			final_hash = gx_hash_tiled_region(dst_addr, dst_width,
 							  dst_width, dst_height);
-			shadow_hash = gx_hash_tiled_region(crop, dst_width,
-							   dst_width, dst_height);
-			pr_info("gcn-gx: scale-trace seq=%u src=%08x crop=%08x horizontal=%08x final=%08x shadow=%08x\n",
+			pr_info("gcn-gx: scale-trace seq=%u src=%08x crop=%08x horizontal=%08x final=%08x\n",
 				trace_sequence, source_hash, crop_hash,
-				horizontal_hash, final_hash, shadow_hash);
+				horizontal_hash, final_hash);
 		}
 	}
 
