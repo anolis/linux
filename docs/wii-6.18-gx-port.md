@@ -14924,3 +14924,22 @@ invalidate both buffers, and hash/compare their complete 320x120 tiled images.
 Matching bad copies place the error in final vertical raster/EFB state;
 different copies place it in EFB-copy destination writes or memory visibility.
 Keep this double copy strictly behind `scale_trace=1`.
+
+Commit `9a84db69b` implements the duplicate-copy diagnostic behind
+`scale_trace=1`. The final EFB image is copied to the public destination without
+clear and then to the unused crop workspace with clear. The trace waits for all
+four final PE markers, invalidates both buffers, and reports `final=` and
+`shadow=` hashes. Non-traced production submissions retain their original
+single copy and marker wait. Strict checkpatch and the PowerPC `W=1` module
+build pass with `-j16`:
+
+```
+9fb44fbb84478168ebe2652cadc906eed0257c81f2df3ff831e79200591633ec  /media/anolis/dev/wii-gcn-linear-v12-build/drivers/video/fbdev/gcn-gx.ko
+```
+
+Repeat the line-buffered focused client with `scale_trace=1` until a final
+pixel mismatch. The final-hash change remains the positive control. If final
+and shadow both change to the same hash, investigate final raster/EFB. If only
+one changes, investigate copy destination/cache visibility. If both change but
+differ, repeat enough times to determine whether each copy independently
+experiences a memory-write error.
