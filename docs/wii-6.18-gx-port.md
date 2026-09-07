@@ -15246,6 +15246,29 @@ first `final` hash paired with an exact public replay is expected and provides
 the positive control that the priming path was exercised. Any bad replay or
 userspace mismatch rejects one-cycle priming.
 
+Hardware result for publish-replay commit `8f2bd45ac` and provider
+`04884a58`: rejected. The first preserved run failed at iteration 42 with
+`0x39cd` instead of `0x38cd` at `(166,113)`; its horizontal, first-final, and
+replay hashes were `591094c5`, `b0303cc5`, and `b0303cc5`. A second run with
+a complete captured transcript failed at iteration 21 with `0x9f0d` instead
+of `0x9f1d` at `(206,31)`. That run again had horizontal `591094c5` and first
+final `b0303cc5`, but the public replay was a different bad `0680b2b5`.
+Source and crop remained exact in both failures, and no timeout or FIFO stall
+occurred.
+
+```
+abe6f058ba9a02ac180cbb0d9fd0508947050e27845fab5268b978d434c05737  /media/anolis/dev/wii-gcn-wide-reduce-publish-replay-client.txt
+ea64beddd3087e9c127a8036646c5279f11fa2d72d5d9a69913b2924a5dedd4d  /media/anolis/dev/wii-gcn-wide-reduce-publish-replay-kernel.txt
+```
+
+A second final raster is not a reliable correction, especially when the
+horizontal producer is already transient. The next diagnostic should replay
+each texture-producing raster into the same destination workspace before the
+next stage consumes it: preserve and log the first horizontal hash, publish a
+second horizontal raster/copy, then do the same for the final stage. This
+tests whether producer-local priming can stabilize both separable passes
+without relying on a particular bad-image signature.
+
 Commit `049bf80d0` implements one primitive per scaled axis. It counts the
 nearest-neighbour runs first, emits one `GX_QUADS` header with four vertices
 per run, then appends the same direct-TEX0 run vertices as the previous
