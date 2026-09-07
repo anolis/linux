@@ -229,6 +229,11 @@ module_param_named(debug_capture, gx_debug_capture, bool, 0444);
 MODULE_PARM_DESC(debug_capture,
 		 "Allocate debugfs VFB/XFB capture buffers (default: false)");
 
+static bool gx_render_only;
+module_param_named(render_only, gx_render_only, bool, 0444);
+MODULE_PARM_DESC(render_only,
+		 "Disable GX scanout while retaining the DRM render provider");
+
 static bool gx_offscreen_probe;
 static bool gx_offscreen_texture_ready;
 static u32 gx_offscreen_copies;
@@ -3319,6 +3324,9 @@ static int gcn_gx_drm_blit(const void *src, u32 src_pitch, u32 xfb_phys,
 	long completed;
 	int ret;
 
+	if (READ_ONCE(gx_render_only))
+		return -ENODEV;
+
 	if (format == GX_VFB_RGB565)
 		bytes_per_pixel = sizeof(u16);
 	else if (format == GX_VFB_XRGB8888)
@@ -5680,12 +5688,12 @@ static int gcn_gx_init(struct platform_device *pdev)
 	}
 
 #if IS_ENABLED(CONFIG_DRM_GCN_GX)
-	pr_info("gcn-gx: ready fifo=%08x tex=%08x/%08x pool=%u/%u/%u irq=%u renderer=%s bias8=%d debug_capture=%u offscreen_probe=%u\n",
+	pr_info("gcn-gx: ready fifo=%08x tex=%08x/%08x pool=%u/%u/%u irq=%u renderer=%s bias8=%d debug_capture=%u offscreen_probe=%u render_only=%u\n",
 		(u32)gx_fifo_phys, (u32)gx_tex_phys,
 		(u32)gx_tex_workspace[1].phys_addr,
 		gx_mem1_total_bytes, gx_mem1_used_bytes, gx_mem1_free_bytes,
 		gx_pe_finish_irq, gx_renderer, gx_texel_bias_eighths,
-		gx_debug_capture, gx_offscreen_probe);
+		gx_debug_capture, gx_offscreen_probe, gx_render_only);
 #else
 	pr_info("gcn-gx: ready fifo=%08x tex=%08x/%08x irq=%u renderer=%s bias8=%d debug_capture=%u offscreen_probe=%u\n",
 		(u32)gx_fifo_phys, (u32)gx_tex_phys,
