@@ -14793,3 +14793,31 @@ PE token equality from `643bac019`.
 171b594dcc56298a4c8ecc857777e4613e0de2d5ca7e61db8ba4e34cb0b1e61e  /media/anolis/dev/wii-gcn-linear-v12-staged-finish-full-4.txt
 27c9bec3cfd08a312e092df63a63c33dcbf6f13b80b7140cefcb529ec6381971  /media/anolis/dev/wii-gcn-linear-v12-staged-finish-audit.txt
 ```
+
+Commit `9278ad462` restores the accepted pre-serialization scaled command flow
+and tests PE dithering as the next isolated state variable. The failing scaled
+path inherits `gx_setup_vertex_color_state()`, which had emitted blend-mode bit
+2 set (`BP 0x41 = 0x4100311c`) from the original libogc capture. The candidate
+clears that bit in the shared state and in both source-alpha blend overrides.
+Exact PE token equality remains in place; geometry, texture filtering, copy
+commands, cache maintenance, and ABI are unchanged. The only adjacent
+non-semantic change is corrected argument indentation retained from the prior
+candidate.
+
+GX documents dithering as effective only with RGBA6/Z24 or RGB565/Z16 EFBs,
+while this driver programs RGB8/Z24 through `BP 0x43 = 0x43000040`. This is
+therefore a lower-confidence race candidate, but disabling it is the correct
+deterministic state for an API whose test oracle requires bit-exact rendering.
+Diff-scoped strict checkpatch reports zero diagnostics and the PowerPC `W=1`
+provider build passes with `-j16`:
+
+```
+699b92f94f656c09138ab7fe22edfc434f244dcec5e028b0811e0386552a8a99  /media/anolis/dev/wii-gcn-linear-v12-build/drivers/video/fbdev/gcn-gx.ko
+```
+
+Validate with the unchanged v12 boot and strict client `34db4188...`. Capture
+stdout and stderr together. Require at least five consecutive complete passes
+because the prior completion candidates often passed twice before a moving
+single-bit failure. Reject any scaled pixel mismatch, changed 64-pixel linear
+oracle, timeout, stall, fallback, allocation leak, provider-loss event, kernel
+fault, or failure to restore CPU scanout.
