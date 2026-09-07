@@ -15093,6 +15093,29 @@ run quads, but place every quad for a stage under one `GX_QUADS` begin/count
 packet. This removes hundreds of primitive boundaries while retaining the
 same geometry, source-index function, phase, and stage synchronization.
 
+Hardware result for single-primitive commit `049bf80d0` and provider
+`9e597a04`: rejected as a complete fix. The focused loop passed 59 exact
+iterations, then iteration 60 read `0x9f0d` instead of `0x9f1d` at `(206,31)`.
+Iteration 54 had changed only the horizontal hash to `71218605` while the final
+output remained exact. Iteration 60 retained the good horizontal hash but
+changed final from `ae90ddc5` to `8b4301b5`. Source and crop remained stable,
+and there was no timeout, stall, or fallback.
+
+```
+537a7d0e9a8fe2eed36c9126a93132e8ef87a645e578989682cb7d1949d7b309  /media/anolis/dev/wii-gcn-wide-reduce-single-primitive-client.txt
+0f461afb12040dfa6a010997be4d9c5efd5bb8e2b8033323da1603dbfa7ca753  /media/anolis/dev/wii-gcn-wide-reduce-single-primitive-kernel.txt
+```
+
+Repeated primitive boundaries are therefore not the root cause. The exact PE
+token, drained FIFO, command-idle, and finish waits are all successful. One
+remaining uncontrolled variable is normal GX scanout between render ioctls:
+its scheduling changes the amount and type of inherited GX activity before
+each otherwise identical scaled operation. Add a diagnostic `render_only=1`
+mode whose scanout callbacks return `-ENODEV`, preserving the DRM render
+provider while forcing console scanout through CPU conversion. A 100-iteration
+focused run in this mode is a positive test of whether interleaved GX scanout
+state or traffic is required for the corruption.
+
 Commit `049bf80d0` implements one primitive per scaled axis. It counts the
 nearest-neighbour runs first, emits one `GX_QUADS` header with four vertices
 per run, then appends the same direct-TEX0 run vertices as the previous
