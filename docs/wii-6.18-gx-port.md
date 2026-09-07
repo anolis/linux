@@ -15898,3 +15898,41 @@ Keep the preceding alternate base `013c0000` for comparison; expect format 6,
 commands and full EFB/source agreement. If 100 iterations pass, run 500 more
 before interpreting apparent improvement. Any reproduced pre-copy EFB error
 rejects changing source format as a sufficient correction.
+
+Hardware result for `056845e28`: equivalent RGBA8 input reproduces the same
+final-draw failure. All three CPU fixtures verified logical hash `22ce6dc5`,
+base `013c0000`, format 6 and 524288-byte extent. Iterations 1 and 2 matched
+all 38400 EFB/source/copy pixels. Iteration 3 failed at `(206,31)` with raw
+EFB `009ce36f`, quantized EFB/copied pixel `9f0d`, expected `9f1d`.
+The complete EFB comparison reported zero copy mismatches and exactly one
+source mismatch. Original horizontal was exact on that iteration; final and
+delayed hashes were both `8b4301b5`. Authored final commands remained
+`8dbe515c` throughout; horizontal remained `03506e62`.
+
+The exact same bad pixel and EFB color now occur with both RGB565 and RGBA8
+CPU-generated inputs. A defect specific to RGB565 decoding is not necessary
+for this occurrence. This does not distinguish shared texture fetch/cache,
+coordinate handling, TEV, command delivery or EFB raster writes. Changing
+source format is rejected as a sufficient correction.
+
+Provider `3a64049b...` and client `5d63411f...` checksums were verified on
+boot `444193a6-aee4-4ae3-a619-4f6dd90fccf1`, target `10.3.10.59`. The
+provider unloaded normally, CPU scanout returned, and the installed accepted
+provider stayed `a2e7df8e...`. No timeout, stall or kernel fault appeared in
+the complete candidate interval.
+
+```
+a95a5bfa123b7eb6237069e229187229e6d566269c707ff17ff13908d9c0c335  /media/anolis/dev/wii-gcn-wide-reduce-cpu-rgba8-100-client.txt
+c2feb8536c99f99b614b11672a34a7ced0d8845fb0732600526fe4c6d30e2db3  /media/anolis/dev/wii-gcn-wide-reduce-cpu-rgba8-100-kernel.txt
+00a7d92c298f6dbbdbf1f5867b4186f15a5087ad2effd1825cd85e9e03a4ac1d  /media/anolis/dev/wii-gcn-wide-reduce-cpu-rgba8-100-audit.txt
+```
+
+Next bounded diagnostic: use a uniform-color source and fill the entire padded
+CPU texture extent with that same color, preserving the current geometry,
+coordinates and RGBA8 binding. Add a corresponding explicit client oracle rather
+than allowing the existing ramp oracle to compare against intentionally changed
+input. This removes distinct neighboring texels as an explanation for a wrong
+sample while still exercising texture fetch and the final draw. Preserve the
+full EFB detector. A failure can then be classified as more than selection of
+another valid differently colored texel. No uniform-source control has yet been
+implemented; a passing short control would not accept a scaler repair.
