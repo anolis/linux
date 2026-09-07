@@ -15675,3 +15675,35 @@ This would test a GX-produced-versus-CPU-published texture boundary; success
 alone would not distinguish timing from ownership effects. No such candidate
 has yet been implemented. Do not return to final-copy or delayed-CPU-read fixes
 as the explanation for the now-localized failure.
+
+#### Stage CPU republication of the horizontal texture (2026-09-07)
+
+The opt-in `scale_cpu_publish=1` diagnostic runs only inside the focused scale
+trace. After the completed horizontal output's paired hashes, it invalidates
+the entire private texture buffer, reads and rewrites each identical 32-bit word
+with `READ_ONCE`/`WRITE_ONCE`, flushes it, and invalidates again. It hashes the
+logical pixels and requires equality with the preceding delayed hash before
+allowing the unchanged final draw. This forces real CPU stores without changing
+texture addresses, layout, geometry, command construction, or logical contents.
+The loop covers the full padded private texture allocation; its size is a
+multiple of four bytes. No CPU republication runs in normal operation.
+
+This tests whether publishing the texture through CPU stores/cache flushes
+changes the pre-copy EFB corruption. It also changes traffic and timing, so a
+pass alone cannot establish an ownership root cause. Keep `scale_efb_full=1`
+and the authored command fingerprints. A final EFB/source mismatch with exact
+horizontal content and stable publication hashes rejects this as a sufficient
+fix. If the first 100 iterations pass, extend to 500 more focused iterations
+before interpreting apparent improvement; distinguish corruption inherited
+from the horizontal producer from new corruption in the final consumer.
+
+Strict checkpatch, `git diff --check`, and PowerPC `W=1` module build pass
+with `-j16`. Candidate SHA-256:
+
+```
+0b76f7cd870927ffdf8fbab393c12732901bd5f2cf085dc7f2ce553f17a4f317  /media/anolis/dev/wii-gcn-linear-v12-build/drivers/video/fbdev/gcn-gx.ko
+```
+
+Run on `10.3.10.59`, the same v12 boot, with the unchanged `5d63411f...`
+focused client and `scale_trace=1 render_only=1 scale_efb_full=1
+scale_cpu_publish=1`. No accepted provider installation is changed.

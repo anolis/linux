@@ -184,6 +184,10 @@ static u32 gx_rgb888_timing_frames;
 
 #if IS_ENABLED(CONFIG_DRM_GCN_GX)
 static bool gx_scale_trace;
+static bool gx_scale_cpu_publish;
+module_param_named(scale_cpu_publish, gx_scale_cpu_publish, bool, 0444);
+MODULE_PARM_DESC(scale_cpu_publish,
+		 "CPU-republish the horizontal texture in the focused scale trace");
 static bool gx_scale_efb_full;
 module_param_named(scale_efb_full, gx_scale_efb_full, bool, 0444);
 MODULE_PARM_DESC(scale_efb_full,
@@ -850,6 +854,25 @@ static void gx_compare_scale_colors(const u32 *pixels, const u16 *output,
 	}
 	pr_info("gcn-gx: scale-efb-full seq=%u pixels=38400 copy_mismatches=%u source_mismatches=%u\n",
 		sequence, copy_mismatches, source_mismatches);
+}
+
+static void gx_cpu_republish_texture(void *pixels, size_t bytes)
+{
+	u32 *words = pixels;
+	size_t i;
+
+	invalidate_dcache_range((unsigned long)pixels,
+				(unsigned long)pixels + bytes);
+	/* Force real CPU stores even though each word retains its value. */
+	for (i = 0; i < bytes / sizeof(*words); i++) {
+		u32 value = READ_ONCE(words[i]);
+
+		WRITE_ONCE(words[i], value);
+	}
+	flush_dcache_range((unsigned long)pixels,
+			   (unsigned long)pixels + bytes);
+	invalidate_dcache_range((unsigned long)pixels,
+				(unsigned long)pixels + bytes);
 }
 
 static size_t gx_rgb565_index(u16 x, u16 y, u16 width, u32 layout)
@@ -5247,6 +5270,21 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 							       horizontal_width,
 							       dst_rect_width,
 							       src_rect_height);
+	}
+
+	if (trace && gx_scale_cpu_publish) {
+		u32 published_hash;
+
+		gx_cpu_republish_texture(horizontal, horizontal_bytes);
+		published_hash = gx_hash_tiled_region(horizontal, horizontal_width,
+						      dst_rect_width, src_rect_height);
+		pr_info("gcn-gx: scale-cpu-publish seq=%u before=%08x after=%08x bytes=%zu\n",
+			trace_sequence, horizontal_delayed_hash, published_hash,
+			horizontal_bytes);
+		if (published_hash != horizontal_delayed_hash) {
+			ret = -EIO;
+			goto out_unlock;
+		}
 	}
 
 	/* The crop workspace is free once the horizontal snapshot is complete. */
