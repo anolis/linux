@@ -16149,3 +16149,27 @@ full-rectangle direct-color quad, keeping uniform color, state, coverage and
 EFB oracle. This tests dependence on row-quad decomposition/edges, with the
 known change in vertex count and authored command fingerprint documented.
 No single-quad control has yet been implemented.
+
+#### Stage single direct-color rectangle control (2026-09-07)
+
+`scale_single_quad=1` changes the focused direct-color final stage from 120
+one-row quads (480 vertices) to one 320x120 quad (four vertices). It uses the
+existing color-rectangle writer. Expanded uniform vertex color, state setup,
+scissor, viewport, coverage, winding, final completion, EFB snapshot and copy
+remain unchanged. The flag only acts in the validated direct-color trace path;
+clear-only and ordinary production paths are unchanged. This compares primitive
+decomposition, with the intentional vertex-count and command-length changes.
+
+Strict checkpatch, `git diff --check`, and PowerPC `W=1` build pass with
+`-j16`. Candidate SHA-256:
+
+```
+b490b6bdc83fb0b6b2165aaf0f666c71c536dc75453851839bc0d2636cbf3074  /media/anolis/dev/wii-gcn-linear-v12-build/drivers/video/fbdev/gcn-gx.ko
+```
+
+Run the same uniform client `8a5c7030...` at `10.3.10.59` with
+`scale_trace=1 render_only=1 scale_efb_full=1 scale_cpu_source=1
+scale_cpu_alt=1 scale_cpu_rgba8=1 scale_cpu_uniform=1 scale_direct_color=1
+scale_single_quad=1`; leave clear-only off. If 100 iterations pass, extend to
+500 more. A reproduced bad EFB pixel shows row decomposition is not necessary;
+a passing control does not establish correctness of spatial scaling.
