@@ -14876,3 +14876,27 @@ The merged stream exposed a presentation issue: stderr is unbuffered while
 redirected stdout is block-buffered, so the failure line appears before its
 iteration heading. Set stdout to line-buffered in the next diagnostic client
 so stage hashes and the failing iteration can be correlated in order.
+
+Commit `999289409` adds the targeted stage-localization diagnostic. With module
+argument `scale_trace=1`, and only for a full tiled 640x240-to-320x120 scale,
+the provider hashes the source and the meaningful pixels in the crop,
+horizontal, and final buffers. Padded workspace columns are excluded. It waits
+for both crop and horizontal PE markers and all three final markers before
+invalidating and reading each GPU-written buffer, then logs one
+`scale-trace seq=` line per operation. Normal provider behavior is unchanged
+when tracing is disabled. The client now line-buffers stdout so iteration and
+failure lines retain execution order in a merged transcript.
+
+```
+396430986a414deaace7aa16d5d385feaa32cb5e428d9241823972a5aed7534b  /media/anolis/dev/wii-gcn-linear-v12-build/drivers/video/fbdev/gcn-gx.ko
+5d63411fd964d2e63ef65c7b46aecfb619fafe779f1d5fcbb57178166d07a8da  /media/anolis/dev/wii-gcn-linear-v12-trace-clients/wii-gcn-render-test
+```
+
+Run `--wide-reduce-only` with `scale_trace=1`, retain the merged client
+transcript and complete `scale-trace` kernel lines, and stop on the first final
+pixel mismatch. Compare hashes by sequence. A varying source invalidates the
+GPU diagnosis; a stable source but varying crop localizes the first error to
+the source raster/copy; stable crop but varying horizontal localizes it to the
+horizontal stage; stable intermediates with a varying final hash localizes it
+to the final stage or CPU visibility. Validate each hash as a positive control
+by confirming the final hash changes on a failing iteration.
