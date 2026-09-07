@@ -15010,3 +15010,26 @@ value; they are not sufficient as a corruption fix. The next candidate should
 remove the repeated final-run state changes, especially dynamic scissor and XF
 texture-matrix updates, by emitting direct texture coordinates and explicit
 per-run geometry instead.
+
+Commit `a1eb87b17` implements that direct-run candidate. Horizontal and
+vertical nearest-neighbour runs are now precisely bounded direct-TEX0 quads.
+The horizontal pass holds S at `(source_column + 1/4) / texture_width` and
+varies T from `-1/4` at the top edge; the vertical pass uses the corresponding
+varying S and constant source-row T. This is algebraically equivalent to the
+previous matrices at pixel centers, while eliminating every per-run BP
+scissor and XF texture-matrix update. One outer scissor still bounds each
+stage. The blocking raster-to-copy waits remain in place so this candidate
+changes only run generation.
+
+Strict checkpatch and the PowerPC `W=1` module build pass with `-j16`:
+
+```
+5aac7c2bbcb37e54848b95bb38de4679b05f63152cf9401ca16d8abbb82cbf0e  /media/anolis/dev/wii-gcn-linear-v12-build/drivers/video/fbdev/gcn-gx.ko
+```
+
+Run the focused 100-iteration 640x240-to-320x120 loop with `scale_trace=1`.
+Acceptance requires exact pixels and stable source/crop/horizontal/final
+hashes for all iterations, without timeout or fallback. If it passes, run at
+least five complete strict suites. A pixel mismatch with a changed horizontal
+or final hash rejects direct run-state elimination; a timeout or FIFO stall
+rejects the larger direct-vertex command stream.
