@@ -16313,3 +16313,47 @@ scale_band_height=2`; leave per-row fences, single-quad and clear-only off.
 Require logged height 2/count 60, stable authored commands and full EFB checks.
 If 100 iterations pass, extend to 500 more before interpreting the geometry
 control. A failure rejects two-row bands as sufficient to avoid corruption.
+
+#### Two-row bands fail extended uniform control (2026-09-07)
+
+Hardware result for `3e72d0ba1`: height 2 is rejected as a sufficient
+correction. The initial 100 iterations and three additional 100-iteration
+cycles passed. Extension 4 failed on iteration 26, after 425 passing frames
+across the five cycles. The extension runner stopped there; extension 5 and
+the conditional one-row recheck were not run.
+
+The failing pixel was `(285,0)`: raw EFB `009cc3ef`, quantized EFB/copied
+`9e1d`, expected `9f1d` (uniform expanded RGB `009ce3ef`). The green channel
+lost bit 5 before the final copy. That frame had one source mismatch and zero
+copy mismatches; final and delayed hashes were both `54b4fac5`. All 426 frames
+had zero EFB-to-copy mismatches, logged height 2/count 60, and stable authored
+hashes `horizontal=03506e62 final=a653afb8`. The entire padded CPU fixture
+remained exact at `c4c69dc5`, MEM1 base `013c0000`, format 6, 524288 bytes.
+Source/crop and horizontal hashes were exact in the failing frame.
+
+This failure shows corruption does not require one-row-high primitives.
+The first 100 passing frames were insufficient evidence of a reliable
+geometry change. It does not identify an exact raster-edge, packet-length or
+primitive-count mechanism. Prior 600-frame full-rectangle and clear-only
+passes remain bounded controls, not proof those paths cannot fail. Do not
+promote band height 2 into the scaler or infer a failure rate from these
+separate stop-on-failure cycles.
+
+All five audits verified candidate `e07f34e7...`, client `8a5c7030...`, target
+`10.3.10.59`, and boot `444193a6-aee4-4ae3-a619-4f6dd90fccf1`. Every cycle
+unloaded the candidate and restored CPU scanout. The installed accepted
+provider stayed `a2e7df8e...`; no candidate was permanently installed. No
+timeout, stall or kernel fault appeared. Ordinary b43 key refresh debug
+messages after the initial test are unrelated to the candidate result.
+
+The 15 client, trimmed-kernel and raw-audit artifacts are covered by:
+
+```
+2595da27ac5c676c7c7f485f4a4b245c143c3c0f9ca204dc6ca0401f468961c5  /media/anolis/dev/wii-gcn-wide-reduce-band2-426.sha256
+```
+
+Next bounded control: extend the same candidate's single-full-rectangle mode
+to at most 2,000 iterations in 100-frame cycles, stopping on the first error.
+Use the same uniform fixture, full EFB oracle and hardware audit. A failure
+would reject the earlier apparent multi-primitive dependency; another finite
+pass would only strengthen the control. Keep production scaling unchanged.
