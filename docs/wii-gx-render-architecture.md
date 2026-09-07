@@ -22,8 +22,12 @@ has platform-resource ownership, a bounded MEM1 allocator, primary and render
 nodes, per-file contexts, typed GEM objects, reservation fences, syncobjs, and
 validated copy, fill, rectangle, scaling, and format-conversion operations.
 Standard RGB565 KMS scanout sustains the full display cadence. Direct scanout
-of private tiled objects still awaits a standard DRM modifier, and no Mesa
-driver exists yet.
+of private tiled objects still awaits a standard DRM modifier. A native Mesa
+Gallium driver now supports a restricted GLES2 subset, including RGBA8
+texture-alpha blending. Its current capability and hardware acceptance record
+is maintained in `/media/anolis/dev/mesa-gcn/docs/gcn-vi.md`. The latest
+accepted Mesa gate passed 35 functional modes plus lifecycle; ongoing v12
+kernel scaling diagnostics remain separate from that accepted baseline.
 
 The first Stage 5 operations are hardware-accepted: an untextured,
 Gouraud-shaded triangle with three screen-space RGBA8 vertices, plus batches of

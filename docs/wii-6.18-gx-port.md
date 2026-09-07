@@ -15428,3 +15428,41 @@ Wii is reachable.
 Workflow instruction (2026-09-07): keep this development log updated with
 changes, validation, hardware outcomes, blockers, and the next step. Commit
 and push completed work, including the notes, to the working branch's remote.
+
+#### Cross-repository status audit (2026-09-07)
+
+The kernel ledger alone is not the complete project status. Review the active
+component repositories on the dev drive before reporting progress:
+
+- Kernel development: `/media/anolis/dev/wii-linux-gcn-productization`,
+  branch `feature/gcn-driver-productization-recovered`. The current v12
+  scaling diagnostics remain experimental; delayed-hash hardware testing is
+  pending. The latest recorded no-clear control failed at iteration 65.
+- Mesa: `/media/anolis/dev/mesa-gcn`, branch `wip/gcn-gallium`, documentation
+  head `2876f3bfa97`. `docs/gcn-vi.md` records a default native hardware
+  driver for a restricted GLES2 subset, with explicit softpipe fallback.
+  Native RGBA8 sampling and source-alpha blending at `8c2789bee20` are
+  accepted. The latest complete gate passed 35 functional modes plus
+  lifecycle (36 total, zero failures), superseding the earlier 31-mode
+  status. KMS stress reached 121 frames with two buffers, all 524288 MEM1
+  bytes were recovered, and kernel logs were identical. This audit recomputed
+  the suite transcript SHA-256 `61105d5e3ed65cff541eab1500da2b673a6afbf0fd228a6456d30d36f42ba570`
+  and both kernel log hashes `cfe8be0e013f3dd0463204015d40371e17dc06a084f63ba284a86afc0562cc59`,
+  matching the accepted evidence. General shader lowering, additional
+  filtering and mipmaps remain outside the accepted Mesa subset.
+- Desktop: `/media/anolis/dev/wiidesk`, branch `feature/desktop-foundation`,
+  head `b0a45f8`. The native DRM/KMS shell includes windows, terminal, files,
+  telemetry, login/session handling and optional VNC. The latest commit adds
+  settings, wallpapers, desktop launch icons and session locking; its commit
+  records clean PowerPC builds, not a new hardware acceptance run. This shell
+  uses its own DRM dumb-buffer backend; do not imply it is Mesa-rendered.
+- OS integration: `/media/anolis/dev/wiidesk-os`, head `c857ebe`. The pinned
+  Debian Ports PowerPC image builder includes first-boot login/video/wireless
+  policy fixes, local firmware injection and explicit OpenSSH client tools.
+  It remains a development image builder rather than an end-user installer.
+  Its local branch reports three commits ahead of its tracking ref; that
+  separate repository was reviewed without changing or publishing it.
+
+The architecture overview's old claim that no Mesa driver exists is obsolete.
+Use the Mesa acceptance ledger for userspace capability and regression status,
+and distinguish that accepted baseline from ongoing v12 kernel experiments.
