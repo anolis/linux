@@ -15499,3 +15499,24 @@ Next, fingerprint both producer draw streams before submission, excluding the
 changing submission token added by the submit helper. Stable command hashes
 with varying output constrain CPU-side command construction, but cannot prove
 what the CP actually fetched. Retain the paired buffer hashes as detectors.
+
+#### Stage authored draw-command fingerprints (2026-09-07)
+
+The trace now emits `scale-commands` with FNV-1a fingerprints of each authored
+horizontal and final draw stream before the submit helper appends its changing
+completion token. Fingerprints cover all `fifo_pos` bytes, including state and
+vertex data. The trace gate, source geometry, copy path, and paired buffer
+hashes are unchanged. Normal operation performs no new hashing.
+
+Strict checkpatch and `git diff --check` pass; the PowerPC `W=1` module build
+passes with `-j16`. Candidate SHA-256:
+
+```
+6b2f16d84d3c46233966c1753ab450f0b7ef1c692b03ac1610d4de9120483efa  /media/anolis/dev/wii-gcn-linear-v12-build/drivers/video/fbdev/gcn-gx.ko
+```
+
+Run the unchanged 100-iteration trace client at `10.3.10.59` with
+`scale_trace=1 render_only=1`. Compare both command fingerprints on every
+sequence with its buffer hashes. This is a diagnostic, not a corruption fix;
+hash equality is evidence of stable authored commands, not proof of identical
+hardware fetches or immunity to hash collisions.

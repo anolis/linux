@@ -752,6 +752,21 @@ static u32 gx_hash_tiled_region(const u16 *pixels, u16 stride, u16 width,
 	return hash;
 }
 
+/* Fingerprint authored commands before submission adds its changing token. */
+static u32 gx_hash_pending_commands(void)
+{
+	const u8 *bytes = gx_fifo_buf;
+	u32 hash = 2166136261U;
+	u32 i;
+
+	for (i = 0; i < fifo_pos; i++) {
+		hash ^= bytes[i];
+		hash *= 16777619U;
+	}
+
+	return hash;
+}
+
 static size_t gx_rgb565_index(u16 x, u16 y, u16 width, u32 layout)
 {
 	if (layout == DRM_GCN_GEM_LAYOUT_LINEAR)
@@ -4949,8 +4964,10 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	size_t src_bytes;
 	bool trace;
 	u32 crop_hash = 0;
+	u32 final_command_hash = 0;
 	u32 final_delayed_hash = 0;
 	u32 final_hash = 0;
+	u32 horizontal_command_hash = 0;
 	u32 horizontal_delayed_hash = 0;
 	u32 horizontal_hash = 0;
 	u32 source_hash = 0;
@@ -5098,6 +5115,8 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 					src_rect_height, crop_height,
 					dst_rect_width);
 	gx_load_bp_reg(0x45000002);
+	if (trace)
+		horizontal_command_hash = gx_hash_pending_commands();
 	ret = gx_submit_and_wait_finish("render-blit-scaled-horizontal-draw");
 	if (ret)
 		goto out_unlock;
@@ -5160,6 +5179,8 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 				      crop_height,
 				      dst_rect_height);
 	gx_load_bp_reg(0x45000002);
+	if (trace)
+		final_command_hash = gx_hash_pending_commands();
 	ret = gx_submit_and_wait_finish("render-blit-scaled-final-draw");
 	if (ret)
 		goto out_unlock;
@@ -5190,6 +5211,9 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 			final_delayed_hash = gx_hash_tiled_region(dst_addr,
 								  dst_width, dst_width,
 								  dst_height);
+			pr_info("gcn-gx: scale-commands seq=%u horizontal=%08x final=%08x\n",
+				trace_sequence, horizontal_command_hash,
+				final_command_hash);
 			pr_info("gcn-gx: scale-trace seq=%u src=%08x crop=%08x horizontal=%08x horizontal_delayed=%08x final=%08x final_delayed=%08x\n",
 				trace_sequence, source_hash, crop_hash,
 				horizontal_hash, horizontal_delayed_hash,
