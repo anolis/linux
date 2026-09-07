@@ -14647,3 +14647,20 @@ suite.
 7a05bf412a001763e30a920b2d84d595979cf6a971c615f06f2cd60c08d1234e  /media/anolis/dev/wii-gcn-linear-v12-focused-row-1.txt
 b21be90bf8445fdca5d9ded98222327c3af42c227525905f17a8ad1ff8170521  /media/anolis/dev/wii-gcn-linear-v12-focused-rows-2-4.txt
 ```
+
+Commit `2e5ea2369` replaces the rejected software-derived expectation with the
+eight exact RGB565 values repeated by hardware. It retains the strict
+all-64-pixel comparison and therefore still rejects nearest sampling, any
+different interpolation phase, and unstable output. The focused diagnostic's
+accidental literal `\\n` output is corrected at the same time. The rebuilt
+static client is:
+
+```
+34db4188402ffaf307e1b5d3266121cd03fa2c3ae27d237b27dd80359004b94f  /media/anolis/dev/wii-gcn-linear-v12-oracle-clients/wii-gcn-render-test
+```
+
+Upload and checksum-verify only this client; keep boot image `033f2d54...` and
+provider `68d6f8c3...` unchanged. Require three focused load/test/unload cycles
+to match all 64 bilinear pixels with full MEM1 recovery. If those pass, run the
+entire strict suite twice and separately evaluate whether the prior moving
+full-screen scale mismatch recurs.
