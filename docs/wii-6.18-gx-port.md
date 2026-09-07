@@ -16404,3 +16404,52 @@ other fixture, state and oracle settings identical. Run at most twenty
 metadata. This tests whether corruption can occur with only two broad
 primitives, without assuming thin bands are necessary. Record any passing
 result as another finite control, not a repair. This comparison is not yet run.
+
+#### Two broad rectangles pass 2,000-frame control (2026-09-07)
+
+The planned height-60 comparison completed twenty 100-frame cycles using
+unchanged candidate `e07f34e7...` from `3e72d0ba1` and uniform client
+`8a5c7030...`. Parameters were `scale_trace=1 render_only=1
+scale_efb_full=1 scale_cpu_source=1 scale_cpu_alt=1 scale_cpu_rgba8=1
+scale_cpu_uniform=1 scale_direct_color=1 scale_single_quad=0
+scale_band_height=60`. Per-row fences and clear-only mode stayed off. No
+source modification or rebuild was needed for this existing control.
+
+All 2,000 frames passed: 76,800,000 pixels matched the source oracle in EFB
+and the copied result. Every frame logged height 60/count 2, zero source/copy
+mismatches, and authored hashes `horizontal=03506e62 final=5fab2440`.
+Source/crop stayed `ad05e5c5`, final/delayed stayed `e5c8efc5`, and the full
+padded CPU fixture stayed `expected=published=c4c69dc5`, base `013c0000`,
+format 6, 524288 bytes. Twenty-four frames had an earlier horizontal hash
+differing from `d33901c5`; their synthetic fixture and final untextured draw
+were still exact. The broader corruption therefore remained observable
+upstream during this passing final-stage control.
+
+All twenty audits verified the candidate/client checksums, installed accepted
+provider `a2e7df8e...`, and boot `444193a6-aee4-4ae3-a619-4f6dd90fccf1`
+at `10.3.10.59`. Every cycle unloaded the candidate and restored CPU scanout.
+No timeout, stall or kernel fault appeared, and no candidate was permanently
+installed. The sixty client, trimmed-kernel and raw-audit artifacts have stems
+`/media/anolis/dev/wii-gcn-wide-reduce-band60-2000-1` through `-20`.
+Their SHA-256 manifest is:
+
+```
+8a371acf9cad0fbea2411558a8fba9ba3e6b02d1751f44fb2bd21a6055ebe93a  /media/anolis/dev/wii-gcn-wide-reduce-band60-2000.sha256
+```
+
+This is a second 2,000-frame passing geometry control. A single internal
+boundary at y=60 did not reproduce the failures seen with one- and two-row
+bands. It does not prove two rectangles cannot fail or distinguish primitive
+height, count, boundary positions and command length across those earlier
+runs. It is not a production scaler repair.
+
+Next bounded implementation: add an opt-in two-rectangle split position for
+the existing focused uniform direct-color control. Emit exactly eight vertices
+in one packet for rectangles [0, split) and [split, 120), with identical state,
+coverage, colors and completion. Compare split=1 against the passing split=60
+geometry: this keeps primitive count and authored packet length fixed while
+changing the first rectangle's height and internal boundary position. Validate
+1 <= split < 120, reject incompatible geometry modes, and log the selected
+split after the EFB comparison. Build/check before hardware use; start with
+100 frames and extend to at most 2,000, stopping on failure. This split control
+has not yet been implemented or run. Production scaling remains unchanged.
