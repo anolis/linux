@@ -184,6 +184,10 @@ static u32 gx_rgb888_timing_frames;
 
 #if IS_ENABLED(CONFIG_DRM_GCN_GX)
 static bool gx_scale_trace;
+static bool gx_scale_clear_color;
+module_param_named(scale_clear_color, gx_scale_clear_color, bool, 0444);
+MODULE_PARM_DESC(scale_clear_color,
+		 "Produce the focused uniform final EFB with copy-clear only");
 static bool gx_scale_direct_color;
 module_param_named(scale_direct_color, gx_scale_direct_color, bool, 0444);
 MODULE_PARM_DESC(scale_direct_color,
@@ -5218,8 +5222,9 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		dst_rect_width == 320 && dst_rect_height == 120;
 	if (trace)
 		trace_sequence = ++gx_scale_trace_sequence;
-	if (trace && gx_scale_direct_color &&
-	    (!gx_scale_cpu_source || !gx_scale_cpu_uniform)) {
+	if (trace && (gx_scale_direct_color || gx_scale_clear_color) &&
+	    (!gx_scale_cpu_source || !gx_scale_cpu_uniform ||
+	     (gx_scale_direct_color && gx_scale_clear_color))) {
 		ret = -EINVAL;
 		goto out_unlock;
 	}
@@ -5458,7 +5463,7 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 			gx_wr8(0);
 	}
 
-	if (trace && gx_scale_direct_color) {
+	if (trace && (gx_scale_direct_color || gx_scale_clear_color)) {
 		u16 color = ((const u16 *)src_addr)[0];
 		u8 r = (color >> 11) & 31;
 		u8 g = (color >> 5) & 63;
@@ -5468,13 +5473,21 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		r = (r << 3) | (r >> 2);
 		g = (g << 2) | (g >> 4);
 		b = (b << 3) | (b >> 2);
-		gx_setup_vertex_color_state(dst_width, dst_height);
-		gx_set_scissor(0, 0, dst_width, dst_height);
-		/* Exact 2:1 trace: one full-width quad per destination row. */
-		gx_wr8(0x80);
-		gx_wr16be(4 * dst_height);
-		for (y = 0; y < dst_height; y++)
-			gx_emit_color_rect(0, y, dst_width, y + 1, r, g, b);
+		if (gx_scale_clear_color) {
+			/* Copy old pixels only to trigger clear, then fence the clear. */
+			gx_setup_display_copy_state();
+			gx_set_copy_clear_rgb(r, g, b);
+			gx_copy_efb_to_rgb565_texture(dst_addr, dst_width,
+						      dst_height, true);
+		} else {
+			gx_setup_vertex_color_state(dst_width, dst_height);
+			gx_set_scissor(0, 0, dst_width, dst_height);
+			/* Exact 2:1 trace: one full-width quad per destination row. */
+			gx_wr8(0x80);
+			gx_wr16be(4 * dst_height);
+			for (y = 0; y < dst_height; y++)
+				gx_emit_color_rect(0, y, dst_width, y + 1, r, g, b);
+		}
 	} else {
 		gx_setup_rgb565_texture_state_mode(dst_width, dst_height, true);
 		gx_setup_texture(final_texture, horizontal_width, crop_height,
@@ -5487,10 +5500,13 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 					      crop_height,
 					      dst_rect_height);
 	}
-	gx_load_bp_reg(0x45000002);
+	if (!(trace && gx_scale_clear_color))
+		gx_load_bp_reg(0x45000002);
 	if (trace)
 		final_command_hash = gx_hash_pending_commands();
-	ret = gx_submit_and_wait_finish("render-blit-scaled-final-draw");
+	ret = gx_submit_and_wait_finish(trace && gx_scale_clear_color ?
+					"render-blit-scaled-final-clear" :
+					"render-blit-scaled-final-draw");
 	if (ret)
 		goto out_unlock;
 	if (efb_snapshot) {

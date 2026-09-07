@@ -16080,3 +16080,33 @@ rasterization as well as final texture sampling. Retain the full EFB oracle and
 explicit uniform client. Account for clear-after-copy ordering; the first copy
 is only a clear trigger and must not be treated as the uniform readout. No
 clear-only final-stage control has yet been implemented.
+
+#### Stage uniform EFB copy-clear-only final stage (2026-09-07)
+
+`scale_clear_color=1` replaces the final draw with the established display-copy
+state, the source's expanded uniform RGB clear value, and one EFB-to-texture
+copy with clear enabled. That first copy writes old pixels to the destination
+only to trigger the clear. Its own post-copy finish marker is awaited before
+the complete EFB snapshot. The ordinary second final copy then publishes the
+cleared EFB for the existing userspace oracle. No final primitive vertices or
+texture sampling are emitted. Earlier transaction stages remain unchanged.
+
+The clear and direct-color options are mutually exclusive and both require
+CPU-source plus uniform validation in the exact focused trace gate. The clear
+helper already emits BP 0x45, so no duplicate draw-finish marker is added.
+The diagnostic phase label distinguishes `final-clear` from `final-draw`.
+
+Strict checkpatch, `git diff --check`, and PowerPC `W=1` module build pass
+with `-j16`. Candidate SHA-256:
+
+```
+e9b883474304582a943c670126d5cabfdd26750547601bc84b021d8c3b61b0be  /media/anolis/dev/wii-gcn-linear-v12-build/drivers/video/fbdev/gcn-gx.ko
+```
+
+Run the existing uniform client `8a5c7030...` at `10.3.10.59` with
+`scale_trace=1 render_only=1 scale_efb_full=1 scale_cpu_source=1
+scale_cpu_alt=1 scale_cpu_rgba8=1 scale_cpu_uniform=1 scale_clear_color=1`.
+The direct-color option stays off. First require uniform EFB and copied output
+for all 38400 pixels; if 100 iterations pass, extend to 500 more. A reproduced
+error means final primitive rasterization is not necessary, but does not by
+itself prove faulty physical EFB storage or eliminate earlier state effects.
