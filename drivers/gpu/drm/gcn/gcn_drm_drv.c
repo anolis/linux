@@ -188,7 +188,7 @@ static int gcn_drm_set_accel_ave_locked(bool accel_active)
 	return 0;
 }
 
-int gcn_drm_register_accel_v10(const struct gcn_drm_accel_ops *ops)
+int gcn_drm_register_accel_v11(const struct gcn_drm_accel_ops *ops)
 {
 	int ret = 0;
 
@@ -215,9 +215,9 @@ out_unlock:
 			ops->name);
 	return ret;
 }
-EXPORT_SYMBOL_GPL(gcn_drm_register_accel_v10);
+EXPORT_SYMBOL_GPL(gcn_drm_register_accel_v11);
 
-void gcn_drm_unregister_accel_v10(const struct gcn_drm_accel_ops *ops)
+void gcn_drm_unregister_accel_v11(const struct gcn_drm_accel_ops *ops)
 {
 	int ret = 0;
 
@@ -234,7 +234,7 @@ void gcn_drm_unregister_accel_v10(const struct gcn_drm_accel_ops *ops)
 	pr_info("gcn-drm: unregistered scanout accelerator %s\n",
 		ops ? ops->name : "unknown");
 }
-EXPORT_SYMBOL_GPL(gcn_drm_unregister_accel_v10);
+EXPORT_SYMBOL_GPL(gcn_drm_unregister_accel_v11);
 
 int gcn_drm_provider_info(struct gcn_drm_mem1_info *info)
 {
@@ -522,6 +522,7 @@ gcn_drm_provider_draw_itex_depth(const struct gcn_drm_accel_ops *provider,
 
 int gcn_drm_provider_draw_fixed(const struct gcn_drm_accel_ops *provider,
 				void *src_allocation, void *dst_allocation,
+				u32 src_format,
 				u16 src_width, u16 src_height,
 				u16 dst_width, u16 dst_height,
 				const struct gcn_drm_fixed_vertex *vertices,
@@ -535,7 +536,8 @@ int gcn_drm_provider_draw_fixed(const struct gcn_drm_accel_ops *provider,
 	mutex_lock(&gcn_drm_accel_lock);
 	if (gcn_drm_accel == provider && provider->draw_fixed_rgb565)
 		ret = provider->draw_fixed_rgb565(src_allocation, dst_allocation,
-				src_width, src_height, dst_width, dst_height,
+				src_format, src_width, src_height, dst_width,
+				dst_height,
 				vertices, vertex_count, indices, triangle_count,
 				tev_mode, state, depth);
 	mutex_unlock(&gcn_drm_accel_lock);
@@ -546,6 +548,7 @@ int gcn_drm_provider_draw_fixed(const struct gcn_drm_accel_ops *provider,
 int
 gcn_drm_provider_draw_fixed_system(const struct gcn_drm_accel_ops *provider,
 				   void *src_allocation, void *dst,
+				   u32 src_format,
 				   u16 src_width, u16 src_height,
 				   u16 dst_width, u16 dst_height,
 				   u32 dst_layout,
@@ -561,7 +564,8 @@ gcn_drm_provider_draw_fixed_system(const struct gcn_drm_accel_ops *provider,
 	if (gcn_drm_accel && (!provider || gcn_drm_accel == provider) &&
 	    gcn_drm_accel->draw_fixed_system_rgb565)
 		ret = gcn_drm_accel->draw_fixed_system_rgb565(src_allocation,
-				dst, src_width, src_height, dst_width, dst_height,
+				dst, src_format, src_width, src_height, dst_width,
+				dst_height,
 				dst_layout, vertices, vertex_count, indices,
 				triangle_count, tev_mode, state, depth);
 	mutex_unlock(&gcn_drm_accel_lock);

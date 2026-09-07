@@ -6,6 +6,7 @@ set -euo pipefail
 repo=$(git rev-parse --show-toplevel)
 output_dir=${1:-/tmp}
 headers_dir=$(mktemp -d)
+build_dir="$headers_dir/build"
 
 cleanup()
 {
@@ -14,8 +15,9 @@ cleanup()
 trap cleanup EXIT
 
 mkdir -p "$output_dir"
+mkdir -p "$build_dir"
 
-make -C "$repo" -j16 ARCH=powerpc \
+make -C "$repo" O="$build_dir" -j16 ARCH=powerpc \
 	INSTALL_HDR_PATH="$headers_dir" headers_install
 
 common_flags=(

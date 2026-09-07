@@ -588,6 +588,11 @@ gcn_drm_render_bo_size(const struct drm_gcn_gem_create *args, u64 *size)
 		    args->layout != DRM_GCN_GEM_LAYOUT_LINEAR)
 			return -EINVAL;
 		bytes_per_pixel = sizeof(u32);
+	} else if (args->format == DRM_GCN_GEM_FORMAT_RGBA8) {
+		if ((args->flags & DRM_GCN_GEM_CREATE_SYSTEM) ||
+		    args->layout != DRM_GCN_GEM_LAYOUT_TILED_4X4)
+			return -EINVAL;
+		bytes_per_pixel = sizeof(u32);
 	} else {
 		return -EINVAL;
 	}

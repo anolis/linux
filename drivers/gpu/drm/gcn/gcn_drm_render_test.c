@@ -75,6 +75,7 @@ static void gcn_drm_render_uapi_layout(struct kunit *test)
 			1ULL << 23);
 	KUNIT_EXPECT_EQ(test, DRM_GCN_FEATURE_RASTER_CULL, 1ULL << 24);
 	KUNIT_EXPECT_EQ(test, DRM_GCN_FEATURE_SYSTEM_RENDER_RGB565, 1ULL << 25);
+	KUNIT_EXPECT_EQ(test, DRM_GCN_FEATURE_TEXTURE_RGBA8, 1ULL << 26);
 }
 
 static void gcn_drm_render_validates_color_triangle(struct kunit *test)
@@ -944,6 +945,26 @@ static void gcn_drm_render_rejects_invalid_objects(struct kunit *test)
 	KUNIT_EXPECT_EQ(test, gcn_drm_render_bo_size(&args, &size), -EINVAL);
 }
 
+static void gcn_drm_render_accepts_tiled_rgba8_texture(struct kunit *test)
+{
+	struct drm_gcn_gem_create args = {
+		.width = 64,
+		.height = 64,
+		.format = DRM_GCN_GEM_FORMAT_RGBA8,
+		.layout = DRM_GCN_GEM_LAYOUT_TILED_4X4,
+	};
+	u64 size = 0;
+
+	KUNIT_EXPECT_EQ(test, gcn_drm_render_bo_size(&args, &size), 0);
+	KUNIT_EXPECT_EQ(test, size, 16384ULL);
+
+	args.layout = DRM_GCN_GEM_LAYOUT_LINEAR;
+	KUNIT_EXPECT_EQ(test, gcn_drm_render_bo_size(&args, &size), -EINVAL);
+	args.layout = DRM_GCN_GEM_LAYOUT_TILED_4X4;
+	args.flags = DRM_GCN_GEM_CREATE_SYSTEM;
+	KUNIT_EXPECT_EQ(test, gcn_drm_render_bo_size(&args, &size), -EINVAL);
+}
+
 static void gcn_drm_render_accepts_linear_system_xrgb8888(struct kunit *test)
 {
 	struct drm_gcn_gem_create args = {
@@ -1048,6 +1069,7 @@ static void gcn_drm_render_converts_absolute_timeouts(struct kunit *test)
 static struct kunit_case gcn_drm_render_test_cases[] = {
 	KUNIT_CASE(gcn_drm_render_uapi_layout),
 	KUNIT_CASE(gcn_drm_render_accepts_tiled_rgb565),
+	KUNIT_CASE(gcn_drm_render_accepts_tiled_rgba8_texture),
 	KUNIT_CASE(gcn_drm_render_accepts_linear_system_xrgb8888),
 	KUNIT_CASE(gcn_drm_render_rejects_invalid_objects),
 	KUNIT_CASE(gcn_drm_render_validates_system_format_pairs),

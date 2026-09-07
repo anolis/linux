@@ -256,6 +256,14 @@ static int gcn_drm_ioctl_gem_create(struct drm_device *drm, void *data,
 	ret = gcn_drm_render_bo_size(args, &size);
 	if (ret)
 		return ret;
+	if (args->format == DRM_GCN_GEM_FORMAT_RGBA8) {
+		ret = gcn_drm_provider_info(&info);
+		if (ret)
+			return ret;
+		if (!(info.formats & DRM_GCN_FORMAT_RGBA8) ||
+		    !(info.features & DRM_GCN_FEATURE_TEXTURE_RGBA8))
+			return -EOPNOTSUPP;
+	}
 
 	if (args->flags & DRM_GCN_GEM_CREATE_SYSTEM) {
 		ret = gcn_drm_provider_info(&info);
@@ -1983,8 +1991,10 @@ static int gcn_drm_ioctl_draw_fixed(struct drm_device *drm, void *data,
 
 	if (textured)
 		src = to_gcn_drm_bo(src_gem);
-	if (src && (src->format != DRM_GCN_GEM_FORMAT_RGB565 ||
-		    src->layout != DRM_GCN_GEM_LAYOUT_TILED_4X4)) {
+	if (src &&
+	    ((src->format != DRM_GCN_GEM_FORMAT_RGB565 &&
+	      src->format != DRM_GCN_GEM_FORMAT_RGBA8) ||
+	     src->layout != DRM_GCN_GEM_LAYOUT_TILED_4X4)) {
 		ret = -EINVAL;
 		goto out_put;
 	}
@@ -2094,6 +2104,7 @@ static int gcn_drm_ioctl_draw_fixed(struct drm_device *drm, void *data,
 			ret = gcn_drm_provider_draw_fixed_system(provider,
 								 src ? src->allocation : NULL,
 								 map.vaddr,
+								 src ? src->format : 0,
 								 src ? src->width : 0,
 								 src ? src->height : 0,
 								 dst_width, dst_height,
@@ -2108,6 +2119,7 @@ static int gcn_drm_ioctl_draw_fixed(struct drm_device *drm, void *data,
 		ret = gcn_drm_provider_draw_fixed(dst->provider,
 						  src ? src->allocation : NULL,
 						  dst->allocation,
+						  src ? src->format : 0,
 						  src ? src->width : 0,
 						  src ? src->height : 0,
 						  dst_width, dst_height, vertices,

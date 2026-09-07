@@ -178,6 +178,7 @@ struct gcn_drm_accel_ops {
 				      const struct gcn_drm_draw_state *state,
 				      const struct gcn_drm_depth_state *depth);
 	int (*draw_fixed_rgb565)(void *src_allocation, void *dst_allocation,
+				 u32 src_format,
 				 u16 src_width, u16 src_height,
 				 u16 dst_width, u16 dst_height,
 				 const struct gcn_drm_fixed_vertex *vertices,
@@ -186,6 +187,7 @@ struct gcn_drm_accel_ops {
 				 const struct gcn_drm_draw_state *state,
 				 const struct gcn_drm_depth_state *depth);
 	int (*draw_fixed_system_rgb565)(void *src_allocation, void *dst,
+					u32 src_format,
 					u16 src_width, u16 src_height,
 					u16 dst_width, u16 dst_height,
 					u32 dst_layout,
@@ -199,7 +201,7 @@ struct gcn_drm_accel_ops {
 				  u16 rect_width, u16 rect_height, u16 color);
 };
 
-int gcn_drm_register_accel_v10(const struct gcn_drm_accel_ops *ops);
-void gcn_drm_unregister_accel_v10(const struct gcn_drm_accel_ops *ops);
+int gcn_drm_register_accel_v11(const struct gcn_drm_accel_ops *ops);
+void gcn_drm_unregister_accel_v11(const struct gcn_drm_accel_ops *ops);
 
 #endif /* _LINUX_GCN_DRM_ACCEL_H */
