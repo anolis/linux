@@ -14700,3 +14700,23 @@ reliably. Require exact token-value equality for submit completion, retaining
 status reads only for acknowledgement and diagnostics. If moving corruption
 continues, the next step is to give each scaled intermediate exactly one final
 `BP 0x45` marker and wait for it before reusing that intermediate.
+
+Commit `643bac019` implements the exact-token candidate. It changes both the
+poll termination and final success condition to require
+`PE_REG_TOKEN == gx_expected_token`; token status remains available only for
+write-one-to-clear acknowledgement and timeout diagnostics. No FIFO command,
+cache operation, texture/raster state, finish-IRQ wait, or ABI changed.
+Diff-scoped strict checkpatch reports zero diagnostics and the focused
+PowerPC `W=1` provider build passes with `-j16`.
+
+```
+69681a1193978da1ffe4d09edd396287da422236e320c7add86376290a200152  /media/anolis/dev/wii-gcn-linear-v12-build/drivers/video/fbdev/gcn-gx.ko
+```
+
+Hot-load this provider against the unchanged v12 kernel and client
+`34db4188...`. Run the full strict suite repeatedly rather than only the linear
+oracle: acceptance requires at least three consecutive complete passes with
+all scaled pixels exact, all 64 linear-filter pixels exact, full MEM1 recovery,
+clean unload, and no timeout or hardware fault. Any moving scaled mismatch
+rejects exact-token polling as sufficient and advances to isolated per-stage
+finish markers.
