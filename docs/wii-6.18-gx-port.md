@@ -14900,3 +14900,27 @@ the source raster/copy; stable crop but varying horizontal localizes it to the
 horizontal stage; stable intermediates with a varying final hash localizes it
 to the final stage or CPU visibility. Validate each hash as a positive control
 by confirming the final hash changes on a failing iteration.
+
+Hardware result for `999289409`: the moving visible error is localized to the
+final stage. Focused iterations 1 through 15 passed all 38,400 pixels;
+iteration 16 read `0x429b` instead of `0x42db` at `(45,64)`. Source and crop
+hashes were identical in all 16 iterations. Horizontal hash differed on the
+first passing iteration, then remained identical from iterations 2 through 16.
+Most importantly, the failing iteration retained the same source, crop, and
+horizontal hashes as the 14 immediately preceding passes, while its final hash
+alone changed from `ae90ddc5` to `66ec3f05`. This validates the hash diagnostic
+with a positive failing control and rules the source and both intermediates out
+for this visible error.
+
+```
+89dd1039b6240582256c1c2b0d463159e38b1d13168b2b3b78032d22788785ac  /media/anolis/dev/wii-gcn-wide-reduce-stage-trace-client.txt
+3aa0f88829242d70232803feb9e8b5c18eb4540dbe29d3b67bac5c9e839bcb78  /media/anolis/dev/wii-gcn-wide-reduce-stage-trace-kernel.txt
+```
+
+The next diagnostic should copy the completed final EFB image twice without
+rerasterizing it: first to the public destination without clearing EFB, then to
+the now-unused crop workspace with clear enabled. Wait for all final markers,
+invalidate both buffers, and hash/compare their complete 320x120 tiled images.
+Matching bad copies place the error in final vertical raster/EFB state;
+different copies place it in EFB-copy destination writes or memory visibility.
+Keep this double copy strictly behind `scale_trace=1`.
