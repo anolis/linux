@@ -3365,6 +3365,10 @@ static void test_linear_texture_filter(int fd)
 		fail("draw linear-filter quad");
 		goto out_sync;
 	}
+	printf("LINEAR FILTER row 0:");
+	for (unsigned int x = 0; x < dst_width; x++)
+		printf(" %04x", dst_map[tiled_rgb565_index(x, 0, dst_width)]);
+	putchar('\n');
 	for (unsigned int y = 0; y < dst_height; y++) {
 		for (unsigned int x = 0; x < dst_width; x++) {
 			size_t pixel = tiled_rgb565_index(x, y, dst_width);
@@ -4167,7 +4171,9 @@ static void test_provider(int fd, int other_fd, uint64_t free_before)
 int main(int argc, char **argv)
 {
 	bool hold = argc > 1 && !strcmp(argv[1], "--hold");
-	const char *node = argc > 1 + hold ? argv[1 + hold] :
+	bool linear_only = argc > 1 && !strcmp(argv[1], "--linear-filter-only");
+	const char *node = argc > 1 + hold + linear_only ?
+			   argv[1 + hold + linear_only] :
 			   "/dev/dri/renderD128";
 	uint64_t provider = 0;
 	uint64_t abi = 0;
@@ -4240,6 +4246,16 @@ int main(int argc, char **argv)
 				fail_value("provider EFB width", max_width, 640);
 			if (max_height != 576)
 				fail_value("provider EFB height", max_height, 576);
+		}
+		if (linear_only) {
+			if ((features & DRM_GCN_FEATURE_TEXTURE_LINEAR) &&
+			    (features & DRM_GCN_FEATURE_TEXTURE_RGBA8) &&
+			    (formats & DRM_GCN_FORMAT_RGBA8))
+				test_linear_texture_filter(fd);
+			else
+				fail_value("linear texture capability", features,
+					   DRM_GCN_FEATURE_TEXTURE_LINEAR);
+			goto out_close;
 		}
 		test_provider(fd, other_fd, free_bytes);
 		if ((features & (DRM_GCN_FEATURE_SUBMIT_RGB565 |
@@ -4355,6 +4371,7 @@ int main(int argc, char **argv)
 		}
 	}
 
+out_close:
 	close(other_fd);
 	close(fd);
 	if (failures) {
