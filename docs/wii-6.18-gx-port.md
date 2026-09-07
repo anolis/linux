@@ -15970,3 +15970,39 @@ Keep hardware fetch corruption, out-of-range access, state and raster behavior
 as separate possibilities. If 100 iterations pass, run 500 additional focused
 iterations before concluding this control appears stable; it is never a
 production scaler correctness test because its source has no spatial detail.
+
+Hardware result for `114485603`: uniform full-extent input reproduces the same
+single-pixel failure. All 30 fixtures passed the 512x256 hash gate with
+`expected=published=c4c69dc5`, base `013c0000`, RGBA8 format 6 and 524288
+bytes. Iterations 1--29 passed all 38400 EFB/source/copy comparisons. Iteration
+30 failed at `(206,31)`, raw EFB `009ce36f`, EFB/copied RGB565 `9f0d`,
+expected uniform `9f1d`. The complete EFB comparison had zero copy mismatches
+and exactly one source mismatch. Final/delayed were both `5860c4b5` instead
+of good uniform `e5c8efc5`; authored draw hashes remained
+`03506e62`/`8dbe515c`. Source/crop stayed `ad05e5c5` and the completed
+horizontal texture was `d33901c5` in the failing iteration.
+
+The full padded source had one uniform logical color, so selecting another
+correctly fetched texel within that texture cannot explain the changed blue
+bit. Corrupted fetch data, accesses outside that verified extent, TEV/raster
+state, command delivery and EFB writes remain distinct possibilities. This
+does not yet identify a physical hardware defect or eliminate texture sampling.
+
+Module `6464b161...` and client `8a5c7030...` checksums matched on boot
+`444193a6-aee4-4ae3-a619-4f6dd90fccf1`, target `10.3.10.59`. Provider
+unload restored CPU scanout; installed accepted provider remained `a2e7df8e...`.
+No timeout, stall or kernel fault appeared in the complete candidate interval.
+
+```
+0d3e661eccbc8a523c77e202efa22fea308f6aafd1994ff4f8b7d5a214704ad8  /media/anolis/dev/wii-gcn-wide-reduce-uniform-100-client.txt
+a0a7577211e153df5ae74bb3c754fb103b92c3a160eb93d78acda54a7f29d4e2  /media/anolis/dev/wii-gcn-wide-reduce-uniform-100-kernel.txt
+4da3db2374d59e6a6d4a8ff1a6e408bd3b6ca2fac4b761f0e0de5fd1063deeab  /media/anolis/dev/wii-gcn-wide-reduce-uniform-100-audit.txt
+```
+
+Next bounded control: bypass texture sampling with the established direct-RGBA8
+pass-color state and the same expanded `0x9f1d` color. Preserve final rectangle
+coverage and run-quad geometry as closely as the vertex format permits; account
+for changed state/vertex commands and retain full EFB/source/copy comparison.
+Run the explicit uniform client oracle. A reproduced error without texture
+sampling would further localize the issue to shared command/raster/TEV/EFB
+behavior. No direct-color scaled control has yet been implemented.
