@@ -14821,3 +14821,26 @@ because the prior completion candidates often passed twice before a moving
 single-bit failure. Reject any scaled pixel mismatch, changed 64-pixel linear
 oracle, timeout, stall, fallback, allocation leak, provider-loss event, kernel
 fault, or failure to restore CPU scanout.
+
+Hardware result for `9278ad462`: PE dithering is rejected as the cause of the
+moving scaled-copy corruption. The first complete strict cycle passed. The
+second passed every small-object scale case and the linear-filter oracle, then
+the 640-wide reduction read `0x429b` instead of `0x42db` at `(45,64)`. This is
+another new coordinate with the same isolated `0x40` green-channel bit change.
+All later full-system scale and XRGB8888 paths passed. The provider unloaded
+cleanly and the kernel audit reports no timeout, stall, fallback, or fault.
+
+Keep dithering disabled because deterministic, bit-exact API rendering should
+not inherit libogc's display-oriented default, but do not claim it repairs the
+scale path. Stop guessing additional raster state. Add a focused repeat mode
+for the deterministic 640-to-320 reduction and instrument hashes of the private
+crop and horizontal workspaces after positively fenced copies. Stable crop but
+varying horizontal hashes localize the corruption to horizontal raster/copy;
+varying crop hashes localize it earlier; stable intermediates with a final
+mismatch localize it to final raster/copy or CPU visibility.
+
+```
+4f5d22acdbeb0a3ee34cf7c7c77b338c94254737fbd17bca9dca641c5cea5f92  /media/anolis/dev/wii-gcn-linear-v12-no-dither-full-1.txt
+170248a32c4c302358cdcd1bd158e73b1b3b6d15e184ba90195a35fd42d93d50  /media/anolis/dev/wii-gcn-linear-v12-no-dither-full-2.txt
+bbea583c2147b06d699201890a42c74d951681756d31910b597cfe3fd03f1efe  /media/anolis/dev/wii-gcn-linear-v12-no-dither-audit.txt
+```
