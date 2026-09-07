@@ -15116,6 +15116,28 @@ provider while forcing console scanout through CPU conversion. A 100-iteration
 focused run in this mode is a positive test of whether interleaved GX scanout
 state or traffic is required for the corruption.
 
+Hardware result for render-only commit `7e02e2630` and provider `9a1b6e99`:
+interleaved GX scanout is ruled out as a necessary cause. The module confirmed
+`render_only=1`; no GX scanout-active message appeared in the candidate
+interval. The focused loop passed three exact iterations, then iteration 4
+reproduced the exact prior pixel error at `(206,31)`, returning `0x9f0d`
+instead of `0x9f1d`. Source, crop, and horizontal hashes were stable; final
+changed from `ae90ddc5` to the same `8b4301b5` seen in the preceding normal-
+scanout failure.
+
+```
+0d9545f6b0c49b04b7784fe5424b29f072df3074ef369b605655d9aead056b50  /media/anolis/dev/wii-gcn-wide-reduce-render-only-client.txt
+2468b4c5b72d162234478aaf0ae567e45f4cd55a12ad4000e44747060429a5ac  /media/anolis/dev/wii-gcn-wide-reduce-render-only-kernel.txt
+```
+
+Keep `render_only` as a useful isolation control, but it does not repair the
+scaler. The next diagnostic should reraster the final vertical stage a second
+time from the unchanged horizontal workspace, copying that second result into
+the now-free crop workspace and hashing both outputs. Unlike the earlier
+duplicate EFB-copy test, this repeats texture fetch and rasterization. A bad
+first result followed by a good replay proves that the final stage itself is
+transient despite identical source memory and command construction.
+
 Commit `049bf80d0` implements one primitive per scaled axis. It counts the
 nearest-neighbour runs first, emits one `GX_QUADS` header with four vertices
 per run, then appends the same direct-TEX0 run vertices as the previous
