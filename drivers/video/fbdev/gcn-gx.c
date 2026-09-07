@@ -1967,16 +1967,13 @@ static void gx_draw_color_quad(u16 width, u16 height, u8 r, u8 g, u8 b)
 	gx_draw_color_rect(0, 0, width, height, r, g, b);
 }
 
-static void gx_draw_textured_rect(u16 x0, u16 y0, u16 x1, u16 y1,
+static void gx_emit_textured_rect(u16 x0, u16 y0, u16 x1, u16 y1,
 				  u32 s0, u32 t0, u32 s1, u32 t1)
 {
 	u32 fx0 = f32_from_u16(x0);
 	u32 fy0 = f32_from_u16(y0);
 	u32 fx1 = f32_from_u16(x1);
 	u32 fy1 = f32_from_u16(y1);
-
-	gx_wr8(0x80); /* GX_QUADS | vtxfmt 0 */
-	gx_wr16be(4);
 
 	wg_f32_bits(fx0); wg_f32_bits(fy0);
 	gx_wr32be(0xffffffff);
@@ -1995,6 +1992,25 @@ static void gx_draw_textured_rect(u16 x0, u16 y0, u16 x1, u16 y1,
 	wg_f32_bits(s0); wg_f32_bits(t1);
 }
 
+static u16 gx_nearest_run_count(u16 src_extent, u16 dst_extent)
+{
+	u16 dst_start = 0;
+	u16 runs = 0;
+
+	while (dst_start < dst_extent) {
+		u16 src_index = gx_nearest_source_index(dst_start, src_extent,
+						       dst_extent);
+
+		do {
+			dst_start++;
+		} while (dst_start < dst_extent &&
+			 gx_nearest_source_index(dst_start, src_extent,
+						 dst_extent) == src_index);
+		runs++;
+	}
+	return runs;
+}
+
 static void gx_draw_nearest_horizontal_runs(u16 src_width,
 					    u16 texture_width, u16 height,
 					    u16 texture_height,
@@ -2003,6 +2019,9 @@ static void gx_draw_nearest_horizontal_runs(u16 src_width,
 	u32 t0 = gx_semantic_texcoord_bits_phase(0, texture_height, -2);
 	u32 t1 = gx_semantic_texcoord_bits_phase(height, texture_height, -2);
 	u16 dst_start = 0;
+
+	gx_wr8(0x80); /* GX_QUADS | vtxfmt 0 */
+	gx_wr16be(4 * gx_nearest_run_count(src_width, dst_width));
 
 	while (dst_start < dst_width) {
 		u16 src_index = gx_nearest_source_index(dst_start, src_width,
@@ -2015,7 +2034,7 @@ static void gx_draw_nearest_horizontal_runs(u16 src_width,
 		       src_index)
 			dst_end++;
 		s = gx_semantic_texcoord_bits_phase(src_index, texture_width, 2);
-		gx_draw_textured_rect(dst_start, 0, dst_end, height,
+		gx_emit_textured_rect(dst_start, 0, dst_end, height,
 				      s, t0, s, t1);
 		dst_start = dst_end;
 	}
@@ -2031,6 +2050,9 @@ static void gx_draw_nearest_vertical_runs(u16 x, u16 y, u16 width,
 	u32 s1 = gx_semantic_texcoord_bits_phase(width, texture_width, -2);
 	u16 dst_start = 0;
 
+	gx_wr8(0x80); /* GX_QUADS | vtxfmt 0 */
+	gx_wr16be(4 * gx_nearest_run_count(src_height, dst_height));
+
 	while (dst_start < dst_height) {
 		u16 src_index = gx_nearest_source_index(dst_start, src_height,
 						       dst_height);
@@ -2042,7 +2064,7 @@ static void gx_draw_nearest_vertical_runs(u16 x, u16 y, u16 width,
 		       src_index)
 			dst_end++;
 		t = gx_semantic_texcoord_bits_phase(src_index, texture_height, 2);
-		gx_draw_textured_rect(x, y + dst_start, x + width,
+		gx_emit_textured_rect(x, y + dst_start, x + width,
 				      y + dst_end, s0, t, s1, t);
 		dst_start = dst_end;
 	}
