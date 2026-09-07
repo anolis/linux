@@ -15158,6 +15158,30 @@ produce different raster results. If both hashes match the same bad image,
 investigate persistent texture-source/cache state. If they differ but both
 are bad, repeat enough times to classify the failure distribution.
 
+Hardware result for final-raster replay commit `14c9def7e` and provider
+`298ed365`: the diagnostic positive control passed and localized a transient
+consumer-stage failure. Iterations 1 through 18 had identical good
+`final=ae90ddc5 replay=ae90ddc5`. On iteration 19, userspace read `0x9f0d`
+instead of `0x9f1d` at `(206,31)`. The source, crop, and horizontal hashes
+remained exact. The first final raster changed to `8b4301b5`, while the
+immediate reraster from the unchanged horizontal texture returned the exact
+good `ae90ddc5` hash.
+
+```
+67ddc51a94d5070ce8a73bf3e416f50d9d2bab2d90d478e377f4accd9dd140ac  /media/anolis/dev/wii-gcn-wide-reduce-final-replay-client.txt
+c6b9ffeefa763a85f70ce86afb6ba52b459634938ba22ad67f91d1f85528ece6  /media/anolis/dev/wii-gcn-wide-reduce-final-replay-kernel.txt
+```
+
+This rules out persistent source-memory corruption and proves that identical
+reconstructed final commands can produce a bad first raster followed by an
+exact replay. The common boundary in both separable stages is consuming a
+texture after its contents were produced or prepared outside the texture
+cache. Although `gx_setup_texture()` emits libogc's invalidate sequence, it
+does so in the same submission as the consuming draw. Test a separate texture-
+cache invalidation submission, followed by BP `0x45`, exact token, CPU finish
+wait, and only then the raster submission. Apply it before both horizontal and
+vertical consumers; keep the replay diagnostic as the positive control.
+
 Commit `049bf80d0` implements one primitive per scaled axis. It counts the
 nearest-neighbour runs first, emits one `GX_QUADS` header with four vertices
 per run, then appends the same direct-TEX0 run vertices as the previous
