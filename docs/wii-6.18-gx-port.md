@@ -16453,3 +16453,30 @@ changing the first rectangle's height and internal boundary position. Validate
 split after the EFB comparison. Build/check before hardware use; start with
 100 frames and extend to at most 2,000, stopping on failure. This split control
 has not yet been implemented or run. Production scaling remains unchanged.
+
+#### Stage two-rectangle split control (2026-09-07)
+
+`scale_split` is an opt-in focused uniform direct-color diagnostic. Zero
+(default) disables it; values 1..119 emit exactly eight vertices in a single
+GX_QUADS packet, covering [0, split) and [split, 120). The split must be below
+the destination height; nonzero split rejects missing direct-color mode,
+nondefault band height, single-quad and per-row-fence modes. Existing uniform
+source checks also apply. Geometry metadata is logged after EFB/readout work.
+
+The split=1 experiment retains two rectangles, eight vertices, packet length,
+state, coverage and completion from the passing height-60 control, changing
+rectangle heights and the internal boundary. It does not independently isolate
+those two geometry effects. Production/default paths stay unchanged.
+
+PowerPC W=1 build, strict checkpatch (zero errors/warnings/checks), and
+`git diff --check` pass. Candidate SHA-256:
+
+```
+87674cc63dd8af73e091f124493a96f67c74b2effbcae9641f3ee47a51f96120  /media/anolis/dev/wii-gcn-linear-v12-build/drivers/video/fbdev/gcn-gx.ko
+```
+
+Test with the existing uniform client at `10.3.10.59`, using `scale_trace=1
+render_only=1 scale_efb_full=1 scale_cpu_source=1 scale_cpu_alt=1
+scale_cpu_rgba8=1 scale_cpu_uniform=1 scale_direct_color=1 scale_split=1`.
+Require row=1/count=2 metadata and the full EFB oracle. Stop on the first
+error or after twenty 100-frame cycles. No hardware result yet.
