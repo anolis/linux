@@ -15606,3 +15606,31 @@ The provider unloaded and CPU scanout returned; the installed provider stayed
 7676dbb6c09b77e28fafa84f2c7d7271f0cf30b166d841518147c804464842b3  /media/anolis/dev/wii-gcn-wide-reduce-efb-peek-100-kernel.txt
 ef212f62840030ac7a8a52055ddf0912d2d2d45881f83e4764357a9f926e59b9  /media/anolis/dev/wii-gcn-wide-reduce-efb-peek-100-kernel-raw.txt
 ```
+
+#### Stage complete pre-copy EFB snapshot (2026-09-07)
+
+`scale_efb_full=1` extends the exact focused trace with a complete 320x120
+ARGB snapshot after final-draw completion and before the copy. A temporary
+153600-byte `kvmalloc_array` buffer holds the snapshot; all exit paths free it.
+The EFB aperture is mapped once for the scan and then unmapped. The submission
+mutex stays held. No EFB writes or additional GX commands are introduced.
+This intentionally changes CPU read traffic/timing and remains diagnostic.
+
+After copy and cache invalidation, the checker compares all 38400 quantized
+EFB pixels with copied RGB565 and original source pixels. It logs both mismatch
+counts and the first differing pixel's coordinates, raw ARGB, quantized EFB,
+copy and source values. An EFB/source mismatch with matching EFB/copy localizes
+bad data before copy; a good EFB with a bad copy points to the copy or subsequent
+visibility boundary. Full passing frames first validate the conversion oracle.
+
+Strict checkpatch, `git diff --check`, and the PowerPC `W=1` module build pass
+with `-j16`. Candidate SHA-256:
+
+```
+76fb155dee6b3bc3824122c24a14515ff0eb4887c0eaad0d09a823fb85a78d6c  /media/anolis/dev/wii-gcn-linear-v12-build/drivers/video/fbdev/gcn-gx.ko
+```
+
+Run the unchanged 100-iteration client at `10.3.10.59` with
+`scale_trace=1 render_only=1 scale_efb_full=1`. The four-pixel peek option stays
+off for this run. Require a reproduced mismatch to classify the fault; clean
+iterations under this more intrusive observer are not a production fix.

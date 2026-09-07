@@ -184,6 +184,10 @@ static u32 gx_rgb888_timing_frames;
 
 #if IS_ENABLED(CONFIG_DRM_GCN_GX)
 static bool gx_scale_trace;
+static bool gx_scale_efb_full;
+module_param_named(scale_efb_full, gx_scale_efb_full, bool, 0444);
+MODULE_PARM_DESC(scale_efb_full,
+		 "Snapshot the full final EFB during the focused scale trace");
 static bool gx_scale_efb_peek;
 module_param_named(scale_efb_peek, gx_scale_efb_peek, bool, 0444);
 MODULE_PARM_DESC(scale_efb_peek,
@@ -794,6 +798,58 @@ static int gx_peek_scale_colors(struct gx_scale_efb_sample *samples, size_t coun
 	}
 
 	return 0;
+}
+
+static u16 gx_argb_to_rgb565(u32 argb)
+{
+	return ((argb >> 8) & 0xf800) | ((argb >> 5) & 0x07e0) |
+	       ((argb >> 3) & 0x001f);
+}
+
+static int gx_snapshot_scale_colors(u32 *pixels, u16 width, u16 height)
+{
+	void __iomem *efb = ioremap(0x08000000, (size_t)height << 12);
+	u16 x;
+	u16 y;
+
+	if (!efb)
+		return -ENOMEM;
+	for (y = 0; y < height; y++) {
+		for (x = 0; x < width; x++)
+			pixels[(size_t)y * width + x] =
+				ioread32be(efb + ((u32)y << 12) + ((u32)x << 2));
+	}
+	iounmap(efb);
+	return 0;
+}
+
+static void gx_compare_scale_colors(const u32 *pixels, const u16 *output,
+				    const u16 *source, u32 sequence)
+{
+	u32 copy_mismatches = 0;
+	u32 source_mismatches = 0;
+	u16 x;
+	u16 y;
+
+	/* Only called within the exact 640x240-to-320x120 trace gate. */
+	for (y = 0; y < 120; y++) {
+		for (x = 0; x < 320; x++) {
+			u32 argb = pixels[(size_t)y * 320 + x];
+			u16 efb = gx_argb_to_rgb565(argb);
+			u16 copied = output[gx_tiled_rgb565_index(x, y, 320)];
+			u16 expected = source[gx_tiled_rgb565_index(2 * x + 1,
+								  2 * y + 1, 640)];
+
+			if ((efb != copied || efb != expected) &&
+			    !copy_mismatches && !source_mismatches)
+				pr_info("gcn-gx: scale-efb-first seq=%u x=%u y=%u argb=%08x rgb565=%04x copied=%04x expected=%04x\n",
+					sequence, x, y, argb, efb, copied, expected);
+			copy_mismatches += efb != copied;
+			source_mismatches += efb != expected;
+		}
+	}
+	pr_info("gcn-gx: scale-efb-full seq=%u pixels=38400 copy_mismatches=%u source_mismatches=%u\n",
+		sequence, copy_mismatches, source_mismatches);
 }
 
 static size_t gx_rgb565_index(u16 x, u16 y, u16 width, u32 layout)
@@ -4986,6 +5042,7 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		{ .x = 206, .y = 31 },
 		{ .x = 319, .y = 119 },
 	};
+	u32 *efb_snapshot = NULL;
 	void *crop = gx_tex_buf_alt;
 	void *horizontal = gx_tex_buf;
 	u16 crop_height;
@@ -5069,6 +5126,15 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		dst_rect_width == 320 && dst_rect_height == 120;
 	if (trace)
 		trace_sequence = ++gx_scale_trace_sequence;
+	if (trace && gx_scale_efb_full) {
+		efb_snapshot = kvmalloc_array(320 * 120, sizeof(*efb_snapshot),
+					      GFP_KERNEL);
+		if (!efb_snapshot) {
+			ret = -ENOMEM;
+			goto out_unlock;
+		}
+	}
+
 	if (!system_memory) {
 		if (src_addr != dst_addr)
 			flush_dcache_range((unsigned long)src_addr,
@@ -5219,6 +5285,11 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	ret = gx_submit_and_wait_finish("render-blit-scaled-final-draw");
 	if (ret)
 		goto out_unlock;
+	if (efb_snapshot) {
+		ret = gx_snapshot_scale_colors(efb_snapshot, dst_width, dst_height);
+		if (ret)
+			goto out_unlock;
+	}
 	if (trace && gx_scale_efb_peek) {
 		ret = gx_peek_scale_colors(samples, ARRAY_SIZE(samples));
 		if (ret)
@@ -5252,6 +5323,9 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 			final_delayed_hash = gx_hash_tiled_region(dst_addr,
 								  dst_width, dst_width,
 								  dst_height);
+			if (efb_snapshot)
+				gx_compare_scale_colors(efb_snapshot, dst_addr, src_addr,
+							trace_sequence);
 			if (gx_scale_efb_peek) {
 				const u16 *output = dst_addr;
 				const u16 *source = src_addr;
@@ -5285,6 +5359,7 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	}
 
 out_unlock:
+	kvfree(efb_snapshot);
 	mutex_unlock(&gx_submit_lock);
 	return ret;
 }
