@@ -15707,3 +15707,33 @@ with `-j16`. Candidate SHA-256:
 Run on `10.3.10.59`, the same v12 boot, with the unchanged `5d63411f...`
 focused client and `scale_trace=1 render_only=1 scale_efb_full=1
 scale_cpu_publish=1`. No accepted provider installation is changed.
+
+Hardware result for `76e2ee058`: rejected as a complete scaler fix, but the
+final-consumer publication hypothesis remains unresolved. Run 1 failed at
+iteration 1 and the unchanged repeat at iteration 3, both at `(166,113)` with
+`39cd` instead of `38cd`. In both failures, horizontal was already bad
+`591094c5` before CPU republication and remained exactly that hash afterward.
+Final EFB and copy both contained `39cd` (`argb=0039386b`), final hash
+`b0303cc5`, with zero EFB/copy mismatches. The repeat's two preceding good
+horizontal inputs produced exact final outputs. Commands remained stable.
+
+A full cumulative dmesg retrieval stalled and was interrupted; its partial
+`-kernel-raw.txt` and prematurely derived `-kernel.txt` are not acceptance
+evidence. Completed bounded SSH audits below contain the complete candidate
+intervals, matching temporary module/client checksums, unchanged installed
+`a2e7df8e...` provider, same boot ID, and normal unload/CPU scanout restoration.
+There were no timeout or kernel fault messages in those candidate intervals.
+
+```
+9504b102ec1fa0ba535e03c8a78f346cabd9af2a8376d0d0ceca47f31fb6c794  /media/anolis/dev/wii-gcn-wide-reduce-cpu-publish-100-client.txt
+3e08bfec391894f69ad8008ade1d2da859a73693b7e83741e06e739ebf72a039  /media/anolis/dev/wii-gcn-wide-reduce-cpu-publish-100-audit.txt
+3850ac18507abf046b0c500b63badd40b8360607713af318468f6eab5b6996be  /media/anolis/dev/wii-gcn-wide-reduce-cpu-publish-repeat-client.txt
+cc03aff152f2d0bd3ed2530de176c52ee7cec644a4085271c8db19856d244327  /media/anolis/dev/wii-gcn-wide-reduce-cpu-publish-repeat-audit.txt
+```
+
+Next use an explicitly synthetic diagnostic input: construct the horizontal
+texture on the CPU from the original source with the exact center-nearest
+horizontal selection, verify its expected hash, then execute the unchanged
+final draw with the full EFB detector. Preserve the original producer hash in
+the log. This intentionally replaces potentially bad producer bytes and must
+not be described as identity republication or a production acceleration fix.
