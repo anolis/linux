@@ -15052,3 +15052,22 @@ destination-restore quad and texture/state switch are unnecessary. Skip that
 restore only when the scaled destination rectangle is the full target, and
 rerun the focused positive control. This isolates direct vertical runs on
 the copy-cleared EFB without weakening partial-blit preservation semantics.
+
+Commit `b65b4dc69` implements the full-target restore bypass. Partial scaled
+blits still restore the complete previous destination before overlaying their
+rectangle. A scaled blit covering the entire target now proceeds directly from
+the copy-cleared EFB to the direct-TEX0 vertical runs, because every target
+pixel is replaced. This removes one position-derived textured quad and one
+texture/state transition from the focused failure path.
+
+Strict checkpatch and the PowerPC `W=1` module build pass with `-j16`:
+
+```
+9986e83a82bdc030351534ffca147e045c66665b96ca265c392c432d37ac4eca  /media/anolis/dev/wii-gcn-linear-v12-build/drivers/video/fbdev/gcn-gx.ko
+```
+
+Run the same 100-iteration focused trace. Exact output and stable stage hashes
+for all iterations validate the simplified final path; any final mismatch
+places the fault in the direct vertical runs or their EFB result rather than
+the removed restore/state transition. A clean focused run still requires five
+complete strict-suite passes before acceptance.
