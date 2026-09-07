@@ -13,6 +13,7 @@ Options:
   --host HOST          Wii address (default: WII_SSH_HOST or 10.3.10.12)
   --module FILE        gcn-gx module (default: drivers/video/fbdev/gcn-gx.ko)
   --client FILE        test client (default: /tmp/wii-gcn-render-test)
+  --client-args ARGS   arguments passed to the test client
   --kms-client FILE    optional linear-render/KMS presentation client
   --kms-hold SECONDS   presentation duration (default: 5)
   --kms-mode MODE      KMS scene: pattern or triangle (default: pattern)
@@ -33,6 +34,7 @@ EOF
 ssh_host=${WII_SSH_HOST:-10.3.10.12}
 module=
 client=/tmp/wii-gcn-render-test
+client_args=
 kms_client=
 kms_hold=5
 kms_mode=pattern
@@ -56,6 +58,10 @@ while (($#)); do
 		;;
 	--client)
 		client=$2
+		shift
+		;;
+	--client-args)
+		client_args=$2
 		shift
 		;;
 	--kms-client)
@@ -146,6 +152,10 @@ if (( ! allow_dirty )) &&
 fi
 if [[ ! $module_args =~ ^[A-Za-z0-9_.,=+\ -]*$ ]]; then
 	printf 'Unsafe character in module arguments: %s\n' "$module_args" >&2
+	exit 2
+fi
+if [[ ! $client_args =~ ^[A-Za-z0-9_./,=+\ -]*$ ]]; then
+	printf 'Unsafe character in client arguments: %s\n' "$client_args" >&2
 	exit 2
 fi
 
@@ -260,7 +270,7 @@ remote_exec "insmod $remote_module $module_args"
 loaded=1
 remote_notice "running hardware test"
 set +e
-remote_exec "$remote_client"
+remote_exec "$remote_client $client_args"
 test_status=$?
 set -e
 

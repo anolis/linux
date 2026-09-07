@@ -5,7 +5,8 @@ set -euo pipefail
 
 repo=$(git rev-parse --show-toplevel)
 output_dir=${1:-/tmp}
-headers_dir=$(mktemp -d)
+mkdir -p "$output_dir"
+headers_dir=$(mktemp -d "$output_dir/.wii-gcn-client-build.XXXXXX")
 build_dir="$headers_dir/build"
 
 cleanup()
@@ -14,7 +15,6 @@ cleanup()
 }
 trap cleanup EXIT
 
-mkdir -p "$output_dir"
 mkdir -p "$build_dir"
 
 make -C "$repo" O="$build_dir" -j16 ARCH=powerpc \

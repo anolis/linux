@@ -4172,8 +4172,10 @@ int main(int argc, char **argv)
 {
 	bool hold = argc > 1 && !strcmp(argv[1], "--hold");
 	bool linear_only = argc > 1 && !strcmp(argv[1], "--linear-filter-only");
-	const char *node = argc > 1 + hold + linear_only ?
-			   argv[1 + hold + linear_only] :
+	bool wide_reduce_only = argc > 1 &&
+				!strcmp(argv[1], "--wide-reduce-only");
+	int mode_args = hold + linear_only + wide_reduce_only;
+	const char *node = argc > 1 + mode_args ? argv[1 + mode_args] :
 			   "/dev/dri/renderD128";
 	uint64_t provider = 0;
 	uint64_t abi = 0;
@@ -4255,6 +4257,18 @@ int main(int argc, char **argv)
 			else
 				fail_value("linear texture capability", features,
 					   DRM_GCN_FEATURE_TEXTURE_LINEAR);
+			goto out_close;
+		}
+		if (wide_reduce_only) {
+			if (features & DRM_GCN_FEATURE_BLIT_SCALED_RGB565) {
+				for (unsigned int i = 1; i <= 100 && !failures; i++) {
+					printf("WIDE REDUCE: iteration %u\n", i);
+					test_wide_scaled_reduce(fd);
+				}
+			} else {
+				fail_value("scaled RGB565 capability", features,
+					   DRM_GCN_FEATURE_BLIT_SCALED_RGB565);
+			}
 			goto out_close;
 		}
 		test_provider(fd, other_fd, free_bytes);
