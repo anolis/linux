@@ -16357,3 +16357,50 @@ to at most 2,000 iterations in 100-frame cycles, stopping on the first error.
 Use the same uniform fixture, full EFB oracle and hardware audit. A failure
 would reject the earlier apparent multi-primitive dependency; another finite
 pass would only strengthen the control. Keep production scaling unchanged.
+
+#### Single rectangle passes 2,000-frame extension (2026-09-07)
+
+The planned extension completed all twenty 100-frame cycles with candidate
+`e07f34e7...` from `3e72d0ba1`, using the unchanged uniform client
+`8a5c7030...`. Parameters were `scale_trace=1 render_only=1
+scale_efb_full=1 scale_cpu_source=1 scale_cpu_alt=1 scale_cpu_rgba8=1
+scale_cpu_uniform=1 scale_direct_color=1 scale_single_quad=1`. Band height
+remained at its default 1; per-row fences and clear-only mode were off.
+No driver source change or rebuild was needed for this existing control.
+
+All 2,000 frames passed: 76,800,000 pixels matched the source oracle in EFB
+and the copied result. Every frame had zero source and copy mismatches,
+`horizontal=03506e62 final=d0808d64` authored hashes, exact source/crop
+`ad05e5c5`, and final/delayed `e5c8efc5`. All padded CPU fixture hashes were
+`expected=published=c4c69dc5`, base `013c0000`, format 6, 524288 bytes.
+Thirty frames had an earlier horizontal hash differing from `d33901c5`;
+the synthetic fixture and untextured final rectangle still produced exact
+output. These are upstream diagnostic errors, not failures of the final
+single-rectangle control, and confirm the broader corruption remains active.
+
+Every cycle's audit verified the module/client checksums, the unchanged
+installed accepted module `a2e7df8e...`, and boot
+`444193a6-aee4-4ae3-a619-4f6dd90fccf1` at `10.3.10.59`. All twenty cycles
+unloaded the candidate and restored CPU scanout, with no timeout, stall or
+kernel fault in the captured intervals. No candidate was permanently installed.
+
+The sixty client, trimmed-kernel and raw-audit artifacts use stems
+`/media/anolis/dev/wii-gcn-wide-reduce-single-2000-1` through `-20`.
+Their SHA-256 manifest is:
+
+```
+8fd7fe0267e480efc81d73ec034b72cbb3f57a194fa65620398448c179f11e8b  /media/anolis/dev/wii-gcn-wide-reduce-single-2000.sha256
+```
+
+This strengthens the bounded single-rectangle control relative to failing
+one- and two-row bands. It does not prove single rectangles cannot fail,
+isolate primitive count from geometry/command length, or implement arbitrary
+nearest-neighbor scaling. Production scaling remains unchanged.
+
+Next bounded comparison: use this same module with `scale_single_quad=0
+scale_band_height=60` to draw two 320x60 rectangles in one packet. Keep all
+other fixture, state and oracle settings identical. Run at most twenty
+100-frame cycles, stopping on the first error, and require height 60/count 2
+metadata. This tests whether corruption can occur with only two broad
+primitives, without assuming thin bands are necessary. Record any passing
+result as another finite control, not a repair. This comparison is not yet run.
