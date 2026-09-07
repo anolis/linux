@@ -14950,6 +14950,27 @@ raster-to-copy barrier next: submit each scaled raster pass with one final
 separate command stream. This differs materially from `daf00bccd`, which only
 waited after already-combined raster-plus-copy stages.
 
+Commit `351de01ca` implements the true raster-to-copy barrier. The crop draw,
+horizontal run raster, and combined final destination-plus-vertical raster now
+each end with exactly one `BP 0x45`, submit, and wait for PE finish. Only after
+that wait does a separate command stream issue the corresponding EFB texture
+copy, itself followed by one finish and a wait. This matches the blocking
+semantics of libogc `GX_DrawDone()` between producer and consumer rather than
+assuming that an earlier marker stalls later commands in the same FIFO. The
+trace-only duplicate final copy is removed; source/crop/horizontal/final hashes
+remain available under `scale_trace=1`.
+
+```
+da4561ac3da9c48dbfa8547115ec7ab9bd24cd7461040cee1231e255406299f9  /media/anolis/dev/wii-gcn-linear-v12-build/drivers/video/fbdev/gcn-gx.ko
+```
+
+First run the focused 100-iteration reduction with `scale_trace=1`. Acceptance
+requires all 100 iterations and every stage hash after initialization to remain
+stable, with no timeout or fallback. If that passes, run at least five complete
+strict suites without tracing. Any moving pixel or stage hash rejects the
+barrier as sufficient; a timeout rejects the implementation even if pixels are
+otherwise exact.
+
 Commit `9a84db69b` implements the duplicate-copy diagnostic behind
 `scale_trace=1`. The final EFB image is copied to the public destination without
 clear and then to the unused crop workspace with clear. The trace waits for all
