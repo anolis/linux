@@ -15269,6 +15269,26 @@ second horizontal raster/copy, then do the same for the final stage. This
 tests whether producer-local priming can stabilize both separable passes
 without relying on a particular bad-image signature.
 
+Commit `d0b8a8470` implements producer-local replay inside the exact trace
+gate. It preserves the first horizontal hash, reconstructs the same horizontal
+raster from the unchanged crop texture, recopies it into the horizontal
+workspace, and logs `horizontal_replay`. The existing final replay then
+consumes that published second horizontal result and writes its own second
+cycle to the public destination. Normal non-trace behavior is unchanged.
+
+Strict checkpatch and the PowerPC `W=1` module build pass with `-j16`:
+
+```
+2ac031cbb710f128c5d67f29a519bf2bff75126718691229e46d6bd691ce25b5  /media/anolis/dev/wii-gcn-linear-v12-build/drivers/video/fbdev/gcn-gx.ko
+```
+
+Run 100 focused iterations with `scale_trace=1 render_only=1`. Acceptance
+requires every userspace result, `horizontal_replay`, and final `replay` to be
+exact, with no timeout or FIFO stall. Changed first `horizontal` or `final`
+hashes are expected positive-control events. If the first gate passes, run at
+least 500 more iterations before considering two-cycle producer priming a
+viable correctness workaround.
+
 Commit `049bf80d0` implements one primitive per scaled axis. It counts the
 nearest-neighbour runs first, emits one `GX_QUADS` header with four vertices
 per run, then appends the same direct-TEX0 run vertices as the previous
