@@ -4977,6 +4977,7 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		flush_dcache_range((unsigned long)crop,
 				   (unsigned long)crop + crop_bytes);
 	} else {
+		finish_count = READ_ONCE(gx_pe_finish_count);
 		fifo_pos = 0;
 		gx_load_libogc_init_preamble();
 		gx_setup_display_copy_state();
@@ -4986,7 +4987,6 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		gx_setup_texture_rgb565((void *)src_addr, src_width, src_height);
 		gx_set_scissor(0, 0, src_rect_width, src_rect_height);
 		gx_draw_color_quad(src_width, src_height, 0xff, 0xff, 0xff);
-		gx_load_bp_reg(0x45000002);
 		for (i = 0; i < 32; i++)
 			gx_wr8(0);
 		gx_set_copy_clear_rgb(0x00, 0x00, 0x00);
@@ -4997,9 +4997,16 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		ret = gx_submit_cmds("render-blit-scaled-crop");
 		if (ret)
 			goto out_unlock;
+		completed = gx_wait_for_pe_finishes(finish_count, 1);
+		if (!completed) {
+			pr_warn_ratelimited("gcn-gx: scaled blit timed out waiting for source crop\n");
+			ret = -ETIMEDOUT;
+			goto out_unlock;
+		}
 	}
 
 	/* Expand or reduce source columns exactly into a private intermediate. */
+	finish_count = READ_ONCE(gx_pe_finish_count);
 	fifo_pos = 0;
 	gx_load_libogc_init_preamble();
 	gx_setup_display_copy_state();
@@ -5012,7 +5019,6 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	gx_draw_nearest_horizontal_runs(src_rect_width, crop_width,
 					src_rect_height, crop_height,
 					 dst_rect_width);
-	gx_load_bp_reg(0x45000002);
 	for (i = 0; i < 32; i++)
 		gx_wr8(0);
 	gx_set_copy_clear_rgb(0x00, 0x00, 0x00);
@@ -5023,6 +5029,12 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	ret = gx_submit_cmds("render-blit-scaled-horizontal");
 	if (ret)
 		goto out_unlock;
+	completed = gx_wait_for_pe_finishes(finish_count, 1);
+	if (!completed) {
+		pr_warn_ratelimited("gcn-gx: scaled blit timed out waiting for horizontal intermediate\n");
+		ret = -ETIMEDOUT;
+		goto out_unlock;
+	}
 
 	/* The crop workspace is free once the horizontal snapshot is complete. */
 	if (system_memory) {
@@ -5033,16 +5045,14 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 				   (unsigned long)crop + dst_bytes);
 	}
 
-	/* gx_submit_cmds() observed the token ordered after the intermediate. */
 	finish_count = READ_ONCE(gx_pe_finish_count);
 	fifo_pos = 0;
 	gx_load_libogc_init_preamble();
 	gx_setup_display_copy_state();
 	gx_setup_rgb565_texture_state(dst_width, dst_height);
 	gx_setup_texture_rgb565(system_memory ? crop : dst_addr,
-				dst_width, dst_height);
+					dst_width, dst_height);
 	gx_draw_color_quad(dst_width, dst_height, 0xff, 0xff, 0xff);
-	gx_load_bp_reg(0x45000002);
 	for (i = 0; i < 32; i++)
 		gx_wr8(0);
 
@@ -5052,10 +5062,9 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 					  false, false);
 	gx_set_scissor(dst_x, dst_y, dst_rect_width, dst_rect_height);
 	gx_draw_nearest_vertical_runs(dst_x, dst_y, dst_rect_width,
-				      horizontal_width, src_rect_height,
-				      crop_height,
-				      dst_rect_height);
-	gx_load_bp_reg(0x45000002);
+					      horizontal_width, src_rect_height,
+					      crop_height,
+					      dst_rect_height);
 	for (i = 0; i < 32; i++)
 		gx_wr8(0);
 
