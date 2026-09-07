@@ -15033,3 +15033,22 @@ hashes for all iterations, without timeout or fallback. If it passes, run at
 least five complete strict suites. A pixel mismatch with a changed horizontal
 or final hash rejects direct run-state elimination; a timeout or FIFO stall
 rejects the larger direct-vertex command stream.
+
+Hardware result for direct-run commit `a1eb87b17` and provider `5aac7c2b`:
+rejected as a complete fix. The focused loop passed 55 exact iterations before
+iteration 56 read `0x20cf` instead of `0x20df` at `(47,6)`. Source, crop, and
+horizontal remained at `a2c385c5`, `a2c385c5`, and `22ce6dc5`; only final
+changed from `ae90ddc5` to `44f605f5`. No timeout or FIFO stall occurred.
+
+```
+44f76053b4a0e408da1ecbeda53f5e2af86a9bd570ac4a200c6caff6c7d9f678  /media/anolis/dev/wii-gcn-wide-reduce-direct-runs-client.txt
+b64636d8fb4f6d86ba0c9d5a16d1f9b59384ca43def5335b328018cd3af6933b  /media/anolis/dev/wii-gcn-wide-reduce-direct-runs-kernel.txt
+```
+
+The longer clean run suggests that removing repeated run-state mutation may
+reduce the failure frequency, but one failure is enough to reject it. The
+focused operation covers the complete destination, so its preceding
+destination-restore quad and texture/state switch are unnecessary. Skip that
+restore only when the scaled destination rectangle is the full target, and
+rerun the focused positive control. This isolates direct vertical runs on
+the copy-cleared EFB without weakening partial-blit preservation semantics.
