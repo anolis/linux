@@ -15737,3 +15737,26 @@ horizontal selection, verify its expected hash, then execute the unchanged
 final draw with the full EFB detector. Preserve the original producer hash in
 the log. This intentionally replaces potentially bad producer bytes and must
 not be described as identity republication or a production acceleration fix.
+
+#### Stage exact CPU horizontal-source control (2026-09-07)
+
+`scale_cpu_source=1` builds a synthetic horizontal texture within the exact
+focused trace gate. It clears the padded private buffer, selects original
+source `(2*x+1,y)` for each horizontal output `(x,y)`, and computes the expected
+logical hash from those selected values. After flushing and invalidating the
+buffer, it requires the published hash to match. The former GPU producer hash
+is logged separately, so repaired producer bytes are explicit in the evidence.
+Final draw commands, texture address, full EFB snapshot and copy remain intact.
+
+Strict checkpatch, `git diff --check`, and the PowerPC `W=1` build pass with
+`-j16`. Candidate SHA-256:
+
+```
+f82423bbd3efd11890c9025196da41110783b76937e48f2e35617bb90e869574  /media/anolis/dev/wii-gcn-linear-v12-build/drivers/video/fbdev/gcn-gx.ko
+```
+
+Run the same focused client on `10.3.10.59` with `scale_trace=1 render_only=1
+scale_efb_full=1 scale_cpu_source=1`; leave `scale_cpu_publish` off. A bad final
+EFB from verified exact CPU input localizes the failure beyond the original
+horizontal producer and its publication. A passing run is only a diagnostic
+control and does not accept CPU substitution as the production scale path.

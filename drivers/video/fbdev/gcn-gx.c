@@ -184,6 +184,10 @@ static u32 gx_rgb888_timing_frames;
 
 #if IS_ENABLED(CONFIG_DRM_GCN_GX)
 static bool gx_scale_trace;
+static bool gx_scale_cpu_source;
+module_param_named(scale_cpu_source, gx_scale_cpu_source, bool, 0444);
+MODULE_PARM_DESC(scale_cpu_source,
+		 "Build an exact CPU horizontal texture in the focused scale trace");
 static bool gx_scale_cpu_publish;
 module_param_named(scale_cpu_publish, gx_scale_cpu_publish, bool, 0444);
 MODULE_PARM_DESC(scale_cpu_publish,
@@ -5282,6 +5286,42 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 			trace_sequence, horizontal_delayed_hash, published_hash,
 			horizontal_bytes);
 		if (published_hash != horizontal_delayed_hash) {
+			ret = -EIO;
+			goto out_unlock;
+		}
+	}
+
+	if (trace && gx_scale_cpu_source) {
+		const u16 *source = src_addr;
+		u16 *pixels = horizontal;
+		u32 expected_hash = 2166136261U;
+		u32 published_hash;
+		u16 x;
+		u16 y;
+
+		/* Synthetic input control, not an accelerated scaler repair. */
+		memset(horizontal, 0, horizontal_bytes);
+		for (y = 0; y < src_rect_height; y++) {
+			for (x = 0; x < dst_rect_width; x++) {
+				u16 value = source[gx_tiled_rgb565_index(2 * x + 1,
+									 y, src_width)];
+
+				pixels[gx_tiled_rgb565_index(x, y, horizontal_width)] =
+					value;
+				expected_hash ^= value;
+				expected_hash *= 16777619U;
+			}
+		}
+		flush_dcache_range((unsigned long)horizontal,
+				   (unsigned long)horizontal + horizontal_bytes);
+		invalidate_dcache_range((unsigned long)horizontal,
+					(unsigned long)horizontal + horizontal_bytes);
+		published_hash = gx_hash_tiled_region(horizontal, horizontal_width,
+						      dst_rect_width, src_rect_height);
+		pr_info("gcn-gx: scale-cpu-source seq=%u producer=%08x expected=%08x published=%08x\n",
+			trace_sequence, horizontal_delayed_hash, expected_hash,
+			published_hash);
+		if (published_hash != expected_hash) {
 			ret = -EIO;
 			goto out_unlock;
 		}
