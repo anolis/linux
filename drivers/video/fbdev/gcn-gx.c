@@ -184,6 +184,10 @@ static u32 gx_rgb888_timing_frames;
 
 #if IS_ENABLED(CONFIG_DRM_GCN_GX)
 static bool gx_scale_trace;
+static bool gx_scale_cpu_rgba8;
+module_param_named(scale_cpu_rgba8, gx_scale_cpu_rgba8, bool, 0444);
+MODULE_PARM_DESC(scale_cpu_rgba8,
+		 "Encode the focused CPU texture source as equivalent tiled RGBA8");
 static bool gx_scale_cpu_alt;
 module_param_named(scale_cpu_alt, gx_scale_cpu_alt, bool, 0444);
 MODULE_PARM_DESC(scale_cpu_alt,
@@ -881,6 +885,48 @@ static void gx_cpu_republish_texture(void *pixels, size_t bytes)
 			   (unsigned long)pixels + bytes);
 	invalidate_dcache_range((unsigned long)pixels,
 				(unsigned long)pixels + bytes);
+}
+
+/* GX RGBA8 uses separate 32-byte A/R and G/B planes in each 4x4 tile. */
+static size_t gx_scale_rgba8_offset(u16 x, u16 y, u16 width)
+{
+	size_t index = gx_tiled_rgb565_index(x, y, width);
+
+	return (index / 16) * 64 + (index % 16) * 2;
+}
+
+static void gx_scale_store_rgba8(u8 *pixels, u16 x, u16 y, u16 width, u16 color)
+{
+	size_t offset = gx_scale_rgba8_offset(x, y, width);
+	u8 r = (color >> 11) & 31;
+	u8 g = (color >> 5) & 63;
+	u8 b = color & 31;
+
+	pixels[offset] = 255;
+	pixels[offset + 1] = (r << 3) | (r >> 2);
+	pixels[offset + 32] = (g << 2) | (g >> 4);
+	pixels[offset + 33] = (b << 3) | (b >> 2);
+}
+
+static u32 gx_hash_scale_rgba8(const u8 *pixels, u16 stride, u16 width,
+			       u16 height)
+{
+	u32 hash = 2166136261U;
+	u16 x;
+	u16 y;
+
+	for (y = 0; y < height; y++) {
+		for (x = 0; x < width; x++) {
+			size_t offset = gx_scale_rgba8_offset(x, y, stride);
+			u32 argb = ((u32)pixels[offset + 1] << 16) |
+				   ((u32)pixels[offset + 32] << 8) |
+				   pixels[offset + 33];
+
+			hash ^= gx_argb_to_rgb565(argb);
+			hash *= 16777619U;
+		}
+	}
+	return hash;
 }
 
 static size_t gx_rgb565_index(u16 x, u16 y, u16 width, u32 layout)
@@ -5077,6 +5123,7 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	void *crop = gx_tex_buf_alt;
 	void *horizontal = gx_tex_buf;
 	void *final_texture = horizontal;
+	u32 final_texture_format = GX_TF_RGB565;
 	u16 crop_height;
 	u16 crop_copy_width;
 	u16 crop_width;
@@ -5299,6 +5346,7 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	if (trace && gx_scale_cpu_source) {
 		const u16 *source = src_addr;
 		u16 *pixels;
+		size_t fixture_bytes = horizontal_bytes;
 		u32 expected_hash = 2166136261U;
 		u32 published_hash;
 		u16 x;
@@ -5308,28 +5356,47 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		if (gx_scale_cpu_alt)
 			final_texture = crop;
 		pixels = final_texture;
+		if (gx_scale_cpu_rgba8) {
+			final_texture_format = GX_TF_RGBA8;
+			fixture_bytes *= 2;
+		}
+		if (fixture_bytes > GX_TEX_BUF_SLOT_SIZE) {
+			ret = -E2BIG;
+			goto out_unlock;
+		}
 		/* Synthetic input control, not an accelerated scaler repair. */
-		memset(final_texture, 0, horizontal_bytes);
+		memset(final_texture, 0, fixture_bytes);
 		for (y = 0; y < src_rect_height; y++) {
 			for (x = 0; x < dst_rect_width; x++) {
+				size_t pixel = gx_tiled_rgb565_index(x, y, horizontal_width);
 				u16 value = source[gx_tiled_rgb565_index(2 * x + 1,
 									 y, src_width)];
 
-				pixels[gx_tiled_rgb565_index(x, y, horizontal_width)] =
-					value;
+				if (gx_scale_cpu_rgba8)
+					gx_scale_store_rgba8(final_texture, x, y,
+							     horizontal_width, value);
+				else
+					pixels[pixel] = value;
 				expected_hash ^= value;
 				expected_hash *= 16777619U;
 			}
 		}
 		flush_dcache_range((unsigned long)final_texture,
-				   (unsigned long)final_texture + horizontal_bytes);
+				   (unsigned long)final_texture + fixture_bytes);
 		invalidate_dcache_range((unsigned long)final_texture,
-					(unsigned long)final_texture + horizontal_bytes);
-		published_hash = gx_hash_tiled_region(final_texture, horizontal_width,
-						      dst_rect_width, src_rect_height);
-		pr_info("gcn-gx: scale-cpu-source seq=%u producer=%08x expected=%08x published=%08x base=%08x\n",
+					(unsigned long)final_texture + fixture_bytes);
+		if (gx_scale_cpu_rgba8)
+			published_hash = gx_hash_scale_rgba8(final_texture,
+							     horizontal_width,
+							     dst_rect_width, src_rect_height);
+		else
+			published_hash = gx_hash_tiled_region(final_texture,
+							      horizontal_width,
+							      dst_rect_width, src_rect_height);
+		pr_info("gcn-gx: scale-cpu-source seq=%u producer=%08x expected=%08x published=%08x base=%08x format=%u bytes=%zu\n",
 			trace_sequence, horizontal_delayed_hash, expected_hash,
-			published_hash, (u32)virt_to_phys(final_texture));
+			published_hash, (u32)virt_to_phys(final_texture),
+			final_texture_format, fixture_bytes);
 		if (published_hash != expected_hash) {
 			ret = -EIO;
 			goto out_unlock;
@@ -5358,7 +5425,8 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	}
 
 	gx_setup_rgb565_texture_state_mode(dst_width, dst_height, true);
-	gx_setup_texture_rgb565(final_texture, horizontal_width, crop_height);
+	gx_setup_texture(final_texture, horizontal_width, crop_height,
+			 final_texture_format, DRM_GCN_TEXTURE_FILTER_NEAREST);
 	gx_setup_texture_coordinate_scale(horizontal_width, crop_height,
 					  false, false);
 	gx_set_scissor(dst_x, dst_y, dst_rect_width, dst_rect_height);

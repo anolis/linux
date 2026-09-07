@@ -15864,3 +15864,37 @@ Verify layout, source hash and format-specific command changes before testing.
 This compares source-format/decode paths; it is not a proposal to replace the
 production scaler or claim RGB565 decoding is already proven faulty. No RGBA8
 scale-source control has yet been implemented.
+
+#### Stage equivalent RGBA8 CPU texture-source control (2026-09-07)
+
+`scale_cpu_rgba8=1` encodes the focused CPU source as tiled RGBA8, using
+4x4 tiles with separate A/R and G/B 32-byte planes. Layout matches the accepted
+Mesa implementation in `src/gallium/drivers/gcn/gcn_native.c`. R/B expand from
+five to eight bits with `(v << 3) | (v >> 2)`; G expands from six to eight with
+`(v << 2) | (v >> 4)`; alpha is 255. Before drawing, the checker reads the
+flushed/invalidated tiled bytes, truncates channels back to RGB565 and requires
+the original logical hash. This checks the encoded source independently of
+GPU sampling. The allocation covers the entire padded 512x256 texture:
+524288 bytes, explicitly checked against the private slot capacity.
+
+The final bind uses the existing accepted `gx_setup_texture(..., GX_TF_RGBA8,
+DRM_GCN_TEXTURE_FILTER_NEAREST)` path. Source dimensions, base selection,
+coordinates, geometry, full EFB comparison, and final copy remain unchanged.
+Normal operation still uses RGB565; the format option acts only inside the
+focused CPU-source gate. This is an interpretation/format-path diagnostic,
+not a production format migration.
+
+Strict checkpatch, `git diff --check`, and PowerPC `W=1` build pass with
+`-j16`. Candidate SHA-256:
+
+```
+3a64049b4c96dfc07713e889b5d909ed758d2d78b37c269dfc76155aed81a9fb  /media/anolis/dev/wii-gcn-linear-v12-build/drivers/video/fbdev/gcn-gx.ko
+```
+
+Run at `10.3.10.59` with the unchanged client and `scale_trace=1 render_only=1
+scale_efb_full=1 scale_cpu_source=1 scale_cpu_alt=1 scale_cpu_rgba8=1`.
+Keep the preceding alternate base `013c0000` for comparison; expect format 6,
+524288 bytes and logical published hash `22ce6dc5`. Require stable authored
+commands and full EFB/source agreement. If 100 iterations pass, run 500 more
+before interpreting apparent improvement. Any reproduced pre-copy EFB error
+rejects changing source format as a sufficient correction.
