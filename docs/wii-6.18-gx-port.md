@@ -16532,3 +16532,31 @@ two controls. This targets a just-observed failing row without requiring 120
 primitives. Validate ordered interior boundaries, log both after readout, and
 retain the same full EFB oracle and stop-on-failure run bound. This extension
 has not been implemented or run. Default production scaling remains unchanged.
+
+#### Stage optional second split boundary (2026-09-07)
+
+`scale_split_second` defaults to zero (the existing two-rectangle stream).
+When nonzero, it requires `0 < scale_split < scale_split_second < 120` in
+the focused trace. Existing direct-color/uniform and incompatible-mode checks
+remain in force. The draw emits twelve vertices in one packet for three
+nonoverlapping rectangles covering the destination. Metadata now includes
+both boundaries and the quad count, logged after EFB/readout work.
+
+Test boundaries 90/91 (one thin interior rectangle at the latest failing row)
+and 40/80 (three broad rectangles), keeping packet length, count, uniform
+color, total coverage, state and completion fixed. Use the usual full EFB
+oracle and CPU-generated uniform fixture; stop each mode at the first error
+or twenty 100-frame cycles. This compares geometry without claiming a fix.
+
+PowerPC W=1 build, strict checkpatch (zero errors/warnings/checks), and
+`git diff --check` pass. Candidate SHA-256:
+
+```
+24010f69b52d2a243cca4013a2bdcb448d67751274f3d840cdc34bc756e50a8e  /media/anolis/dev/wii-gcn-linear-v12-build/drivers/video/fbdev/gcn-gx.ko
+```
+
+Use the existing uniform client at `10.3.10.59` with `scale_trace=1
+render_only=1 scale_efb_full=1 scale_cpu_source=1 scale_cpu_alt=1
+scale_cpu_rgba8=1 scale_cpu_uniform=1 scale_direct_color=1`, plus the two
+boundaries. Keep band height at default, single-quad/per-row-fence/clear-only
+off. No hardware results yet. Default production scaling is unchanged.

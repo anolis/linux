@@ -188,6 +188,10 @@ static bool gx_scale_clear_color;
 module_param_named(scale_clear_color, gx_scale_clear_color, bool, 0444);
 MODULE_PARM_DESC(scale_clear_color,
 		 "Produce the focused uniform final EFB with copy-clear only");
+static unsigned int gx_scale_split_second;
+module_param_named(scale_split_second, gx_scale_split_second, uint, 0444);
+MODULE_PARM_DESC(scale_split_second,
+		 "Optional second focused split row, above scale_split and below 120");
 static unsigned int gx_scale_split;
 module_param_named(scale_split, gx_scale_split, uint, 0444);
 MODULE_PARM_DESC(scale_split,
@@ -5281,6 +5285,13 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		goto out_unlock;
 	}
 
+	if (trace && gx_scale_split_second &&
+	    (!gx_scale_split || gx_scale_split_second <= gx_scale_split ||
+	     gx_scale_split_second >= dst_height)) {
+		ret = -EINVAL;
+		goto out_unlock;
+	}
+
 	if (trace && gx_scale_split &&
 	    (!gx_scale_direct_color || gx_scale_split >= dst_height ||
 	     gx_scale_band_height != 1 || gx_scale_single_quad ||
@@ -5557,12 +5568,17 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 				pr_info("gcn-gx: scale-row-fence seq=%u completed=%u commands=%08x\n",
 					trace_sequence, dst_height, final_command_hash);
 			} else if (gx_scale_split) {
+				u16 end = gx_scale_split_second ?: dst_height;
+
 				gx_wr8(0x80);
-				gx_wr16be(8);
+				gx_wr16be(gx_scale_split_second ? 12 : 8);
 				gx_emit_color_rect(0, 0, dst_width, gx_scale_split,
 						   r, g, b);
 				gx_emit_color_rect(0, gx_scale_split, dst_width,
-						   dst_height, r, g, b);
+						   end, r, g, b);
+				if (gx_scale_split_second)
+					gx_emit_color_rect(0, end, dst_width, dst_height,
+							   r, g, b);
 			} else if (gx_scale_single_quad) {
 				gx_draw_color_rect(0, 0, dst_width, dst_height, r, g, b);
 			} else {
@@ -5665,8 +5681,10 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 				}
 			}
 			if (gx_scale_split)
-				pr_info("gcn-gx: scale-split seq=%u row=%u quads=2\n",
-					trace_sequence, gx_scale_split);
+				pr_info("gcn-gx: scale-split seq=%u row=%u second=%u quads=%u\n",
+					trace_sequence, gx_scale_split,
+					gx_scale_split_second,
+					gx_scale_split_second ? 3 : 2);
 			if (gx_scale_direct_color && !gx_scale_row_fence &&
 			    !gx_scale_single_quad && !gx_scale_split)
 				pr_info("gcn-gx: scale-bands seq=%u height=%u quads=%u\n",
