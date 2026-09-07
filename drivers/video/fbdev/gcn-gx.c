@@ -4920,6 +4920,7 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	u32 crop_hash = 0;
 	u32 final_hash = 0;
 	u32 horizontal_hash = 0;
+	u32 shadow_hash = 0;
 	u32 source_hash = 0;
 	u32 trace_sequence = 0;
 	int ret;
@@ -5133,13 +5134,19 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		gx_wr8(0);
 
 	gx_set_copy_clear_rgb(0x00, 0x00, 0x00);
-	gx_copy_efb_to_rgb565_texture(system_memory ? crop : dst_addr,
-				      dst_width, dst_height, true);
+	if (trace) {
+		gx_copy_efb_to_rgb565_texture(dst_addr, dst_width, dst_height,
+					      false);
+		gx_copy_efb_to_rgb565_texture(crop, dst_width, dst_height, true);
+	} else {
+		gx_copy_efb_to_rgb565_texture(system_memory ? crop : dst_addr,
+					      dst_width, dst_height, true);
+	}
 	ret = gx_submit_cmds("render-blit-scaled");
 	if (ret)
 		goto out_unlock;
 
-	completed = gx_wait_for_pe_finishes(finish_count, trace ? 3 : 1);
+	completed = gx_wait_for_pe_finishes(finish_count, trace ? 4 : 1);
 	if (!completed) {
 		pr_warn_ratelimited("gcn-gx: scaled blit timed out waiting for final PE finish\n");
 		ret = -ETIMEDOUT;
@@ -5154,11 +5161,15 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		invalidate_dcache_range((unsigned long)dst_addr,
 					(unsigned long)dst_addr + dst_bytes);
 		if (trace) {
+			invalidate_dcache_range((unsigned long)crop,
+						(unsigned long)crop + dst_bytes);
 			final_hash = gx_hash_tiled_region(dst_addr, dst_width,
 							  dst_width, dst_height);
-			pr_info("gcn-gx: scale-trace seq=%u src=%08x crop=%08x horizontal=%08x final=%08x\n",
+			shadow_hash = gx_hash_tiled_region(crop, dst_width,
+							   dst_width, dst_height);
+			pr_info("gcn-gx: scale-trace seq=%u src=%08x crop=%08x horizontal=%08x final=%08x shadow=%08x\n",
 				trace_sequence, source_hash, crop_hash,
-				horizontal_hash, final_hash);
+				horizontal_hash, final_hash, shadow_hash);
 		}
 	}
 
