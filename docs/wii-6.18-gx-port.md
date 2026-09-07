@@ -14505,3 +14505,43 @@ with strict client `b4f4406c...`. Require two complete passes, including all 64
 RGBA8 alpha pixels, both invalid RGBA8 allocation cases, the 640-wide reduction,
 all full-screen system scales, exact MEM1 recovery, clean provider unload, and
 no kernel fault or timeout. Any moving one-pixel mismatch rejects the candidate.
+
+Hardware result for `1defee349`: accepted. Two uninterrupted invocations of the
+checksum-identical v11 strict client passed the complete render UAPI suite on
+boot ID `3081c7f2-15c8-4445-b177-b1f820125ed9`. The transcripts are
+byte-for-byte identical. In each run, all 64 RGBA8 source-alpha pixels matched;
+the 640-by-240 to 320-by-120 reduction matched all 38,400 pixels; both tiled
+and linear full-screen system scales matched all 307,200 pixels; and the
+XRGB8888 conversion matched all 307,200 pixels. Every retained allocator,
+mapping, context, syncobj, submit, fill, rectangle, overlap, arbitrary scale,
+colour/state/depth, indexed, fixed-draw, system-render, and lifecycle oracle
+also passed, ending with `PASS: GCN render UAPI`.
+
+Both cycles began with all 524,288 public MEM1 bytes free, recovered all MEM1
+capacity after system operations, unloaded the provider normally, and restored
+CPU scanout. The compact final audit verifies the boot image, provider, and
+client checksums and confirms that no module remained loaded. It contains no
+test-time PE/FIFO timeout, stalled submission, fallback, oops, panic, machine
+check, reboot, or kernel bug. Earlier `TEST FAILED` notices in that cumulative
+boot log belong to the three intentionally retained rejected-candidate runs
+documented above; both `1defee349` intervals end in `TEST PASSED`.
+
+```
+5472caa78633715ff169b35d6fee6f17afc95632b43fd30b25bb20fb80bc2b40  /media/anolis/dev/wii-gcn-rgba8-pixsync-cycle-1.txt
+5472caa78633715ff169b35d6fee6f17afc95632b43fd30b25bb20fb80bc2b40  /media/anolis/dev/wii-gcn-rgba8-pixsync-cycle-2.txt
+2aa7eb793440ef3762a603f491116bf2b6ad37234c9ce415ab52062add9a79ab  /media/anolis/dev/wii-gcn-rgba8-pixsync-final-audit.txt
+```
+
+This accepts both the explicit post-copy `GX_PixModeSync()` and the v11 native
+RGBA8 texture-source contract. The result also upgrades the synchronization
+from a timing workaround to the documented GX ordering mechanism and explains
+the moving one-pixel corruption exposed by the initial build.
+
+After acceptance, provider SHA-256 `a2e7df8e...` was installed at
+`/lib/modules/6.18.40-wii+/kernel/drivers/video/fbdev/gcn-gx.ko`; `depmod` and
+`sync` completed and the installed checksum was verified. The prior accepted
+v10 provider remains recoverable as
+`gcn-gx.ko.backup.17ef4c1c9a953222cffd1a04fa0295755ffbd2a73c1409734c34a8920aeca53f`
+with that exact checksum. The accepted v11 provider was left unloaded with CPU
+scanout active. Mesa may now add capability-gated native RGBA8 sampler
+resources and transfer tiling against this accepted kernel contract.
