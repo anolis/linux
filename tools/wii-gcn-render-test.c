@@ -4190,6 +4190,8 @@ int main(int argc, char **argv)
 	int other_fd;
 	int fd;
 
+	setvbuf(stdout, NULL, _IOLBF, 0);
+
 	if (hold)
 		return hold_mapping(node);
 

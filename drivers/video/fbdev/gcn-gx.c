@@ -182,6 +182,14 @@ static u64 gx_rgb888_flush_total_ns;
 static u64 gx_rgb888_flush_max_ns;
 static u32 gx_rgb888_timing_frames;
 
+#if IS_ENABLED(CONFIG_DRM_GCN_GX)
+static bool gx_scale_trace;
+static u32 gx_scale_trace_sequence;
+module_param_named(scale_trace, gx_scale_trace, bool, 0444);
+MODULE_PARM_DESC(scale_trace,
+		 "Hash each stage of the focused 640x240-to-320x120 tiled scale");
+#endif
+
 #define GX_XFB_SNAPSHOT_MAX	(640 * 480 * 2)
 static void *gx_xfb_snapshot;
 static struct dentry *gx_debugfs_dir;
@@ -761,6 +769,23 @@ static size_t gx_tiled_rgb565_index(u16 x, u16 y, u16 width)
 {
 	return ((size_t)(y >> 2) * (width >> 2) + (x >> 2)) * 16 +
 	       (y & 3) * 4 + (x & 3);
+}
+
+static u32 gx_hash_tiled_region(const u16 *pixels, u16 stride, u16 width,
+				u16 height)
+{
+	u32 hash = 2166136261U;
+	u16 x;
+	u16 y;
+
+	for (y = 0; y < height; y++) {
+		for (x = 0; x < width; x++) {
+			hash ^= pixels[gx_tiled_rgb565_index(x, y, stride)];
+			hash *= 16777619U;
+		}
+	}
+
+	return hash;
 }
 
 static size_t gx_rgb565_index(u16 x, u16 y, u16 width, u32 layout)
@@ -4891,6 +4916,12 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	size_t horizontal_bytes;
 	size_t src_bytes;
 	long completed;
+	bool trace;
+	u32 crop_hash = 0;
+	u32 final_hash = 0;
+	u32 horizontal_hash = 0;
+	u32 source_hash = 0;
+	u32 trace_sequence = 0;
 	int ret;
 	int i;
 
@@ -4946,12 +4977,22 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		return -E2BIG;
 
 	mutex_lock(&gx_submit_lock);
+	trace = READ_ONCE(gx_scale_trace) && !system_memory && !src_x && !src_y &&
+		!dst_x && !dst_y && src_width == 640 && src_height == 240 &&
+		dst_width == 320 && dst_height == 120 &&
+		src_rect_width == 640 && src_rect_height == 240 &&
+		dst_rect_width == 320 && dst_rect_height == 120;
+	if (trace)
+		trace_sequence = ++gx_scale_trace_sequence;
 	if (!system_memory) {
 		if (src_addr != dst_addr)
 			flush_dcache_range((unsigned long)src_addr,
 					   (unsigned long)src_addr + src_bytes);
 		flush_dcache_range((unsigned long)dst_addr,
 				   (unsigned long)dst_addr + dst_bytes);
+		if (trace)
+			source_hash = gx_hash_tiled_region(src_addr, src_width,
+							   src_width, src_height);
 	}
 	flush_dcache_range((unsigned long)crop,
 			   (unsigned long)crop + crop_bytes);
@@ -4978,6 +5019,8 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		flush_dcache_range((unsigned long)crop,
 				   (unsigned long)crop + crop_bytes);
 	} else {
+		if (trace)
+			finish_count = READ_ONCE(gx_pe_finish_count);
 		fifo_pos = 0;
 		gx_load_libogc_init_preamble();
 		gx_setup_display_copy_state();
@@ -4998,9 +5041,24 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		ret = gx_submit_cmds("render-blit-scaled-crop");
 		if (ret)
 			goto out_unlock;
+		if (trace) {
+			completed = gx_wait_for_pe_finishes(finish_count, 2);
+			if (!completed) {
+				pr_warn("gcn-gx: scale trace timed out after crop\n");
+				ret = -ETIMEDOUT;
+				goto out_unlock;
+			}
+			invalidate_dcache_range((unsigned long)crop,
+						(unsigned long)crop + crop_bytes);
+			crop_hash = gx_hash_tiled_region(crop, crop_width,
+							 crop_copy_width,
+							 src_rect_height);
+		}
 	}
 
 	/* Expand or reduce source columns exactly into a private intermediate. */
+	if (trace)
+		finish_count = READ_ONCE(gx_pe_finish_count);
 	fifo_pos = 0;
 	gx_load_libogc_init_preamble();
 	gx_setup_display_copy_state();
@@ -5024,6 +5082,20 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	ret = gx_submit_cmds("render-blit-scaled-horizontal");
 	if (ret)
 		goto out_unlock;
+	if (trace) {
+		completed = gx_wait_for_pe_finishes(finish_count, 2);
+		if (!completed) {
+			pr_warn("gcn-gx: scale trace timed out after horizontal stage\n");
+			ret = -ETIMEDOUT;
+			goto out_unlock;
+		}
+		invalidate_dcache_range((unsigned long)horizontal,
+					(unsigned long)horizontal + horizontal_bytes);
+		horizontal_hash = gx_hash_tiled_region(horizontal,
+						       horizontal_width,
+						       dst_rect_width,
+						       src_rect_height);
+	}
 
 	/* The crop workspace is free once the horizontal snapshot is complete. */
 	if (system_memory) {
@@ -5067,7 +5139,7 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	if (ret)
 		goto out_unlock;
 
-	completed = gx_wait_for_pe_finishes(finish_count, 1);
+	completed = gx_wait_for_pe_finishes(finish_count, trace ? 3 : 1);
 	if (!completed) {
 		pr_warn_ratelimited("gcn-gx: scaled blit timed out waiting for final PE finish\n");
 		ret = -ETIMEDOUT;
@@ -5081,6 +5153,13 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	} else {
 		invalidate_dcache_range((unsigned long)dst_addr,
 					(unsigned long)dst_addr + dst_bytes);
+		if (trace) {
+			final_hash = gx_hash_tiled_region(dst_addr, dst_width,
+							  dst_width, dst_height);
+			pr_info("gcn-gx: scale-trace seq=%u src=%08x crop=%08x horizontal=%08x final=%08x\n",
+				trace_sequence, source_hash, crop_hash,
+				horizontal_hash, final_hash);
+		}
 	}
 
 out_unlock:
