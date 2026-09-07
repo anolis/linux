@@ -366,13 +366,15 @@ gcn_drm_fixed_args(const struct drm_gcn_draw_indexed_fixed *args)
 	    args->state.cull_mode > DRM_GCN_CULL_ALL ||
 	    args->depth.pad || args->pad ||
 	    args->tev_mode > DRM_GCN_TEV_MODULATE ||
+	    args->texture_filter > DRM_GCN_TEXTURE_FILTER_LINEAR ||
 	    args->state.blend_mode > DRM_GCN_BLEND_SRC_ALPHA ||
 	    args->depth.test_enable > 1 || args->depth.write_enable > 1 ||
 	    args->depth.compare > DRM_GCN_DEPTH_ALWAYS)
 		return -EINVAL;
 
 	if (args->tev_mode == DRM_GCN_TEV_PASS_COLOR) {
-		if (args->src_handle)
+		if (args->src_handle ||
+		    args->texture_filter != DRM_GCN_TEXTURE_FILTER_NEAREST)
 			return -EINVAL;
 	} else if (!args->src_handle || args->src_handle == args->dst_handle) {
 		return -EINVAL;

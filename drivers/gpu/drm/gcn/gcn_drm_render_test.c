@@ -76,6 +76,7 @@ static void gcn_drm_render_uapi_layout(struct kunit *test)
 	KUNIT_EXPECT_EQ(test, DRM_GCN_FEATURE_RASTER_CULL, 1ULL << 24);
 	KUNIT_EXPECT_EQ(test, DRM_GCN_FEATURE_SYSTEM_RENDER_RGB565, 1ULL << 25);
 	KUNIT_EXPECT_EQ(test, DRM_GCN_FEATURE_TEXTURE_RGBA8, 1ULL << 26);
+	KUNIT_EXPECT_EQ(test, DRM_GCN_FEATURE_TEXTURE_LINEAR, 1ULL << 27);
 }
 
 static void gcn_drm_render_validates_color_triangle(struct kunit *test)
@@ -640,6 +641,13 @@ static void gcn_drm_render_validates_fixed_draw(struct kunit *test)
 
 	ret = gcn_drm_fixed_args(&args);
 	KUNIT_EXPECT_EQ(test, ret, 0);
+	args.texture_filter = DRM_GCN_TEXTURE_FILTER_LINEAR;
+	ret = gcn_drm_fixed_args(&args);
+	KUNIT_EXPECT_EQ(test, ret, 0);
+	args.texture_filter = DRM_GCN_TEXTURE_FILTER_LINEAR + 1;
+	ret = gcn_drm_fixed_args(&args);
+	KUNIT_EXPECT_EQ(test, ret, -EINVAL);
+	args.texture_filter = DRM_GCN_TEXTURE_FILTER_NEAREST;
 	ret = gcn_drm_fixed_vertices(vertices, 5, indices, 2,
 				     DRM_GCN_TEV_MODULATE,
 				     320, 192, 640, 480, true);
@@ -657,6 +665,10 @@ static void gcn_drm_render_validates_fixed_draw(struct kunit *test)
 
 	args.tev_mode = DRM_GCN_TEV_PASS_COLOR;
 	args.src_handle = 0;
+	args.texture_filter = DRM_GCN_TEXTURE_FILTER_LINEAR;
+	ret = gcn_drm_fixed_args(&args);
+	KUNIT_EXPECT_EQ(test, ret, -EINVAL);
+	args.texture_filter = DRM_GCN_TEXTURE_FILTER_NEAREST;
 	vertices[0].s = 0;
 	vertices[0].t = 0;
 	vertices[2].s = 0;

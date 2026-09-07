@@ -1950,6 +1950,15 @@ static int gcn_drm_ioctl_draw_fixed(struct drm_device *drm, void *data,
 	ret = gcn_drm_fixed_args(args);
 	if (ret)
 		return ret;
+	if (args->texture_filter == DRM_GCN_TEXTURE_FILTER_LINEAR) {
+		struct gcn_drm_mem1_info info;
+
+		ret = gcn_drm_provider_info(&info);
+		if (ret)
+			return ret;
+		if (!(info.features & DRM_GCN_FEATURE_TEXTURE_LINEAR))
+			return -EOPNOTSUPP;
+	}
 	if (!xa_load(&render->contexts, args->ctx_id))
 		return -ENOENT;
 
@@ -2111,7 +2120,8 @@ static int gcn_drm_ioctl_draw_fixed(struct drm_device *drm, void *data,
 								 system_dst->layout, vertices,
 								 args->vertex_count, indices,
 								 args->triangle_count,
-								 args->tev_mode, &state,
+								 args->tev_mode,
+								 args->texture_filter, &state,
 								 &depth);
 		}
 		drm_gem_shmem_vunmap_locked(&system_dst->shmem, &map);
@@ -2125,7 +2135,9 @@ static int gcn_drm_ioctl_draw_fixed(struct drm_device *drm, void *data,
 						  dst_width, dst_height, vertices,
 						  args->vertex_count, indices,
 						  args->triangle_count,
-						  args->tev_mode, &state, &depth);
+						  args->tev_mode,
+						  args->texture_filter, &state,
+						  &depth);
 	}
 	if (ret)
 		goto out_exec;

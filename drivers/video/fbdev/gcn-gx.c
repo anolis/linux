@@ -1552,16 +1552,19 @@ static void gx_setup_rgb565_texture_state(u16 width, u16 height)
 #define GX_TF_RGBA8	6U
 
 /* Bind a tiled RGB565 or RGBA8 buffer to texmap 0. */
-static void gx_setup_texture(void *tile_buf, u16 width, u16 height, u32 format)
+static void gx_setup_texture(void *tile_buf, u16 width, u16 height, u32 format,
+			     u32 filter)
 {
 	u32 phys = virt_to_phys(tile_buf);
 	u32 img0;
 
 	/*
-	 * BP 0x80 texMode0: match explicit libogc nearest/nearest sampling
-	 * with CLAMP wrapping, no mipmaps, and edge LOD disabled.
+	 * BP 0x80 texMode0: CLAMP wrapping, no mipmaps, edge LOD disabled.
+	 * Linear sets libogc's mag-filter bit 4 and non-mipmapped min-filter
+	 * value 4 in bits 5..7.
 	 */
-	gx_load_bp_reg(0x80000100);
+	gx_load_bp_reg(0x80000100 |
+		       (filter == DRM_GCN_TEXTURE_FILTER_LINEAR ? 0x90 : 0));
 
 	/* BP 0x84 texMode1: LOD disabled */
 	gx_load_bp_reg(0x84000000);
@@ -1604,12 +1607,8 @@ static void gx_setup_texture(void *tile_buf, u16 width, u16 height, u32 format)
 
 static void gx_setup_texture_rgb565(void *tile_buf, u16 width, u16 height)
 {
-	gx_setup_texture(tile_buf, width, height, GX_TF_RGB565);
-}
-
-static void gx_setup_texture_rgba8(void *tile_buf, u16 width, u16 height)
-{
-	gx_setup_texture(tile_buf, width, height, GX_TF_RGBA8);
+	gx_setup_texture(tile_buf, width, height, GX_TF_RGB565,
+			 DRM_GCN_TEXTURE_FILTER_NEAREST);
 }
 
 static void gx_setup_texture_coordinate_scale(u16 width, u16 height,
@@ -3379,7 +3378,8 @@ static int gcn_gx_drm_mem1_info(struct gcn_drm_mem1_info *info)
 			 DRM_GCN_FEATURE_DRAW_INDEXED_FIXED_RGB565 |
 			 DRM_GCN_FEATURE_RASTER_CULL |
 			 DRM_GCN_FEATURE_SYSTEM_RENDER_RGB565 |
-			 DRM_GCN_FEATURE_TEXTURE_RGBA8;
+			 DRM_GCN_FEATURE_TEXTURE_RGBA8 |
+			 DRM_GCN_FEATURE_TEXTURE_LINEAR;
 	mutex_unlock(&gx_mem1_lock);
 	return 0;
 }
@@ -4479,6 +4479,7 @@ gcn_gx_drm_draw_fixed_core(const void *src_addr, size_t src_size,
 			   const struct gcn_drm_fixed_vertex *vertices,
 			   u32 vertex_count, const u8 *indices,
 			   u32 triangle_count, u32 tev_mode,
+			   u32 texture_filter,
 			   const struct gcn_drm_draw_state *state,
 			   const struct gcn_drm_depth_state *depth)
 {
@@ -4497,6 +4498,7 @@ gcn_gx_drm_draw_fixed_core(const void *src_addr, size_t src_size,
 	    !triangle_count || triangle_count > DRM_GCN_MAX_TRIANGLES ||
 	    !dst_width || !dst_height || (dst_width & 3) || (dst_height & 3) ||
 	    tev_mode > DRM_GCN_TEV_MODULATE ||
+	    texture_filter > DRM_GCN_TEXTURE_FILTER_LINEAR ||
 	    !state->viewport_width || !state->viewport_height ||
 	    state->viewport_x >= dst_width || state->viewport_y >= dst_height ||
 	    state->viewport_width > dst_width - state->viewport_x ||
@@ -4515,7 +4517,8 @@ gcn_gx_drm_draw_fixed_core(const void *src_addr, size_t src_size,
 		    (src_format != DRM_GCN_GEM_FORMAT_RGB565 &&
 		     src_format != DRM_GCN_GEM_FORMAT_RGBA8))
 			return -EINVAL;
-	} else if (src_addr || src_format || src_width || src_height) {
+	} else if (src_addr || src_format || src_width || src_height ||
+		   texture_filter != DRM_GCN_TEXTURE_FILTER_NEAREST) {
 		return -EINVAL;
 	}
 	if (system_dst && dst_layout != DRM_GCN_GEM_LAYOUT_LINEAR)
@@ -4616,10 +4619,9 @@ gcn_gx_drm_draw_fixed_core(const void *src_addr, size_t src_size,
 
 	gx_setup_fixed_state(dst_width, dst_height, tev_mode, state, depth);
 	if (textured) {
-		if (src_format == DRM_GCN_GEM_FORMAT_RGBA8)
-			gx_setup_texture_rgba8((void *)src_addr, src_width, src_height);
-		else
-			gx_setup_texture_rgb565((void *)src_addr, src_width, src_height);
+		gx_setup_texture((void *)src_addr, src_width, src_height,
+				 src_format == DRM_GCN_GEM_FORMAT_RGBA8 ?
+				 GX_TF_RGBA8 : GX_TF_RGB565, texture_filter);
 		gx_setup_texture_coordinate_scale(src_width, src_height,
 						  false, false);
 	}
@@ -4662,6 +4664,7 @@ gcn_gx_drm_draw_fixed(void *src_allocation, void *dst_allocation,
 		      const struct gcn_drm_fixed_vertex *vertices,
 		      u32 vertex_count, const u8 *indices,
 		      u32 triangle_count, u32 tev_mode,
+		      u32 texture_filter,
 		      const struct gcn_drm_draw_state *state,
 		      const struct gcn_drm_depth_state *depth)
 {
@@ -4674,7 +4677,7 @@ gcn_gx_drm_draw_fixed(void *src_allocation, void *dst_allocation,
 			src_format, DRM_GCN_GEM_LAYOUT_TILED_4X4,
 			src_width, src_height,
 			dst_width, dst_height, vertices, vertex_count, indices,
-			triangle_count, tev_mode, state, depth);
+			triangle_count, tev_mode, texture_filter, state, depth);
 }
 
 static int
@@ -4685,6 +4688,7 @@ gcn_gx_drm_draw_fixed_system(void *src_allocation, void *dst,
 			     const struct gcn_drm_fixed_vertex *vertices,
 			     u32 vertex_count, const u8 *indices,
 			     u32 triangle_count, u32 tev_mode,
+			     u32 texture_filter,
 			     const struct gcn_drm_draw_state *state,
 			     const struct gcn_drm_depth_state *depth)
 {
@@ -4695,7 +4699,7 @@ gcn_gx_drm_draw_fixed_system(void *src_allocation, void *dst,
 			src ? src->size : 0, dst, dst_size, true, src_format,
 			dst_layout, src_width, src_height, dst_width, dst_height,
 			vertices, vertex_count, indices, triangle_count, tev_mode,
-			state, depth);
+			texture_filter, state, depth);
 }
 
 static int
@@ -5685,7 +5689,7 @@ static int gcn_gx_probe(struct platform_device *pdev)
 		return ret;
 
 #if IS_ENABLED(CONFIG_DRM_GCN_GX)
-	ret = gcn_drm_register_accel_v11(&gcn_gx_drm_accel_ops);
+	ret = gcn_drm_register_accel_v12(&gcn_gx_drm_accel_ops);
 #else
 	ret = gcnfb_register_accel(&gcn_gx_accel_ops);
 #endif
@@ -5711,7 +5715,7 @@ static void gcn_gx_remove(struct platform_device *pdev)
 	cancel_work_sync(&gx_frame_work.work);
 	gcnfb_unregister_accel(&gcn_gx_accel_ops);
 #else
-	gcn_drm_unregister_accel_v11(&gcn_gx_drm_accel_ops);
+	gcn_drm_unregister_accel_v12(&gcn_gx_drm_accel_ops);
 #endif
 	gcn_gx_exit();
 }

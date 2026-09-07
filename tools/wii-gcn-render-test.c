@@ -3267,6 +3267,143 @@ out:
 		fail_value("RGBA8 texture MEM1 recovery", free_after, free_before);
 }
 
+static void test_linear_texture_filter(int fd)
+{
+	const unsigned int src_width = 4;
+	const unsigned int src_height = 4;
+	const unsigned int dst_width = 8;
+	const unsigned int dst_height = 8;
+	const uint16_t expected_row[8] = {
+		0x0000, 0x0000, 0x7bef, 0xffff,
+		0x7bef, 0x0000, 0x7bef, 0xffff,
+	};
+	struct drm_syncobj_create sync = {};
+	struct drm_syncobj_destroy destroy = {};
+	struct drm_gcn_ctx_create ctx = {};
+	struct drm_gcn_ctx_free free_ctx = {};
+	struct drm_gcn_gem_create src = {};
+	struct drm_gcn_gem_create dst = {};
+	struct drm_gcn_fixed_vertex vertices[4] = {
+		{ 0, 0, DRM_GCN_DEPTH_MAX,
+		  DRM_GCN_RGBA8(0xff, 0xff, 0xff, 0xff), 0, 0 },
+		{ dst_width, 0, DRM_GCN_DEPTH_MAX,
+		  DRM_GCN_RGBA8(0xff, 0xff, 0xff, 0xff), src_width, 0 },
+		{ dst_width, dst_height, DRM_GCN_DEPTH_MAX,
+		  DRM_GCN_RGBA8(0xff, 0xff, 0xff, 0xff), src_width, src_height },
+		{ 0, dst_height, DRM_GCN_DEPTH_MAX,
+		  DRM_GCN_RGBA8(0xff, 0xff, 0xff, 0xff), 0, src_height },
+	};
+	uint16_t indices[6] = { 0, 1, 2, 0, 2, 3 };
+	struct drm_gcn_draw_indexed_fixed draw = {
+		.vertex_count = ARRAY_SIZE(vertices),
+		.triangle_count = 2,
+		.tev_mode = DRM_GCN_TEV_REPLACE_TEXTURE,
+		.vertices_ptr = (uintptr_t)vertices,
+		.indices_ptr = (uintptr_t)indices,
+		.state = {
+			.viewport_width = dst_width,
+			.viewport_height = dst_height,
+			.scissor_width = dst_width,
+			.scissor_height = dst_height,
+			.blend_mode = DRM_GCN_BLEND_NONE,
+		},
+		.depth = {
+			.compare = DRM_GCN_DEPTH_ALWAYS,
+		},
+		.texture_filter = DRM_GCN_TEXTURE_FILTER_LINEAR,
+	};
+	uint8_t *src_map = MAP_FAILED;
+	uint16_t *dst_map = MAP_FAILED;
+	uint64_t free_before = 0;
+	uint64_t free_after = 0;
+	unsigned int checked = 0;
+
+	if (get_param(fd, DRM_GCN_PARAM_MEM1_FREE_BYTES, &free_before)) {
+		fail("query MEM1 before linear-filter test");
+		return;
+	}
+	if (create_bo_size_format_layout_flags(fd, &src, src_width, src_height,
+					       DRM_GCN_GEM_FORMAT_RGBA8,
+					       DRM_GCN_GEM_LAYOUT_TILED_4X4, 0) ||
+	    create_bo_size(fd, &dst, dst_width, dst_height)) {
+		fail("create linear-filter objects");
+		goto out;
+	}
+	src_map = map_bo(fd, &src);
+	dst_map = map_bo(fd, &dst);
+	if (src_map == MAP_FAILED || dst_map == MAP_FAILED) {
+		fail("map linear-filter objects");
+		goto out;
+	}
+	if (ioctl(fd, DRM_IOCTL_GCN_CTX_CREATE, &ctx)) {
+		fail("create linear-filter context");
+		goto out;
+	}
+	if (ioctl(fd, DRM_IOCTL_SYNCOBJ_CREATE, &sync)) {
+		fail("create linear-filter syncobj");
+		goto out_ctx;
+	}
+
+	for (unsigned int y = 0; y < src_height; y++) {
+		for (unsigned int x = 0; x < src_width; x++) {
+			uint32_t rgba = (x & 1) ?
+				DRM_GCN_RGBA8(0xff, 0xff, 0xff, 0xff) :
+				DRM_GCN_RGBA8(0, 0, 0, 0xff);
+
+			tiled_rgba8_store(src_map, x, y, src_width, rgba);
+		}
+	}
+	for (unsigned int y = 0; y < dst_height; y++)
+		for (unsigned int x = 0; x < dst_width; x++)
+			dst_map[tiled_rgb565_index(x, y, dst_width)] = 0xf81f;
+
+	draw.ctx_id = ctx.id;
+	draw.src_handle = src.handle;
+	draw.dst_handle = dst.handle;
+	draw.out_syncobj = sync.handle;
+	if (submit_fixed(fd, &draw, sync.handle)) {
+		fail("draw linear-filter quad");
+		goto out_sync;
+	}
+	for (unsigned int y = 0; y < dst_height; y++) {
+		for (unsigned int x = 0; x < dst_width; x++) {
+			size_t pixel = tiled_rgb565_index(x, y, dst_width);
+
+			checked++;
+			if (dst_map[pixel] != expected_row[x]) {
+				fprintf(stderr,
+					"FAIL: linear-filter mismatch at (%u,%u): got=0x%04x expected=0x%04x\\n",
+					x, y, dst_map[pixel], expected_row[x]);
+				failures++;
+				goto out_sync;
+			}
+		}
+	}
+	printf("LINEAR FILTER: %u bilinear pixels matched\\n", checked);
+
+out_sync:
+	destroy.handle = sync.handle;
+	if (ioctl(fd, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy))
+		fail("destroy linear-filter syncobj");
+out_ctx:
+	free_ctx.id = ctx.id;
+	if (ioctl(fd, DRM_IOCTL_GCN_CTX_FREE, &free_ctx))
+		fail("free linear-filter context");
+out:
+	if (dst_map != MAP_FAILED && munmap(dst_map, dst.size))
+		fail("unmap linear-filter destination");
+	if (src_map != MAP_FAILED && munmap(src_map, src.size))
+		fail("unmap linear-filter source");
+	if (dst.handle && close_bo(fd, dst.handle))
+		fail("close linear-filter destination");
+	if (src.handle && close_bo(fd, src.handle))
+		fail("close linear-filter source");
+	if (get_param(fd, DRM_GCN_PARAM_MEM1_FREE_BYTES, &free_after))
+		fail("query MEM1 after linear-filter test");
+	else if (free_after != free_before)
+		fail_value("linear-filter MEM1 recovery", free_after, free_before);
+}
+
 static void test_full_system_render(int fd)
 {
 	const uint16_t blue = 0x001f;
@@ -4183,6 +4320,13 @@ int main(int argc, char **argv)
 		else
 			fail_value("RGBA8 texture capability", features,
 				   DRM_GCN_FEATURE_TEXTURE_RGBA8);
+		if ((features & DRM_GCN_FEATURE_TEXTURE_LINEAR) &&
+		    (features & DRM_GCN_FEATURE_TEXTURE_RGBA8) &&
+		    (formats & DRM_GCN_FORMAT_RGBA8))
+			test_linear_texture_filter(fd);
+		else
+			fail_value("linear texture capability", features,
+				   DRM_GCN_FEATURE_TEXTURE_LINEAR);
 		if (features & DRM_GCN_FEATURE_SYSTEM_RENDER_RGB565)
 			test_full_system_render(fd);
 		else

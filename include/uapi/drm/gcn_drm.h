@@ -56,6 +56,7 @@ enum drm_gcn_param {
 #define DRM_GCN_FEATURE_RASTER_CULL		(1ULL << 24)
 #define DRM_GCN_FEATURE_SYSTEM_RENDER_RGB565	(1ULL << 25)
 #define DRM_GCN_FEATURE_TEXTURE_RGBA8		(1ULL << 26)
+#define DRM_GCN_FEATURE_TEXTURE_LINEAR		(1ULL << 27)
 
 struct drm_gcn_get_param {
 	__u32 param;
@@ -528,6 +529,11 @@ enum drm_gcn_tev_mode {
 	DRM_GCN_TEV_MODULATE = 2,
 };
 
+enum drm_gcn_texture_filter {
+	DRM_GCN_TEXTURE_FILTER_NEAREST = 0,
+	DRM_GCN_TEXTURE_FILTER_LINEAR = 1,
+};
+
 struct drm_gcn_fixed_vertex {
 	__u16 x;
 	__u16 y;
@@ -541,7 +547,7 @@ struct drm_gcn_fixed_vertex {
 /*
  * Submit one bounded indexed fixed-function draw. PASS_COLOR requires a zero
  * source handle and zero ST coordinates. Texture modes require a distinct
- * tiled RGB565 source. No raw GX state or addresses are accepted.
+ * supported tiled source. No raw GX state or addresses are accepted.
  */
 struct drm_gcn_draw_indexed_fixed {
 	__u32 ctx_id;
@@ -563,8 +569,10 @@ struct drm_gcn_draw_indexed_fixed {
 	__u64 indices_ptr;
 	struct drm_gcn_draw_state state;
 	struct drm_gcn_depth_state depth;
+	/* One of drm_gcn_texture_filter. Must be NEAREST for PASS_COLOR. */
+	__u32 texture_filter;
 	/* Must be zero. */
-	__u64 pad;
+	__u32 pad;
 };
 
 #define DRM_GCN_GET_PARAM	0x00

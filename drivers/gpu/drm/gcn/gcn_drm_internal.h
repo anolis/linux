@@ -92,6 +92,7 @@ int gcn_drm_provider_draw_fixed(const struct gcn_drm_accel_ops *provider,
 				const struct gcn_drm_fixed_vertex *vertices,
 				u32 vertex_count, const u8 *indices,
 				u32 triangle_count, u32 tev_mode,
+				u32 texture_filter,
 				const struct gcn_drm_draw_state *state,
 				const struct gcn_drm_depth_state *depth);
 int
@@ -104,6 +105,7 @@ gcn_drm_provider_draw_fixed_system(const struct gcn_drm_accel_ops *provider,
 				   const struct gcn_drm_fixed_vertex *vertices,
 				   u32 vertex_count, const u8 *indices,
 				   u32 triangle_count, u32 tev_mode,
+				   u32 texture_filter,
 				   const struct gcn_drm_draw_state *state,
 				   const struct gcn_drm_depth_state *depth);
 int gcn_drm_provider_blit_rect(const struct gcn_drm_accel_ops *provider,
