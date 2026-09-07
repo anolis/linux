@@ -3212,15 +3212,6 @@ static int gx_submit_and_wait_finish(const char *phase)
 	return 0;
 }
 
-static int gx_invalidate_texture_cache_and_wait(const char *phase)
-{
-	fifo_pos = 0;
-	gx_invalidate_texture_cache();
-	gx_load_bp_reg(0x45000002);
-
-	return gx_submit_and_wait_finish(phase);
-}
-
 static int gx_drm_offscreen_capture(u16 width, u16 height)
 {
 	const u32 sentinel = 0xa55aa55a;
@@ -5093,10 +5084,6 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 							 src_rect_height);
 		}
 	}
-	ret = gx_invalidate_texture_cache_and_wait("render-blit-scaled-crop-ready");
-	if (ret)
-		goto out_unlock;
-
 	/* Expand or reduce source columns exactly into a private intermediate. */
 	fifo_pos = 0;
 	gx_load_libogc_init_preamble();
@@ -5142,10 +5129,6 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		flush_dcache_range((unsigned long)crop,
 				   (unsigned long)crop + dst_bytes);
 	}
-	ret = gx_invalidate_texture_cache_and_wait("render-blit-scaled-horizontal-ready");
-	if (ret)
-		goto out_unlock;
-
 	fifo_pos = 0;
 	gx_load_libogc_init_preamble();
 	gx_setup_display_copy_state();
@@ -5214,20 +5197,20 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 			if (ret)
 				goto out_unlock;
 
-			flush_dcache_range((unsigned long)crop,
-					   (unsigned long)crop + dst_bytes);
+			flush_dcache_range((unsigned long)dst_addr,
+					   (unsigned long)dst_addr + dst_bytes);
 			fifo_pos = 0;
 			gx_load_libogc_init_preamble();
 			gx_setup_display_copy_state();
 			gx_set_copy_clear_rgb(0x00, 0x00, 0x00);
-			gx_copy_efb_to_rgb565_texture(crop, dst_width, dst_height,
+			gx_copy_efb_to_rgb565_texture(dst_addr, dst_width, dst_height,
 						      true);
 			ret = gx_submit_and_wait_finish("render-blit-scaled-final-replay-copy");
 			if (ret)
 				goto out_unlock;
-			invalidate_dcache_range((unsigned long)crop,
-						(unsigned long)crop + dst_bytes);
-			replay_hash = gx_hash_tiled_region(crop, dst_width,
+			invalidate_dcache_range((unsigned long)dst_addr,
+						(unsigned long)dst_addr + dst_bytes);
+			replay_hash = gx_hash_tiled_region(dst_addr, dst_width,
 							   dst_width, dst_height);
 			pr_info("gcn-gx: scale-trace seq=%u src=%08x crop=%08x horizontal=%08x final=%08x replay=%08x\n",
 				trace_sequence, source_hash, crop_hash,
