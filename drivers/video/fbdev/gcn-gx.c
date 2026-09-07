@@ -5098,12 +5098,15 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	fifo_pos = 0;
 	gx_load_libogc_init_preamble();
 	gx_setup_display_copy_state();
-	gx_setup_rgb565_texture_state(dst_width, dst_height);
-	gx_setup_texture_rgb565(system_memory ? crop : dst_addr,
-				dst_width, dst_height);
-	gx_draw_color_quad(dst_width, dst_height, 0xff, 0xff, 0xff);
-	for (i = 0; i < 32; i++)
-		gx_wr8(0);
+	if (dst_x || dst_y || dst_rect_width != dst_width ||
+	    dst_rect_height != dst_height) {
+		gx_setup_rgb565_texture_state(dst_width, dst_height);
+		gx_setup_texture_rgb565(system_memory ? crop : dst_addr,
+					dst_width, dst_height);
+		gx_draw_color_quad(dst_width, dst_height, 0xff, 0xff, 0xff);
+		for (i = 0; i < 32; i++)
+			gx_wr8(0);
+	}
 
 	gx_setup_rgb565_texture_state_mode(dst_width, dst_height, true);
 	gx_setup_texture_rgb565(horizontal, horizontal_width, crop_height);
