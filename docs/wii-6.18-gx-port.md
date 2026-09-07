@@ -16480,3 +16480,55 @@ render_only=1 scale_efb_full=1 scale_cpu_source=1 scale_cpu_alt=1
 scale_cpu_rgba8=1 scale_cpu_uniform=1 scale_direct_color=1 scale_split=1`.
 Require row=1/count=2 metadata and the full EFB oracle. Stop on the first
 error or after twenty 100-frame cycles. No hardware result yet.
+
+#### Split at row 1 passes; same-module row stream fails (2026-09-07)
+
+Hardware result for `d008a5080`: split=1 completed twenty 100-frame cycles,
+all 2,000 frames exact (76,800,000 pixels). Every frame logged row=1/count=2,
+zero EFB source/copy mismatches, authored hashes
+`horizontal=03506e62 final=1e159220`, source/crop `ad05e5c5`, and
+final/delayed `e5c8efc5`. The entire padded fixture remained exact at
+`c4c69dc5`, base `013c0000`, format 6, 524288 bytes. Twenty-one frames had
+an earlier horizontal hash differing from `d33901c5`, while the synthetic
+fixture and final direct-color output remained exact.
+
+A same-module follow-up disabled only the split option (`scale_split=0`),
+restoring the default 120 one-row rectangles. It failed on iteration 8 at
+`(270,90)`: raw EFB `009ce36f`, quantized/copied `9f0d`, expected `9f1d`.
+The blue channel lost bit 7 before copying. There was one source mismatch
+and zero copy mismatches, with final/delayed `aeeec4b5`. All eight frames
+logged height=1/count=120 and the original authored hashes
+`horizontal=03506e62 final=b5e83197`; padded fixture publication was exact.
+
+A thin rectangle at y=0 therefore passed this bounded two-primitive control,
+while many thin rectangles still failed on the same candidate. This does not
+prove primitive count is causal: coverage by thin primitives, boundary
+positions and command length also differ. It does not exclude corruption of
+a thin rectangle elsewhere in the image or constitute a scaler repair.
+
+All twenty-one cycles verified candidate `87674cc6...`, client `8a5c7030...`,
+installed accepted provider `a2e7df8e...`, and boot
+`444193a6-aee4-4ae3-a619-4f6dd90fccf1` at `10.3.10.59`. Every cycle
+unloaded the candidate and restored CPU scanout. No timeout, stall or kernel
+fault appeared. The candidate was not permanently installed.
+
+The sixty split-control artifacts have stems
+`/media/anolis/dev/wii-gcn-wide-reduce-split1-2000-1` through `-20`.
+Manifest and the three same-module row-recheck artifacts:
+
+```
+d1f063043d30a19bc3becfd3050255af187df745f8eb407489d5f04e1e77334b  /media/anolis/dev/wii-gcn-wide-reduce-split1-2000.sha256
+0b7c83842e7740ecc44233db98761c941020a327c8edcd829ece804b578eb0c1  /media/anolis/dev/wii-gcn-wide-reduce-split-row-recheck-1-audit.txt
+2295aed423d18ae8369e2ce289b2846b6bd26ecca212bb753f8238833fed1743  /media/anolis/dev/wii-gcn-wide-reduce-split-row-recheck-1-client.txt
+0496dea1b6b9845c461caa1de7ddbded4d5dd96c6ca9120a38c9ccdf2efad8e9  /media/anolis/dev/wii-gcn-wide-reduce-split-row-recheck-1-kernel.txt
+```
+
+Next bounded geometry experiment: extend the focused split control to permit
+a second boundary, giving three rectangles with twelve vertices in one packet.
+Place a single thin interior rectangle at y=90 using boundaries 90 and 91;
+compare with a three-broad-rectangle control using boundaries 40 and 80.
+Keep count, packet length, state, color and total coverage fixed between these
+two controls. This targets a just-observed failing row without requiring 120
+primitives. Validate ordered interior boundaries, log both after readout, and
+retain the same full EFB oracle and stop-on-failure run bound. This extension
+has not been implemented or run. Default production scaling remains unchanged.
