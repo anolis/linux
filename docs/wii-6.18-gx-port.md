@@ -14598,3 +14598,30 @@ suite twice across clean provider load/unload cycles. Reject any nearest-like
 row, pixel mismatch, wrong negative errno, PE/FIFO timeout, stalled
 submission, fallback, provider loss, allocation leak, oops, panic, machine
 check, or failure to restore CPU scanout.
+
+Initial hardware result for `fa1ace2b1`: the filter programming is active,
+but the guessed exact oracle is rejected pending measurement of GX
+quantization. Image `033f2d54...` booted as `6.18.40-wii+` with boot ID
+`444193a6-aee4-4ae3-a619-4f6dd90fccf1` and exposed the expected v12
+registration symbols. Provider `68d6f8c3...` and strict client
+`70926d61...` were checksum-verified before execution. All preceding
+allocator, nearest-copy, raster, depth, fixed-draw, and RGBA8-alpha controls
+passed. The first linear mismatch was `0xffdf` instead of white
+`0xffff` at `(3,0)`: one green-channel step, and importantly not a
+nearest-like result. The same long run also found one moving green/blue-bit
+error in the full-screen system scale at `(62,332)`. The provider unloaded
+normally, restored CPU scanout, recovered all public MEM1, and logged no
+timeout, stall, fallback, oops, panic, machine check, or kernel bug.
+
+```
+c44647b596ed0501667d75ec1b5b3ac779d8f8e122c1931343deb7f97494019b  /media/anolis/dev/wii-gcn-linear-v12-cycle-1.txt
+```
+
+Commit `fd1f46f5b` adds a focused `--linear-filter-only` client mode and
+prints the complete first readback row before comparison. Its static client
+SHA-256 is
+`b339e644116cb0bbcc4fb2a9b8004fa9654263ebacabadf9a05d1f7fdc4c07d5`.
+Run this diagnostic repeatedly against the unchanged committed provider to
+establish deterministic hardware values for all eight columns without
+exercising unrelated scaled-copy paths. Do not alter the expected row until
+the observed row repeats exactly.
