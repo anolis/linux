@@ -17,6 +17,7 @@ Environment overrides:
   WII_ROOT_MOUNT       root mountpoint (default: /media/$USER/WII-LINUX-NGX)
   WII_KERNEL_DEST      deployed image path (default: $mount/gumboot/zImage.ngx)
   WII_DEPLOY_ARCHIVE   host backup directory (default: /tmp/wii-kernel-deploy-backups)
+  WII_KERNEL_IMAGE     built image to deploy (default: repo arch/powerpc/boot/zImage)
   WII_DEPLOY_BACKUP_MODE
                        backup mode: remote, host, or none (default: remote)
   WII_DEPLOY_CHUNK_BYTES
@@ -98,7 +99,7 @@ boot_mount=${WII_BOOT_MOUNT:-/media/$USER/BOOTWII}
 root_mount=${WII_ROOT_MOUNT:-/media/$USER/WII-LINUX-NGX}
 destination=${WII_KERNEL_DEST:-$boot_mount/gumboot/zImage.ngx}
 archive=${WII_DEPLOY_ARCHIVE:-/tmp/wii-kernel-deploy-backups}
-image=$repo/arch/powerpc/boot/zImage
+image=${WII_KERNEL_IMAGE:-$repo/arch/powerpc/boot/zImage}
 
 if (( build )); then
 	ARCH=powerpc CROSS_COMPILE=powerpc-linux-gnu- make -j"$jobs" wii_defconfig
