@@ -14925,6 +14925,31 @@ Matching bad copies place the error in final vertical raster/EFB state;
 different copies place it in EFB-copy destination writes or memory visibility.
 Keep this double copy strictly behind `scale_trace=1`.
 
+Hardware result for `999289409` plus duplicate-copy commit `9fb44fbb8`: the
+public and shadow final copies match byte-for-byte, including on the failing
+frame. Focused iterations 1 through 12 passed with identical source, crop,
+horizontal, final, and shadow hashes. Iteration 13 read `0x763d` instead of
+`0x773d` at `(222,23)`. Source and crop remained stable; horizontal changed
+from `22ce6dc5` to `d37826c5`; final and shadow both changed from `ae90ddc5` to
+the identical bad hash `8aa416c5`. The second EFB copy therefore reproduced
+the first exactly rather than repairing or independently changing it.
+
+```
+73924b3995fb79e9c104e3f7e07ba4382ac2e658659625a305f988f68d0a05af  /media/anolis/dev/wii-gcn-wide-reduce-double-copy-client.txt
+09adeffaa0affab747532ee7a3db01baf2a9c100e7134e891c12d2cb9a9dd1c6  /media/anolis/dev/wii-gcn-wide-reduce-double-copy-kernel.txt
+```
+
+This run places its first visible divergence in the horizontal raster/copy,
+while the preceding stage-hash run had stable horizontal data and diverged only
+at the final vertical stage. The common mechanism is that each multi-primitive
+raster pass and its EFB-to-texture copy currently share one FIFO submission.
+The pre-copy `BP 0x45` marker does not block later FIFO commands; unlike
+`GX_DrawDone()`, the CPU never waits for it before issuing the copy. Test a true
+raster-to-copy barrier next: submit each scaled raster pass with one final
+`BP 0x45`, wait for its PE finish, then submit and wait for its EFB copy in a
+separate command stream. This differs materially from `daf00bccd`, which only
+waited after already-combined raster-plus-copy stages.
+
 Commit `9a84db69b` implements the duplicate-copy diagnostic behind
 `scale_trace=1`. The final EFB image is copied to the public destination without
 clear and then to the unused crop workspace with clear. The trace waits for all
