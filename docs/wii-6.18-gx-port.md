@@ -14625,3 +14625,25 @@ Run this diagnostic repeatedly against the unchanged committed provider to
 establish deterministic hardware values for all eight columns without
 exercising unrelated scaled-copy paths. Do not alter the expected row until
 the observed row repeats exactly.
+
+The focused diagnostic produced the identical complete row in four independent
+provider load/test/unload cycles on boot ID
+`444193a6-aee4-4ae3-a619-4f6dd90fccf1`:
+
+```
+0000 0000 7bef ffdf 7bcf 0000 8430 ffff
+```
+
+The provider and client remained checksum-identical at `68d6f8c3...` and
+`b339e644...`. Every cycle recovered all 524,288 public MEM1 bytes and unloaded
+the provider normally. The stable non-nearest row validates the linear-filter
+register programming and establishes the real GX RGB565 interpolation and
+quantization values. It rejects only the software-derived expected row, not the
+feature. Correct the strict oracle to these eight exact values and require the
+focused all-64-pixel comparison to pass repeatedly before returning to the full
+suite.
+
+```
+7a05bf412a001763e30a920b2d84d595979cf6a971c615f06f2cd60c08d1234e  /media/anolis/dev/wii-gcn-linear-v12-focused-row-1.txt
+b21be90bf8445fdca5d9ded98222327c3af42c227525905f17a8ad1ff8170521  /media/anolis/dev/wii-gcn-linear-v12-focused-rows-2-4.txt
+```
