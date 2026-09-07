@@ -15289,6 +15289,30 @@ hashes are expected positive-control events. If the first gate passes, run at
 least 500 more iterations before considering two-cycle producer priming a
 viable correctness workaround.
 
+Hardware result for producer-local replay commit `d0b8a8470` and provider
+`2ac031cb`: rejected at iteration 30. Userspace read `0x39cd` instead of
+`0x38cd` at `(166,113)`. The first horizontal result was exact `22ce6dc5`, but
+the replay written into the consumed workspace was bad `591094c5`; both final
+passes then reproduced the same bad `b0303cc5` image. There was no timeout or
+FIFO stall.
+
+The preceding iterations disprove a simple first-pass warm-up model in both
+directions. Sequence 20 changed first horizontal to `71218605` and recovered
+to exact `22ce6dc5` on replay. Sequences 19, 26, and 28 started exact and
+changed only the replay to `d760c525`, `d760c525`, and `a6230d85`; their final
+outputs happened to remain exact. Repetition can introduce or remove the
+transient result, so fixed-count duplicate rendering is not a correctness
+mechanism.
+
+```
+7b7b436d51c16360380360a1d36495055bd07ab2353c5e0b6dd9a775d45f5ea4  /media/anolis/dev/wii-gcn-wide-reduce-producer-replay-100-client.txt
+a438db0424c0d77f565c863eb491487d3f680b8dfb33fde9203cccb714f8a786  /media/anolis/dev/wii-gcn-wide-reduce-producer-replay-100-kernel.txt
+```
+
+Do not extend replay-count workarounds. Return to synchronization and command-
+stream diagnosis around the render-to-texture producer itself, using the
+per-pass hashes only as a validated detector.
+
 Commit `049bf80d0` implements one primitive per scaled axis. It counts the
 nearest-neighbour runs first, emits one `GX_QUADS` header with four vertices
 per run, then appends the same direct-TEX0 run vertices as the previous
