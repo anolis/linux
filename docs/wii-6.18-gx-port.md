@@ -14387,3 +14387,58 @@ After acceptance, module SHA-256 `17ef4c1c...` was installed at
 `7355edd8...` remains recoverable beside it as
 `gcn-gx.ko.backup.7355edd87a2743f75e45421556b3d672b404bd80d83baa95b95a23f8f3cac588`.
 The accepted provider was left unloaded with CPU scanout active.
+
+## 2026-09-06: Stage native tiled RGBA8 texture sources
+
+Commit `95698272f` extends the fixed-function texture source contract from
+RGB565-only to RGB565 or native GX RGBA8. This is an additive public UAPI
+change: `DRM_GCN_FORMAT_RGBA8`, `DRM_GCN_GEM_FORMAT_RGBA8`, and
+`DRM_GCN_FEATURE_TEXTURE_RGBA8` are new, while render ABI version 1 and all
+existing ioctl layouts remain unchanged. RGBA8 objects are restricted to
+4-by-4 tiled MEM1 allocations; linear and system-backed RGBA8 allocations are
+rejected. The private in-kernel provider registration advances from v10 to v11
+because fixed-draw callbacks now receive the source format.
+
+The provider binds RGBA8 as `GX_TF_RGBA8` (`0x6`) and retains the accepted
+fixed-draw geometry, sampling phases, texture-cache region, destination paths,
+and completion protocol. Each 4-by-4 source tile occupies 64 bytes: its first
+32 bytes contain interleaved alpha/red samples and its second 32 bytes contain
+interleaved green/blue samples. This encoding was checked independently against
+the local libogc and Dolphin source trees before implementation.
+
+The strict render client adds a 4-by-4 RGBA8 texture rendered into an 8-by-8
+RGB565 destination with source-alpha blending over blue. Opaque red and white
+quadrants must produce red and white; transparent green and magenta quadrants
+must preserve blue. Acceptance requires all 64 destination pixels to match,
+linear and system-backed RGBA8 allocations to return `EINVAL`, and public MEM1
+free space to recover exactly. The test is capability-gated on both the RGBA8
+format and feature bits.
+
+Host validation is complete. `git diff --check` and strict checkpatch report no
+diagnostics. Focused PowerPC `W=1` compilation passes for every touched GX/DRM
+object. UML KUnit passes all 3 `gcn_gx_mem1` cases and all 22
+`gcn_drm_render` cases, including RGBA8 sizing and invalid-layout coverage. The
+complete PowerPC production `zImage modules` build and all static clients pass
+with `-j16`. A full-tree `W=1` build was also attempted; it stopped only on
+pre-existing warnings in untouched code such as `arch/powerpc/lib/sstep.c`.
+The client build helper now installs headers through a temporary out-of-tree
+build, avoiding generated-file contamination of the source checkout.
+
+Staged artifacts are:
+
+```
+40e8624b23a14fe23b1683405c88219f149e6a5b582361d7ede30837993575ec  /media/anolis/dev/wii-gcn-rgba8-v11-build/arch/powerpc/boot/zImage
+86470aa56b4b1a856d6f0e9a4151efbdfdcb49c34d0e4c1a735f1d04e498e7f8  /media/anolis/dev/wii-gcn-rgba8-v11-build/drivers/video/fbdev/gcn-gx.ko
+b4f4406cbe3f95e1ab5680e055cd54c2612239aba1c4e2244b69cd8e984d49d7  /media/anolis/dev/gcn-rgba8-v11-clients-final/wii-gcn-render-test
+```
+
+Hardware validation requires booting the matching v11 kernel; the accepted v10
+kernel cannot resolve the renamed provider exports. First run the focused
+strict-client RGBA8 alpha oracle and retain its exact transcript, boot ID,
+artifact checksums, before/after kernel fault logs, and before/after MEM1
+capacity. Then run the complete strict render-UAPI suite twice across clean
+provider load/unload cycles. Reject any pixel mismatch, wrong negative-case
+errno, allocation leak, PE/FIFO timeout, stalled submission, CPU fallback,
+provider loss, oops, panic, machine check, or failure to restore CPU scanout.
+Only after that gate passes should Mesa expose RGBA8 sampler resources through
+the hardware winsys.
