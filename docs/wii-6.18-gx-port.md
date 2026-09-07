@@ -14861,3 +14861,18 @@ Run the focused mode against unchanged provider `699b92f9...` as a positive
 control. It must reproduce a moving 640-wide mismatch without exercising the
 rest of the suite before per-stage hashing is added. Capture merged stdout and
 stderr and retain the iteration number and exact pixel/value pair.
+
+Hardware result for `0ed17caab`: focused control validated. Iterations 1 through
+8 copied all 38,400 destination pixels exactly. Iteration 9 reproduced the same
+`(45,64)` failure as the preceding full-suite run, reading `0x429b` instead of
+`0x42db`. The reduced mode therefore reaches the real intermittent path quickly
+without relying on unrelated workload as a trigger.
+
+```
+c90b91edb6ed93f04ae581f3cc1e01779cf14aac8469057e5a5fe171b058413a  /media/anolis/dev/wii-gcn-wide-reduce-focused-control.txt
+```
+
+The merged stream exposed a presentation issue: stderr is unbuffered while
+redirected stdout is block-buffered, so the failure line appears before its
+iteration heading. Set stdout to line-buffered in the next diagnostic client
+so stage hashes and the failing iteration can be correlated in order.
