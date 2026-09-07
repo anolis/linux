@@ -14485,3 +14485,23 @@ in the same command stream. Add the known current value `BP 0x43 = 0x000040`
 immediately after each texture-copy execute command and before its final
 draw-done marker. Require the RGBA8 oracle and all retained scaled tests to pass
 twice before accepting either the synchronization fix or v11.
+
+Commit `1defee349` implements that single-variable candidate. The provider now
+emits `BP 0x43 = 0x000040` directly after every RGB565 texture-copy execute and
+before the copy's final `BP 0x45` marker. This is the current PE-control value
+and therefore the exact command form of `GX_PixModeSync()` for this driver. No
+public or private ABI, texture binding, raster state, coordinate, sampling
+phase, memory allocation, or completion timeout changed.
+
+Strict checkpatch and focused PowerPC `W=1` compilation pass. The production
+module built with `-j16` against the already-booted v11 kernel is:
+
+```
+a2e7df8e7f62d85b1c4d107b9142addb7bbf2ab0cf8812aa295dde3c8eea5d09  /media/anolis/dev/wii-gcn-rgba8-v11-build/drivers/video/fbdev/gcn-gx.ko
+```
+
+Hot-load this provider on boot ID `3081c7f2-15c8-4445-b177-b1f820125ed9`
+with strict client `b4f4406c...`. Require two complete passes, including all 64
+RGBA8 alpha pixels, both invalid RGBA8 allocation cases, the 640-wide reduction,
+all full-screen system scales, exact MEM1 recovery, clean provider unload, and
+no kernel fault or timeout. Any moving one-pixel mismatch rejects the candidate.
