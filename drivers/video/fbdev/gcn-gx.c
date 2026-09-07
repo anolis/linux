@@ -2282,6 +2282,9 @@ static void gx_copy_efb_rect_to_rgb565_texture_stride(void *dest, u16 left,
 	ctrl = (BP_DISP_COPY_CTRL << 24) | BIT(16) | (4U << 4) |
 	       (clear ? COPY_CTRL_CLEAR : 0);
 	gx_load_bp_reg(ctrl);
+
+	/* GX_PixModeSync: order texture-copy writes before later consumers. */
+	gx_load_bp_reg(0x43000040);
 	gx_load_bp_reg(0x45000002);
 }
 
