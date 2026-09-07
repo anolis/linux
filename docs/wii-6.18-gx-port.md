@@ -15224,6 +15224,28 @@ first-result hash before overwrite, then let the unchanged userspace oracle
 validate the second result. Run 100 and then 500 iterations to determine
 whether one complete render/copy-clear cycle reliably primes the consumer.
 
+Commit `8f2bd45ac` implements the trace-only publish-replay candidate. It
+removes the rejected standalone texture-cache fence submissions but retains
+the factored libogc invalidation helper used by ordinary texture binding. The
+first final result is invalidated and hashed as before. The exact vertical
+raster is then reconstructed from the unchanged horizontal workspace and the
+second EFB copy writes directly to the public destination, so the existing
+userspace oracle validates the replay rather than the first result. Normal
+non-trace operation is unchanged.
+
+Strict checkpatch and the PowerPC `W=1` module build pass with `-j16`:
+
+```
+04884a58c6cb98fdbaac80cd5374b57bdf612e2ab59ce7b292344fd3bd2e4c50  /media/anolis/dev/wii-gcn-linear-v12-build/drivers/video/fbdev/gcn-gx.ko
+```
+
+Run the focused loop with `scale_trace=1 render_only=1`. Acceptance requires
+100 exact userspace iterations followed by 500 more, every `replay` hash equal
+to the known-good `ae90ddc5`, and no timeout or FIFO stall. An occasional bad
+first `final` hash paired with an exact public replay is expected and provides
+the positive control that the priming path was exercised. Any bad replay or
+userspace mismatch rejects one-cycle priming.
+
 Commit `049bf80d0` implements one primitive per scaled axis. It counts the
 nearest-neighbour runs first, emits one `GX_QUADS` header with four vertices
 per run, then appends the same direct-TEX0 run vertices as the previous
