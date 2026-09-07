@@ -15138,6 +15138,26 @@ duplicate EFB-copy test, this repeats texture fetch and rasterization. A bad
 first result followed by a good replay proves that the final stage itself is
 transient despite identical source memory and command construction.
 
+Commit `14c9def7e` implements the trace-only final-raster replay. After hashing
+the public first result, the exact focused path redraws the same vertical run
+stream from the unchanged horizontal workspace, copies that second EFB image
+into the free crop workspace, and logs it as `replay`. The public destination
+is not modified, so userspace still validates and fails on the first result.
+Normal non-trace operation is unchanged.
+
+Strict checkpatch and the PowerPC `W=1` module build pass with `-j16`:
+
+```
+298ed365f40dcb6f9a3aeec402ceefb657ab5f3b873f36a7d75ef5ded0a57af2  /media/anolis/dev/wii-gcn-linear-v12-build/drivers/video/fbdev/gcn-gx.ko
+```
+
+Run the focused loop with `scale_trace=1 render_only=1` until userspace finds
+a mismatch. The `final` hash is the failing first result. If `replay` is the
+known-good `ae90ddc5`, identical source memory and reconstructed commands can
+produce different raster results. If both hashes match the same bad image,
+investigate persistent texture-source/cache state. If they differ but both
+are bad, repeat enough times to classify the failure distribution.
+
 Commit `049bf80d0` implements one primitive per scaled axis. It counts the
 nearest-neighbour runs first, emits one `GX_QUADS` header with four vertices
 per run, then appends the same direct-TEX0 run vertices as the previous
