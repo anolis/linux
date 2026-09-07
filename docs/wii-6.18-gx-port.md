@@ -14545,3 +14545,56 @@ v10 provider remains recoverable as
 with that exact checksum. The accepted v11 provider was left unloaded with CPU
 scanout active. Mesa may now add capability-gated native RGBA8 sampler
 resources and transfer tiling against this accepted kernel contract.
+
+## 2026-09-07: Stage linear texture filtering
+
+Commit `fa1ace2b1` adds the first sampler-state choice to the consolidated
+fixed-function draw ABI. The public ioctl remains 96 bytes: its trailing
+reserved `u64` is split into a semantic `u32 texture_filter` and zero
+`u32 pad`. Nearest remains value zero, preserving all existing userspace
+behavior. Linear is value one and is independently advertised through
+`DRM_GCN_FEATURE_TEXTURE_LINEAR`; unknown values, unsupported linear
+requests, and linear filtering on untextured `PASS_COLOR` draws are rejected.
+Wrapping remains clamp-to-edge and mipmapping remains unsupported.
+
+The private core/provider registration advances from v11 to v12 because both
+fixed-draw callbacks now receive the filter selector. The provider programs
+`TX_SETMODE0` as `BP 0x80 = 0x000100` for nearest and `0x000190` for
+linear. The latter sets magnification bit 4 and non-mipmapped linear
+minification value 4 in bits 5 through 7. This encoding was independently
+verified against local libogc `GX_InitTexObjLOD()`,
+`_gx2HWFiltConv[GX_LINEAR] == 4`, Dolphin's `TexMode0` bitfield, and
+Dolphin's software sampler. Legacy texture draws and all internal provider
+copies remain nearest.
+
+The strict client adds a positive control which scales a 4-by-4 opaque RGBA8
+texture into an 8-by-8 RGB565 destination. Every source row contains
+black/white/black/white columns. The fixed texture phase predicts each output
+row as black, black, half-gray, white, half-gray, black, half-gray, white.
+All 64 pixels must match exactly; nearest filtering cannot pass this oracle.
+
+Host validation is complete. Strict checkpatch and `git diff --check` report
+no diagnostics. Focused PowerPC `W=1` compilation passes for all changed
+GX/DRM objects. UML KUnit passes all 3 `gcn_gx_mem1` and all 22
+`gcn_drm_render` cases, including the stable ioctl size, new feature value,
+filter bounds, and untextured rejection. The complete PowerPC
+`zImage modules` build and all four static clients pass with `-j16`.
+
+```
+033f2d542c09460d5133c3f4a186286c0bbec66ca916a2019370fd7f43f3bb3b  /media/anolis/dev/wii-gcn-linear-v12-build/arch/powerpc/boot/zImage
+68d6f8c3cbae687d5e3931dcddb9bc948e59772eedecc59cb36145b1cd5b37aa  /media/anolis/dev/wii-gcn-linear-v12-build/drivers/video/fbdev/gcn-gx.ko
+70926d611ef1ddc3dbd3e7b26f759b1337d02b29201459d1e18e13476a65a2d4  /media/anolis/dev/wii-gcn-linear-v12-clients/wii-gcn-render-test
+```
+
+Hardware validation requires booting the matching v12 kernel because the
+provider imports the renamed v12 registration symbols. First verify the
+deployed image, provider, and client checksums, boot ID, v12 symbols, and full
+MEM1 availability. Run the focused linear-filter oracle and retain its exact
+transcript plus before/after kernel fault logs. If the sole mismatch is the
+predicted half-gray quantization, reject the oracle expectation and record the
+actual hardware rounding before changing it; do not weaken the all-pixel
+requirement. After the focused gate passes, run the complete strict render
+suite twice across clean provider load/unload cycles. Reject any nearest-like
+row, pixel mismatch, wrong negative errno, PE/FIFO timeout, stalled
+submission, fallback, provider loss, allocation leak, oops, panic, machine
+check, or failure to restore CPU scanout.
