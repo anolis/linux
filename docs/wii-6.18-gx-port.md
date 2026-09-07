@@ -14989,3 +14989,24 @@ and shadow both change to the same hash, investigate final raster/EFB. If only
 one changes, investigate copy destination/cache visibility. If both change but
 differ, repeat enough times to determine whether each copy independently
 experiences a memory-write error.
+
+Hardware result for raster-to-copy fence commit `351de01ca` and provider
+`da4561ac3`: rejected. The focused 640x240-to-320x120 loop passed six complete
+iterations, then iteration 7 read `0x429b` instead of `0x42db` at `(45,64)`.
+The source, crop, and horizontal hashes remained at their known-good values;
+only the final vertical-stage hash changed from `ae90ddc5` to `66ec3f05`.
+There was no PE timeout or fallback.
+
+```
+2bb78795fde9185875fc1b5f1f3f02333558b877cb5927e8a563d661b9f5b6cf  /media/anolis/dev/wii-gcn-wide-reduce-raster-fence-client.txt
+3d61eb9e24d742a5cbf209ba65af3ef78d655f6b0af96eb901e2e4a486970752  /media/anolis/dev/wii-gcn-wide-reduce-raster-fence-kernel.txt
+```
+
+This proves that a CPU-observed PE finish between rasterization and EFB copy
+does not eliminate the moving corruption. It also provides a clean failure in
+which all upstream workspaces were stable and the final multi-run raster alone
+changed. Keep the split waits only if they have independent synchronization
+value; they are not sufficient as a corruption fix. The next candidate should
+remove the repeated final-run state changes, especially dynamic scissor and XF
+texture-matrix updates, by emitting direct texture coordinates and explicit
+per-run geometry instead.
