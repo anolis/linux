@@ -15393,3 +15393,38 @@ repeat at least 500 focused iterations before attributing the earlier moving
 error to interleaved scanout; the recent direct-run candidates survived 55 and
 59 iterations before failing. Any mismatch with CPU scanout active rejects
 scanout traffic as a necessary cause.
+
+#### Delayed producer visibility diagnostic (2026-09-07)
+
+The pending diagnostic restores post-copy EFB clear after the rejected
+no-clear experiment and extends the focused `scale_trace=1` output with
+`horizontal_delayed` and `final_delayed`. Each producer is hashed immediately
+after completion and cache invalidation, then hashed again after a 5--6 ms
+sleep and a second invalidation. The submission mutex remains held throughout
+the interval, preventing other driver GX submissions; no GX commands or CPU
+buffer writes occur between the paired hashes. Scheduler latency can extend
+the sleep beyond the requested range.
+
+Strict checkpatch reports zero errors, warnings, or checks. The PowerPC `W=1`
+module build passes with `-j16`:
+
+```
+27262fd52f9a8b30b68107ba07eb6ecee957923550447ad123b1bec74fc2274e  /media/anolis/dev/wii-gcn-linear-v12-build/drivers/video/fbdev/gcn-gx.ko
+```
+
+Hardware validation is pending. Run the focused 100-iteration oracle with
+`scale_trace=1 render_only=1`, retaining both userspace and kernel logs. Compare
+each immediate/delayed pair, including iterations before the first userspace
+failure. A changed pair demonstrates memory contents becoming visible after
+the first sample; an unchanged bad pair places the observed bad data at or
+before that sample, without excluding an earlier visibility issue. Passing
+100 iterations with added delays alone does not establish a root cause.
+
+Hardware access attempt: SSH to `root@10.3.10.12` first timed out; a retry
+outside the sandbox returned `No route to host`. No candidate was uploaded or
+loaded, and no hardware result is claimed. Resume the focused test when the
+Wii is reachable.
+
+Workflow instruction (2026-09-07): keep this development log updated with
+changes, validation, hardware outcomes, blockers, and the next step. Commit
+and push completed work, including the notes, to the working branch's remote.

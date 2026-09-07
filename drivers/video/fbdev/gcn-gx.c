@@ -4949,7 +4949,9 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	size_t src_bytes;
 	bool trace;
 	u32 crop_hash = 0;
+	u32 final_delayed_hash = 0;
 	u32 final_hash = 0;
+	u32 horizontal_delayed_hash = 0;
 	u32 horizontal_hash = 0;
 	u32 source_hash = 0;
 	u32 trace_sequence = 0;
@@ -5071,7 +5073,7 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		gx_copy_efb_rect_to_rgb565_texture_stride(crop, 0, 0,
 							  crop_copy_width,
 							  crop_height,
-							  crop_width, !trace);
+							  crop_width, true);
 		ret = gx_submit_and_wait_finish("render-blit-scaled-crop-copy");
 		if (ret)
 			goto out_unlock;
@@ -5107,7 +5109,7 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	gx_copy_efb_rect_to_rgb565_texture_stride(horizontal, 0, 0,
 						  horizontal_copy_width,
 						  crop_height,
-						  horizontal_width, !trace);
+						  horizontal_width, true);
 	ret = gx_submit_and_wait_finish("render-blit-scaled-horizontal-copy");
 	if (ret)
 		goto out_unlock;
@@ -5118,6 +5120,13 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 						       horizontal_width,
 						       dst_rect_width,
 						       src_rect_height);
+		usleep_range(5000, 6000);
+		invalidate_dcache_range((unsigned long)horizontal,
+					(unsigned long)horizontal + horizontal_bytes);
+		horizontal_delayed_hash = gx_hash_tiled_region(horizontal,
+							       horizontal_width,
+							       dst_rect_width,
+							       src_rect_height);
 	}
 
 	/* The crop workspace is free once the horizontal snapshot is complete. */
@@ -5160,7 +5169,7 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	gx_setup_display_copy_state();
 	gx_set_copy_clear_rgb(0x00, 0x00, 0x00);
 	gx_copy_efb_to_rgb565_texture(system_memory ? crop : dst_addr,
-				      dst_width, dst_height, !trace);
+				      dst_width, dst_height, true);
 	ret = gx_submit_and_wait_finish("render-blit-scaled-final-copy");
 	if (ret)
 		goto out_unlock;
@@ -5175,9 +5184,16 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		if (trace) {
 			final_hash = gx_hash_tiled_region(dst_addr, dst_width,
 							  dst_width, dst_height);
-			pr_info("gcn-gx: scale-trace seq=%u src=%08x crop=%08x horizontal=%08x final=%08x\n",
+			usleep_range(5000, 6000);
+			invalidate_dcache_range((unsigned long)dst_addr,
+						(unsigned long)dst_addr + dst_bytes);
+			final_delayed_hash = gx_hash_tiled_region(dst_addr,
+								  dst_width, dst_width,
+								  dst_height);
+			pr_info("gcn-gx: scale-trace seq=%u src=%08x crop=%08x horizontal=%08x horizontal_delayed=%08x final=%08x final_delayed=%08x\n",
 				trace_sequence, source_hash, crop_hash,
-				horizontal_hash, final_hash);
+				horizontal_hash, horizontal_delayed_hash,
+				final_hash, final_delayed_hash);
 		}
 	}
 
