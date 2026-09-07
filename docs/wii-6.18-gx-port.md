@@ -15203,6 +15203,27 @@ to at least 500 iterations before accepting the fence, because the unfenced
 direct-run candidates survived as many as 59 iterations. Any mismatch rejects
 the isolated invalidation; compare `final` and `replay` on that same event.
 
+Hardware result for isolated-invalidation commit `02e387942` and provider
+`c4364c4d`: rejected. The focused render-only loop passed 21 iterations, then
+iteration 22 reproduced `0x9f0d` instead of `0x9f1d` at `(206,31)`. Iteration
+21 had a changed horizontal hash but exact final and replay outputs. Iteration
+22 changed horizontal to `71218605` and first final to `8b4301b5`, while the
+immediate replay was again the exact `ae90ddc5` image. Source and crop stayed
+stable; there was no timeout or stall.
+
+```
+74b63cf92d416aad277537eb8d33507ac9cec0f8a930913f44941ef76d32de90  /media/anolis/dev/wii-gcn-wide-reduce-cache-fence-client.txt
+7f09f87259e77d7ca5505ff5f69cb7181b33d607add0d442fea6d2891c350dfe  /media/anolis/dev/wii-gcn-wide-reduce-cache-fence-kernel.txt
+```
+
+An isolated invalidate and PE fence are therefore insufficient. Remove their
+extra production submissions while retaining the factored invalidate helper.
+For the next trace-only candidate, copy the replay result back to the public
+destination rather than the private crop workspace. Preserve and log the
+first-result hash before overwrite, then let the unchanged userspace oracle
+validate the second result. Run 100 and then 500 iterations to determine
+whether one complete render/copy-clear cycle reliably primes the consumer.
+
 Commit `049bf80d0` implements one primitive per scaled axis. It counts the
 nearest-neighbour runs first, emits one `GX_QUADS` header with four vertices
 per run, then appends the same direct-TEX0 run vertices as the previous
