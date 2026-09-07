@@ -15634,3 +15634,44 @@ Run the unchanged 100-iteration client at `10.3.10.59` with
 `scale_trace=1 render_only=1 scale_efb_full=1`. The four-pixel peek option stays
 off for this run. Require a reproduced mismatch to classify the fault; clean
 iterations under this more intrusive observer are not a production fix.
+
+Hardware result for `1b26dc6e8`: the complete EFB comparison localizes the
+reproduced corruption before the final texture copy. All 38400 pixels agreed
+between EFB, copied output and original source for iterations 1--16. At
+iteration 17, `(206,31)` read raw EFB `0x009ce36f`, quantized EFB `0x9f0d`,
+copied output `0x9f0d`, and expected source `0x9f1d`. The corresponding good
+raw EFB control was `0x009ce3ef`; the observed color change is blue bit 7,
+not a green-channel change.
+
+The failing frame reported `copy_mismatches=0 source_mismatches=1`: every
+copied pixel still matched the pre-copy EFB snapshot, including the single bad
+pixel. Its horizontal hash was exact `22ce6dc5`; source/crop were exact
+`a2c385c5`; final/delayed were both `8b4301b5`; authored draw fingerprints
+remained `03506e62`/`9dfcb1dc`. The final copy and subsequent CPU read therefore
+faithfully reproduced an already-bad EFB raster in this occurrence. This does
+not prove every historical failure has the same cause, nor identify texture
+fetch, command fetch, TEV, or raster state as the individual defective stage.
+
+Provider `76fb155d...` and client `5d63411f...` were checksum-verified on boot
+`444193a6-aee4-4ae3-a619-4f6dd90fccf1`, target `10.3.10.59`. The provider
+unloaded normally and restored CPU scanout. The installed accepted provider
+remained checksum-identical at `a2e7df8e...`. No timeout, stall, or kernel fault
+appeared in the captured candidate interval. These are diagnostic acceptance
+results, not acceptance of the experimental v12 scaler as reliable.
+
+```
+8779f600582884836f407f1db8ec0ea1d6ef58895fc63c14997fdd3d3efebdd8  /media/anolis/dev/wii-gcn-wide-reduce-efb-full-100-client.txt
+ecd71b2bf7862a0c67068ba6e3a5ba38df2a236d69f556b29439253831f96571  /media/anolis/dev/wii-gcn-wide-reduce-efb-full-100-kernel.txt
+95129bec0460810a5874de431c9939327e5142aeab7bf6628717e5e1c6df0453  /media/anolis/dev/wii-gcn-wide-reduce-efb-full-100-kernel-raw.txt
+```
+
+Next isolate the final draw's texture input publication from its raster state.
+A candidate can CPU-republish the completed horizontal workspace without
+changing its bytes: invalidate, preserve/read and rewrite identical contents,
+flush, verify the same logical hash, then submit the unchanged final draw.
+Keep this opt-in, retain the full EFB detector and command fingerprints, and
+require a reproduced failure or sustained exact runs before interpreting it.
+This would test a GX-produced-versus-CPU-published texture boundary; success
+alone would not distinguish timing from ownership effects. No such candidate
+has yet been implemented. Do not return to final-copy or delayed-CPU-read fixes
+as the explanation for the now-localized failure.
