@@ -1541,6 +1541,15 @@ static void gx_setup_rgb565_texture_state(u16 width, u16 height)
 #define GX_TF_RGB565	4U
 #define GX_TF_RGBA8	6U
 
+static void gx_invalidate_texture_cache(void)
+{
+	/* Exact libogc GX_InvalidateTexAll() sequence. */
+	gx_load_bp_reg(0x0F000000);
+	gx_load_bp_reg(0x66001000);
+	gx_load_bp_reg(0x66001100);
+	gx_load_bp_reg(0x0F000000);
+}
+
 /* Bind a tiled RGB565 or RGBA8 buffer to texmap 0. */
 static void gx_setup_texture(void *tile_buf, u16 width, u16 height, u32 format,
 			     u32 filter)
@@ -1578,11 +1587,7 @@ static void gx_setup_texture(void *tile_buf, u16 width, u16 height, u32 format,
 	/* BP 0x94 texImage3: physical address >> 5 */
 	gx_load_bp_reg(0x94000000 | ((phys >> 5) & 0x00ffffff));
 
-	/* Exact libogc GX_InvalidateTexAll() sequence. */
-	gx_load_bp_reg(0x0F000000);
-	gx_load_bp_reg(0x66001000);
-	gx_load_bp_reg(0x66001100);
-	gx_load_bp_reg(0x0F000000);
+	gx_invalidate_texture_cache();
 
 	/* BP 0x30/0x31 suSsize/suTsize for texcoord 0:
 	 * [15:0] = coordinate scale - 1: dimension - 1 for normalized
@@ -3205,6 +3210,15 @@ static int gx_submit_and_wait_finish(const char *phase)
 	}
 
 	return 0;
+}
+
+static int gx_invalidate_texture_cache_and_wait(const char *phase)
+{
+	fifo_pos = 0;
+	gx_invalidate_texture_cache();
+	gx_load_bp_reg(0x45000002);
+
+	return gx_submit_and_wait_finish(phase);
 }
 
 static int gx_drm_offscreen_capture(u16 width, u16 height)
@@ -5079,6 +5093,9 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 							 src_rect_height);
 		}
 	}
+	ret = gx_invalidate_texture_cache_and_wait("render-blit-scaled-crop-ready");
+	if (ret)
+		goto out_unlock;
 
 	/* Expand or reduce source columns exactly into a private intermediate. */
 	fifo_pos = 0;
@@ -5125,6 +5142,9 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		flush_dcache_range((unsigned long)crop,
 				   (unsigned long)crop + dst_bytes);
 	}
+	ret = gx_invalidate_texture_cache_and_wait("render-blit-scaled-horizontal-ready");
+	if (ret)
+		goto out_unlock;
 
 	fifo_pos = 0;
 	gx_load_libogc_init_preamble();
