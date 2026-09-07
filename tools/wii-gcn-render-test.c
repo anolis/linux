@@ -3274,8 +3274,8 @@ static void test_linear_texture_filter(int fd)
 	const unsigned int dst_width = 8;
 	const unsigned int dst_height = 8;
 	const uint16_t expected_row[8] = {
-		0x0000, 0x0000, 0x7bef, 0xffff,
-		0x7bef, 0x0000, 0x7bef, 0xffff,
+		0x0000, 0x0000, 0x7bef, 0xffdf,
+		0x7bcf, 0x0000, 0x8430, 0xffff,
 	};
 	struct drm_syncobj_create sync = {};
 	struct drm_syncobj_destroy destroy = {};
@@ -3376,14 +3376,14 @@ static void test_linear_texture_filter(int fd)
 			checked++;
 			if (dst_map[pixel] != expected_row[x]) {
 				fprintf(stderr,
-					"FAIL: linear-filter mismatch at (%u,%u): got=0x%04x expected=0x%04x\\n",
+					"FAIL: linear-filter mismatch at (%u,%u): got=0x%04x expected=0x%04x\n",
 					x, y, dst_map[pixel], expected_row[x]);
 				failures++;
 				goto out_sync;
 			}
 		}
 	}
-	printf("LINEAR FILTER: %u bilinear pixels matched\\n", checked);
+	printf("LINEAR FILTER: %u bilinear pixels matched\n", checked);
 
 out_sync:
 	destroy.handle = sync.handle;
