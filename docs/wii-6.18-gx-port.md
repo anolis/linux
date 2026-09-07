@@ -16040,3 +16040,43 @@ scale_cpu_alt=1 scale_cpu_rgba8=1 scale_cpu_uniform=1 scale_direct_color=1`.
 A reproduced bad pre-copy pixel proves final-draw texture sampling is not
 necessary. If 100 iterations pass, extend to 500 more before interpreting the
 control; no spatial scaling correctness is established by uniform-color passes.
+
+Hardware result for `ccf4ac907`: untextured final row quads reproduce pre-copy
+EFB corruption. Iterations 1--8 passed all 38400 comparisons. Iteration 9
+failed at `(28,48)` with raw EFB `008ce3ef`, quantized EFB/copied pixel `8f1d`,
+expected `9f1d` (expanded RGB `009ce3ef`). This is a lost red bit 4. The same
+coordinate/red-bit change appeared in the earlier ramp color-peek run, where
+`f2b9` became `e2b9`; it is not unique to the uniform texture oracle.
+
+The full EFB comparison had zero copy mismatches and exactly one source
+mismatch. Uniform final/delayed hashes were both `72759fc5` rather than
+`e5c8efc5`. Source/crop stayed `ad05e5c5`, completed horizontal was `d33901c5`,
+and the whole padded CPU fixture remained `c4c69dc5`. Authored final commands
+stayed `b5e83197` through passing and failing frames; horizontal stayed
+`03506e62`.
+
+Final-draw texture sampling is not necessary for this occurrence. The failure
+is in a path shared with direct vertex-color rasterization, or in state left by
+prior stages; earlier transaction stages still exercised texture hardware.
+Stable CPU-authored command hashes do not establish correct CP fetches. Do not
+label this a proven defective EFB memory cell or physical hardware failure yet.
+
+Module `85ecabf0...` and uniform client `8a5c7030...` checksums matched on boot
+`444193a6-aee4-4ae3-a619-4f6dd90fccf1`, target `10.3.10.59`. Provider
+unload restored CPU scanout and the installed accepted provider remained
+`a2e7df8e...`. No timeout, stall or kernel fault appeared during the candidate
+interval; a later ordinary b43 group-key refresh is unrelated.
+
+```
+af8f28b12aaf315ab9bb31c423154d94239c0bc1e03be725fc36f0f454d40e43  /media/anolis/dev/wii-gcn-wide-reduce-direct-color-100-client.txt
+f732a9a5d3f3e5121cb5164dc826bb6f2fc400e0bff7714299bf9456a838fbb1  /media/anolis/dev/wii-gcn-wide-reduce-direct-color-100-kernel.txt
+5a2d35a1f1ea17504d9ab1496532c33d112b55a363ab79d9102ba008249b70aa  /media/anolis/dev/wii-gcn-wide-reduce-direct-color-100-audit.txt
+```
+
+Next bounded control: produce the same uniform EFB color through the established
+EFB copy-clear mechanism, with a positively fenced clear before the snapshot
+and a subsequent copy for userspace comparison. This bypasses final primitive
+rasterization as well as final texture sampling. Retain the full EFB oracle and
+explicit uniform client. Account for clear-after-copy ordering; the first copy
+is only a clear trigger and must not be treated as the uniform readout. No
+clear-only final-stage control has yet been implemented.
