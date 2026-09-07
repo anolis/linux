@@ -15335,6 +15335,26 @@ requires exact userspace output and stable hashes after initialization, with
 no timeout or FIFO stall. If that passes, run at least 500 additional focused
 iterations before accepting copy-clear overlap as the root cause.
 
+Hardware result for no-clear commit `8f9b5ed48` and provider `22d1e4b8`:
+rejected at iteration 65. Userspace read `0x39cd` instead of `0x38cd` at
+`(166,113)`. Source and crop remained exact, while horizontal changed to the
+familiar `591094c5` and final changed to the corresponding `b0303cc5`.
+Sequence 62 also produced horizontal `d760c525` while its final output remained
+exact. No timeout or FIFO stall occurred.
+
+```
+1067d3b2203463897aad402361b0f4eba11b636937d571e01eb59476037b6640  /media/anolis/dev/wii-gcn-wide-reduce-no-clear-100-client.txt
+68da71085a4035007d1411d642398d9701f1d581de1fcff0da0045224f5fc9ea  /media/anolis/dev/wii-gcn-wide-reduce-no-clear-100-kernel.txt
+```
+
+Disabling post-copy EFB clear may reduce the observed failure frequency, but
+it does not fix the corruption and therefore does not establish a clear race.
+The next diagnostic should leave each completed producer buffer untouched,
+hash it immediately, wait a bounded interval with no GX commands, invalidate
+the CPU cache again, and hash the same bytes a second time. A changed delayed
+hash would prove late memory visibility; an unchanged bad hash would place the
+bad result before or within the completed EFB texture copy.
+
 Commit `049bf80d0` implements one primitive per scaled axis. It counts the
 nearest-neighbour runs first, emits one `GX_QUADS` header with four vertices
 per run, then appends the same direct-TEX0 run vertices as the previous
