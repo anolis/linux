@@ -4946,6 +4946,7 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	u32 crop_hash = 0;
 	u32 final_hash = 0;
 	u32 horizontal_hash = 0;
+	u32 replay_hash = 0;
 	u32 source_hash = 0;
 	u32 trace_sequence = 0;
 	int ret;
@@ -5172,9 +5173,45 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		if (trace) {
 			final_hash = gx_hash_tiled_region(dst_addr, dst_width,
 							  dst_width, dst_height);
-			pr_info("gcn-gx: scale-trace seq=%u src=%08x crop=%08x horizontal=%08x final=%08x\n",
+
+			fifo_pos = 0;
+			gx_load_libogc_init_preamble();
+			gx_setup_display_copy_state();
+			gx_setup_rgb565_texture_state_mode(dst_width, dst_height,
+							   true);
+			gx_setup_texture_rgb565(horizontal, horizontal_width,
+						crop_height);
+			gx_setup_texture_coordinate_scale(horizontal_width,
+							  crop_height,
+							  false, false);
+			gx_set_scissor(0, 0, dst_width, dst_height);
+			gx_draw_nearest_vertical_runs(0, 0, dst_width,
+						      horizontal_width,
+						      src_rect_height,
+						      crop_height, dst_height);
+			gx_load_bp_reg(0x45000002);
+			ret = gx_submit_and_wait_finish("render-blit-scaled-final-replay-draw");
+			if (ret)
+				goto out_unlock;
+
+			flush_dcache_range((unsigned long)crop,
+					   (unsigned long)crop + dst_bytes);
+			fifo_pos = 0;
+			gx_load_libogc_init_preamble();
+			gx_setup_display_copy_state();
+			gx_set_copy_clear_rgb(0x00, 0x00, 0x00);
+			gx_copy_efb_to_rgb565_texture(crop, dst_width, dst_height,
+						      true);
+			ret = gx_submit_and_wait_finish("render-blit-scaled-final-replay-copy");
+			if (ret)
+				goto out_unlock;
+			invalidate_dcache_range((unsigned long)crop,
+						(unsigned long)crop + dst_bytes);
+			replay_hash = gx_hash_tiled_region(crop, dst_width,
+							   dst_width, dst_height);
+			pr_info("gcn-gx: scale-trace seq=%u src=%08x crop=%08x horizontal=%08x final=%08x replay=%08x\n",
 				trace_sequence, source_hash, crop_hash,
-				horizontal_hash, final_hash);
+				horizontal_hash, final_hash, replay_hash);
 		}
 	}
 
