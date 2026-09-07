@@ -14664,3 +14664,39 @@ provider `68d6f8c3...` unchanged. Require three focused load/test/unload cycles
 to match all 64 bilinear pixels with full MEM1 recovery. If those pass, run the
 entire strict suite twice and separately evaluate whether the prior moving
 full-screen scale mismatch recurs.
+
+Hardware result for `2e5ea2369`: the measured linear-filter oracle is accepted,
+but the complete v12 provider is not yet accepted. Three consecutive focused
+provider load/test/unload cycles each matched all 64 bilinear pixels exactly,
+reported the same eight-value row, began with all 524,288 public MEM1 bytes
+free, and ended in `PASS: GCN render UAPI`. The first complete strict cycle
+also passed every retained operation, including the linear oracle, both
+640-wide scale directions, both full-screen system scales, XRGB8888 conversion,
+MEM1 recovery, provider unload, and CPU-console restoration.
+
+The second complete strict cycle again passed the linear oracle but reproduced
+the pre-existing moving scaled-copy corruption. The same-object opposed-scale
+case read `0x6415` instead of `0x6455` at `(108,60)`, and the later 640-wide
+reduction read `0x763d` instead of `0x773d` at `(222,23)`. These locations and
+values differ from the initial v12 full-suite failure, so they are not a stable
+sampling-oracle error. The post-run audit confirms normal provider unload and
+CPU restoration with no timeout, FIFO stall, fallback, oops, panic, machine
+check, or kernel bug.
+
+```
+688ee092d60bcb6e773cee05121d22817f7ab1222129402477b78e3cc3241ecc  /media/anolis/dev/wii-gcn-linear-v12-oracle-focused-1.txt
+4f5d22acdbeb0a3ee34cf7c7c77b338c94254737fbd17bca9dca641c5cea5f92  /media/anolis/dev/wii-gcn-linear-v12-oracle-full-1.txt
+0d029e0959c150d0bb6c22b9852db30b0573af8b42923f7fe082f5e65b2f7508  /media/anolis/dev/wii-gcn-linear-v12-oracle-full-2.txt
+3e3864ec0ccfb18f0a0422f98c06204dfc56faa0b1fb9d2f73ba45ca7ca4d711  /media/anolis/dev/wii-gcn-linear-v12-oracle-final-audit.txt
+```
+
+Source review identified a narrower completion weakness to test before
+restructuring the scaled pipeline. `gx_submit_cmds()` currently accepts either
+the PE token-status bit or equality of `PE+0x0e` with the unique expected token.
+The status bit contains no token identity and can therefore terminate the poll
+on stale or delayed state. The token-value register is an already validated
+positive control and repeated focused runs demonstrate that it advances
+reliably. Require exact token-value equality for submit completion, retaining
+status reads only for acknowledgement and diagnostics. If moving corruption
+continues, the next step is to give each scaled intermediate exactly one final
+`BP 0x45` marker and wait for it before reusing that intermediate.
