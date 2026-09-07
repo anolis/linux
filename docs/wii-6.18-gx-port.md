@@ -16283,3 +16283,33 @@ count explicitly; handle any final partial band without changing coverage.
 This tests thin-primitive/edge dependence after submission pacing failed to
 fix it. A passing uniform band test is not an implementation of arbitrary
 nearest-neighbor scaling. No band-height control has yet been implemented.
+
+#### Stage direct-color band-height control (2026-09-07)
+
+`scale_band_height` selects 1 through 120 rows for focused direct-color bands;
+default 1 retains the prior row stream. The packet contains four vertices per
+band, with `DIV_ROUND_UP` determining the count and the last band clipped to
+the exact destination height. Invalid heights and combining a non-default
+height with single-quad or per-row-fence mode return `-EINVAL`. The option has
+no effect outside the direct-color trace. Band height and quad count are logged
+after the EFB/readout work, avoiding a new printk inside the authored draw.
+
+The first control uses height 2: sixty 320x2 quads in one packet, with unchanged
+uniform color, direct vertex state, winding, viewport, scissor, total coverage,
+final completion and EFB oracle. This changes both primitive height and count;
+it does not individually isolate an edge, tile or command-length effect.
+
+Strict checkpatch, `git diff --check`, and PowerPC `W=1` build pass with
+`-j16`. Candidate SHA-256:
+
+```
+e07f34e7658180d81639a50f27a2c5788016f97f957385ebf181c84dc276f3d7  /media/anolis/dev/wii-gcn-linear-v12-build/drivers/video/fbdev/gcn-gx.ko
+```
+
+Run the existing uniform client `8a5c7030...` at `10.3.10.59` with
+`scale_trace=1 render_only=1 scale_efb_full=1 scale_cpu_source=1
+scale_cpu_alt=1 scale_cpu_rgba8=1 scale_cpu_uniform=1 scale_direct_color=1
+scale_band_height=2`; leave per-row fences, single-quad and clear-only off.
+Require logged height 2/count 60, stable authored commands and full EFB checks.
+If 100 iterations pass, extend to 500 more before interpreting the geometry
+control. A failure rejects two-row bands as sufficient to avoid corruption.
