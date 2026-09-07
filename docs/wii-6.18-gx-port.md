@@ -15133,3 +15133,24 @@ Run the focused trace for 100 iterations. Acceptance requires exact output,
 stable stage hashes, no FIFO stall, and no timeout throughout. If focused
 testing passes, run five complete strict suites before deciding whether the
 primitive-boundary reduction resolves the moving scale corruption.
+
+Commit `7e02e2630` adds the `render_only=1` isolation mode. The registered
+provider and every DRM render callback remain unchanged, but RGB565 and
+XRGB8888 scanout callbacks return `-ENODEV`. The DRM core already interprets
+that result as a silent request for CPU conversion, so console scanout cannot
+submit GX work or leave scanout state between render ioctls. Default module
+behavior is unchanged.
+
+Strict checkpatch and the PowerPC `W=1` module build pass with `-j16`:
+
+```
+9a1b6e99b8d922d81b98dee4a9f9523cee34edfb42af1a79d12aaa615edc5fa7  /media/anolis/dev/wii-gcn-linear-v12-build/drivers/video/fbdev/gcn-gx.ko
+```
+
+Run the focused 100-iteration trace with both `scale_trace=1` and
+`render_only=1`. Confirm the module log reports `render_only=1` and that no GX
+scanout-active message appears during the candidate interval. If this passes,
+repeat at least 500 focused iterations before attributing the earlier moving
+error to interleaved scanout; the recent direct-run candidates survived 55 and
+59 iterations before failing. Any mismatch with CPU scanout active rejects
+scanout traffic as a necessary cause.
