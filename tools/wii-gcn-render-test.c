@@ -3694,7 +3694,7 @@ out:
 		fail("close 640-wide scaled-blit source");
 }
 
-static void test_wide_scaled_reduce(int fd)
+static void test_wide_scaled_reduce(int fd, bool uniform)
 {
 	struct drm_gcn_ctx_create ctx = {};
 	struct drm_gcn_ctx_free free_ctx;
@@ -3723,7 +3723,8 @@ static void test_wide_scaled_reduce(int fd)
 			size_t pixel = tiled_rgb565_index(x, y,
 						 WIDE_REDUCE_SRC_WIDTH);
 
-			src_map[pixel] = y * WIDE_REDUCE_SRC_WIDTH + x;
+			src_map[pixel] = uniform ? 0x9f1d :
+					 y * WIDE_REDUCE_SRC_WIDTH + x;
 		}
 	}
 	for (unsigned int y = 0; y < WIDE_REDUCE_DST_HEIGHT; y++) {
@@ -3761,8 +3762,8 @@ static void test_wide_scaled_reduce(int fd)
 			unsigned int source_y = scaled_source_offset(y,
 					WIDE_REDUCE_SRC_HEIGHT,
 					WIDE_REDUCE_DST_HEIGHT);
-			uint16_t expected = source_y * WIDE_REDUCE_SRC_WIDTH +
-					    source_x;
+			uint16_t expected = uniform ? 0x9f1d :
+					    source_y * WIDE_REDUCE_SRC_WIDTH + source_x;
 			size_t pixel = tiled_rgb565_index(x, y,
 						 WIDE_REDUCE_DST_WIDTH);
 
@@ -4174,7 +4175,9 @@ int main(int argc, char **argv)
 	bool linear_only = argc > 1 && !strcmp(argv[1], "--linear-filter-only");
 	bool wide_reduce_only = argc > 1 &&
 				!strcmp(argv[1], "--wide-reduce-only");
-	int mode_args = hold + linear_only + wide_reduce_only;
+	bool uniform_only = argc > 1 &&
+			    !strcmp(argv[1], "--wide-reduce-uniform-only");
+	int mode_args = hold + linear_only + wide_reduce_only + uniform_only;
 	const char *node = argc > 1 + mode_args ? argv[1 + mode_args] :
 			   "/dev/dri/renderD128";
 	uint64_t provider = 0;
@@ -4261,11 +4264,12 @@ int main(int argc, char **argv)
 					   DRM_GCN_FEATURE_TEXTURE_LINEAR);
 			goto out_close;
 		}
-		if (wide_reduce_only) {
+		if (wide_reduce_only || uniform_only) {
 			if (features & DRM_GCN_FEATURE_BLIT_SCALED_RGB565) {
 				for (unsigned int i = 1; i <= 100 && !failures; i++) {
-					printf("WIDE REDUCE: iteration %u\n", i);
-					test_wide_scaled_reduce(fd);
+					printf("WIDE REDUCE: iteration %u uniform=%u\n", i,
+					       uniform_only);
+					test_wide_scaled_reduce(fd, uniform_only);
 				}
 			} else {
 				fail_value("scaled RGB565 capability", features,
@@ -4367,7 +4371,7 @@ int main(int argc, char **argv)
 		if (features & DRM_GCN_FEATURE_BLIT_SCALED_RGB565)
 			test_wide_scaled_blit(fd);
 		if (features & DRM_GCN_FEATURE_BLIT_SCALED_RGB565)
-			test_wide_scaled_reduce(fd);
+			test_wide_scaled_reduce(fd, false);
 		if ((features & (DRM_GCN_FEATURE_SYSTEM_GEM |
 				 DRM_GCN_FEATURE_BLIT_SCALED_SYSTEM_RGB565 |
 				 DRM_GCN_FEATURE_SYSTEM_GEM_LINEAR |

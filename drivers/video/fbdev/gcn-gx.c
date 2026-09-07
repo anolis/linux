@@ -184,6 +184,10 @@ static u32 gx_rgb888_timing_frames;
 
 #if IS_ENABLED(CONFIG_DRM_GCN_GX)
 static bool gx_scale_trace;
+static bool gx_scale_cpu_uniform;
+module_param_named(scale_cpu_uniform, gx_scale_cpu_uniform, bool, 0444);
+MODULE_PARM_DESC(scale_cpu_uniform,
+		 "Validate uniform source and fill the entire focused texture extent");
 static bool gx_scale_cpu_rgba8;
 module_param_named(scale_cpu_rgba8, gx_scale_cpu_rgba8, bool, 0444);
 MODULE_PARM_DESC(scale_cpu_rgba8,
@@ -5349,6 +5353,8 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		size_t fixture_bytes = horizontal_bytes;
 		u32 expected_hash = 2166136261U;
 		u32 published_hash;
+		u16 hash_width = dst_rect_width;
+		u16 hash_height = src_rect_height;
 		u16 x;
 		u16 y;
 
@@ -5364,13 +5370,26 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 			ret = -E2BIG;
 			goto out_unlock;
 		}
+		if (gx_scale_cpu_uniform) {
+			for (y = 0; y < src_height; y++) {
+				for (x = 0; x < src_width; x++) {
+					if (source[gx_tiled_rgb565_index(x, y, src_width)] !=
+					    source[0]) {
+						ret = -EINVAL;
+						goto out_unlock;
+					}
+				}
+			}
+			hash_width = horizontal_width;
+			hash_height = crop_height;
+		}
 		/* Synthetic input control, not an accelerated scaler repair. */
 		memset(final_texture, 0, fixture_bytes);
-		for (y = 0; y < src_rect_height; y++) {
-			for (x = 0; x < dst_rect_width; x++) {
+		for (y = 0; y < hash_height; y++) {
+			for (x = 0; x < hash_width; x++) {
 				size_t pixel = gx_tiled_rgb565_index(x, y, horizontal_width);
-				u16 value = source[gx_tiled_rgb565_index(2 * x + 1,
-									 y, src_width)];
+				u16 value = gx_scale_cpu_uniform ? source[0] :
+					source[gx_tiled_rgb565_index(2 * x + 1, y, src_width)];
 
 				if (gx_scale_cpu_rgba8)
 					gx_scale_store_rgba8(final_texture, x, y,
@@ -5388,15 +5407,15 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		if (gx_scale_cpu_rgba8)
 			published_hash = gx_hash_scale_rgba8(final_texture,
 							     horizontal_width,
-							     dst_rect_width, src_rect_height);
+							     hash_width, hash_height);
 		else
 			published_hash = gx_hash_tiled_region(final_texture,
 							      horizontal_width,
-							      dst_rect_width, src_rect_height);
-		pr_info("gcn-gx: scale-cpu-source seq=%u producer=%08x expected=%08x published=%08x base=%08x format=%u bytes=%zu\n",
+							      hash_width, hash_height);
+		pr_info("gcn-gx: scale-cpu-source seq=%u producer=%08x expected=%08x published=%08x base=%08x format=%u bytes=%zu hash_extent=%ux%u\n",
 			trace_sequence, horizontal_delayed_hash, expected_hash,
 			published_hash, (u32)virt_to_phys(final_texture),
-			final_texture_format, fixture_bytes);
+			final_texture_format, fixture_bytes, hash_width, hash_height);
 		if (published_hash != expected_hash) {
 			ret = -EIO;
 			goto out_unlock;

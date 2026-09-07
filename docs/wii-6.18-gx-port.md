@@ -15936,3 +15936,37 @@ sample while still exercising texture fetch and the final draw. Preserve the
 full EFB detector. A failure can then be classified as more than selection of
 another valid differently colored texel. No uniform-source control has yet been
 implemented; a passing short control would not accept a scaler repair.
+
+#### Stage full-extent uniform texture control (2026-09-07)
+
+The explicit client mode `--wide-reduce-uniform-only` fills its original
+640x240 source with RGB565 `0x9f1d` and requires every one of the 38400 output
+pixels to equal that same literal value. It repeats up to 100 iterations and
+stops on the first error. Ordinary full-suite and ramp-only cases keep their
+original ramp input and oracle.
+
+With `scale_cpu_uniform=1` inside the exact CPU-source trace, the driver first
+validates that every original source pixel equals the first. It then fills all
+512x256 texels, including padding, with that color. The existing bit-replicated
+RGBA8 encoder and round-trip logical hash cover the whole padded extent, not
+only the sampled 320x240 region. The final geometry, coordinates, texture base,
+RGBA8 binding, full EFB oracle and copy remain unchanged. Input uniformity or
+published-hash failure rejects the diagnostic before the final draw.
+
+Strict checkpatch and `git diff --check` pass. The PowerPC `W=1` module and
+all four static clients build successfully with the standard `-j16` helpers;
+client compilation uses `-Wall -Wextra -Werror`. Checksums:
+
+```
+6464b161433242928e746117915c66e72752b55939331ecd411459472c3d7dfd  /media/anolis/dev/wii-gcn-linear-v12-build/drivers/video/fbdev/gcn-gx.ko
+8a5c703059182bbf405ab9c1d7feedc94bf3139cb0ef5af17dc867a60f35d549  /media/anolis/dev/wii-gcn-uniform-clients/wii-gcn-render-test
+```
+
+Run at `10.3.10.59` with `scale_trace=1 render_only=1 scale_efb_full=1
+scale_cpu_source=1 scale_cpu_alt=1 scale_cpu_rgba8=1 scale_cpu_uniform=1`
+and the explicit uniform client mode. A wrong pixel cannot be explained solely
+by selecting another correctly fetched texel in this uniformly filled texture.
+Keep hardware fetch corruption, out-of-range access, state and raster behavior
+as separate possibilities. If 100 iterations pass, run 500 additional focused
+iterations before concluding this control appears stable; it is never a
+production scaler correctness test because its source has no spatial detail.
