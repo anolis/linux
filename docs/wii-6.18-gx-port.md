@@ -14745,3 +14745,25 @@ three scaled command streams, leaving one marker after each copy, and waits for
 that marker before reusing the crop or horizontal intermediate. Retain all
 command padding, texture invalidation, pixel-mode synchronization, exact-token
 polling, geometry, and cache operations unchanged.
+
+Commit `daf00bccd` implements isolated scaled-stage completion. The source-crop,
+horizontal, and final submissions now contain one PE finish marker each: the
+marker emitted after that stage's EFB texture copy. The crop and horizontal
+stages each wait for their finish before the next stage binds their output.
+The final copy retains its existing wait. Exact token equality, `GX_PixModeSync`,
+all 32-byte command padding, texture invalidation, raster/texture state,
+geometry, allocation, and CPU cache maintenance remain unchanged.
+
+Diff-scoped strict checkpatch reports zero diagnostics and the PowerPC `W=1`
+provider build passes with `-j16`:
+
+```
+2fa12555f04ca46e98102b154672000baaa624708fa10524aba538f87d40714f  /media/anolis/dev/wii-gcn-linear-v12-build/drivers/video/fbdev/gcn-gx.ko
+```
+
+Validate with the unchanged strict client `34db4188...` on the unchanged v12
+boot. Require at least three consecutive full-suite passes. In particular,
+every one of the 23 small-object scaled cases, both 640-wide directions, both
+full-screen system paths, and XRGB8888 conversion must match every pixel. Also
+require the 64-pixel linear oracle, exact MEM1 recovery, clean unload, and no
+timeout or kernel fault.
