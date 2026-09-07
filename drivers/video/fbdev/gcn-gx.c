@@ -184,6 +184,10 @@ static u32 gx_rgb888_timing_frames;
 
 #if IS_ENABLED(CONFIG_DRM_GCN_GX)
 static bool gx_scale_trace;
+static bool gx_scale_efb_peek;
+module_param_named(scale_efb_peek, gx_scale_efb_peek, bool, 0444);
+MODULE_PARM_DESC(scale_efb_peek,
+		 "Read four final EFB colors during the focused scale trace");
 static u32 gx_scale_trace_sequence;
 module_param_named(scale_trace, gx_scale_trace, bool, 0444);
 MODULE_PARM_DESC(scale_trace,
@@ -765,6 +769,31 @@ static u32 gx_hash_pending_commands(void)
 	}
 
 	return hash;
+}
+
+struct gx_scale_efb_sample {
+	u16 x;
+	u16 y;
+	u32 argb;
+};
+
+/* libogc GX_PeekARGB: physical EFB color aperture, y[21:12], x[11:2]. */
+static int gx_peek_scale_colors(struct gx_scale_efb_sample *samples, size_t count)
+{
+	size_t i;
+
+	for (i = 0; i < count; i++) {
+		phys_addr_t phys = 0x08000000 | ((u32)samples[i].y << 12) |
+				   ((u32)samples[i].x << 2);
+		void __iomem *pixel = ioremap(phys, sizeof(u32));
+
+		if (!pixel)
+			return -ENOMEM;
+		samples[i].argb = ioread32be(pixel);
+		iounmap(pixel);
+	}
+
+	return 0;
 }
 
 static size_t gx_rgb565_index(u16 x, u16 y, u16 width, u32 layout)
@@ -4951,6 +4980,12 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 					      u32 dst_layout,
 					      bool system_memory)
 {
+	struct gx_scale_efb_sample samples[] = {
+		{ .x = 0, .y = 0 },
+		{ .x = 166, .y = 113 },
+		{ .x = 206, .y = 31 },
+		{ .x = 319, .y = 119 },
+	};
 	void *crop = gx_tex_buf_alt;
 	void *horizontal = gx_tex_buf;
 	u16 crop_height;
@@ -5184,6 +5219,12 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	ret = gx_submit_and_wait_finish("render-blit-scaled-final-draw");
 	if (ret)
 		goto out_unlock;
+	if (trace && gx_scale_efb_peek) {
+		ret = gx_peek_scale_colors(samples, ARRAY_SIZE(samples));
+		if (ret)
+			goto out_unlock;
+	}
+
 
 	fifo_pos = 0;
 	gx_load_libogc_init_preamble();
@@ -5211,6 +5252,28 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 			final_delayed_hash = gx_hash_tiled_region(dst_addr,
 								  dst_width, dst_width,
 								  dst_height);
+			if (gx_scale_efb_peek) {
+				const u16 *output = dst_addr;
+				const u16 *source = src_addr;
+
+				for (i = 0; i < ARRAY_SIZE(samples); i++) {
+					u16 x = samples[i].x;
+					u16 y = samples[i].y;
+					u32 argb = samples[i].argb;
+					u16 rgb565 = ((argb >> 8) & 0xf800) |
+						     ((argb >> 5) & 0x07e0) |
+						     ((argb >> 3) & 0x001f);
+					u16 copied = output[gx_tiled_rgb565_index(x, y,
+										      dst_width)];
+					u16 expected = source[gx_tiled_rgb565_index(2 * x + 1,
+											2 * y + 1,
+											src_width)];
+
+					pr_info("gcn-gx: scale-efb seq=%u x=%u y=%u argb=%08x rgb565=%04x copied=%04x expected=%04x\n",
+						trace_sequence, x, y, argb, rgb565,
+						copied, expected);
+				}
+			}
 			pr_info("gcn-gx: scale-commands seq=%u horizontal=%08x final=%08x\n",
 				trace_sequence, horizontal_command_hash,
 				final_command_hash);

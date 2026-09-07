@@ -15550,3 +15550,36 @@ the corresponding copied RGB565 pixels. Account explicitly for RGB8-to-RGB565
 quantization. Retain the current source/command/output detectors and avoid
 repeating rejected replay-count, scanout-isolation, dithering, or copy-clear
 fixes. No EFB-access candidate has yet been implemented or hardware-validated.
+
+#### Stage opt-in EFB color-read control (2026-09-07)
+
+The `scale_efb_peek=1` parameter adds four CPU color reads after the focused
+final draw's PE finish and before its EFB texture copy. It only acts within
+`scale_trace=1`'s exact 640x240-to-320x120 gate. Coordinates are `(0,0)`,
+`(166,113)`, `(206,31)`, and `(319,119)`, covering controls and both recurring
+failure positions. No CPU EFB writes occur. Each mapped 32-bit read is promptly
+unmapped, and an allocation failure returns through the normal unlock path.
+
+Address and ARGB interpretation follow the archived primary source
+`wii-test-artifacts/tmp-archive-20260730/libogc-gx-reference/libogc/gx.c`,
+`GX_PeekARGB()` at line 4506: physical `0x08000000 | (y << 12) | (x << 2)`.
+Dolphin's archived `VideoCommon/EFBInterface.cpp` also models RGB8 color reads
+as ARGB, with separately controlled alpha. Alpha is ignored here. Log raw
+ARGB, RGB565 obtained by truncating R/B to five bits and G to six, the copied
+RGB565 pixel, and the source pixel selected by the exact 2:1 center-nearest
+oracle. Validate that interpretation on passing varied pixels before using
+it to classify corruption; earlier CPU EFB depth tests failed their controls
+and remain explicitly non-authoritative.
+
+Strict checkpatch and `git diff --check` pass. PowerPC `W=1` module compilation
+passes with `-j16`. Candidate module SHA-256:
+
+```
+45ceb4ee73a18580ed89cfbaffa23172c71937233c6bad085a9581804156c738  /media/anolis/dev/wii-gcn-linear-v12-build/drivers/video/fbdev/gcn-gx.ko
+```
+
+Run the checksum-pinned focused client on `10.3.10.59` with
+`scale_trace=1 render_only=1 scale_efb_peek=1`. If passing copy pixels do not
+agree with quantized EFB reads, reject the readback interpretation. If the
+control works, compare a sampled failing pixel before and after copy. No
+production behavior is accepted on the basis of this diagnostic.
