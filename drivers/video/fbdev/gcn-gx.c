@@ -188,6 +188,10 @@ static bool gx_scale_clear_color;
 module_param_named(scale_clear_color, gx_scale_clear_color, bool, 0444);
 MODULE_PARM_DESC(scale_clear_color,
 		 "Produce the focused uniform final EFB with copy-clear only");
+static bool gx_scale_row_fence;
+module_param_named(scale_row_fence, gx_scale_row_fence, bool, 0444);
+MODULE_PARM_DESC(scale_row_fence,
+		 "Submit and finish each focused direct-color row separately");
 static bool gx_scale_single_quad;
 module_param_named(scale_single_quad, gx_scale_single_quad, bool, 0444);
 MODULE_PARM_DESC(scale_single_quad,
@@ -793,10 +797,9 @@ static u32 gx_hash_tiled_region(const u16 *pixels, u16 stride, u16 width,
 }
 
 /* Fingerprint authored commands before submission adds its changing token. */
-static u32 gx_hash_pending_commands(void)
+static u32 gx_hash_pending_commands_seed(u32 hash)
 {
 	const u8 *bytes = gx_fifo_buf;
-	u32 hash = 2166136261U;
 	u32 i;
 
 	for (i = 0; i < fifo_pos; i++) {
@@ -805,6 +808,11 @@ static u32 gx_hash_pending_commands(void)
 	}
 
 	return hash;
+}
+
+static u32 gx_hash_pending_commands(void)
+{
+	return gx_hash_pending_commands_seed(2166136261U);
 }
 
 struct gx_scale_efb_sample {
@@ -3410,6 +3418,29 @@ static int gx_submit_and_wait_finish(const char *phase)
 	return 0;
 }
 
+static int gx_submit_fenced_color_rows(u16 width, u16 height,
+				       u8 r, u8 g, u8 b, u32 *commands)
+{
+	u32 hash = 2166136261U;
+	u16 y;
+	int ret;
+
+	/* The caller has authored state for row zero; later rows retain it. */
+	for (y = 0; y < height; y++) {
+		gx_draw_color_rect(0, y, width, y + 1, r, g, b);
+		gx_load_bp_reg(0x45000002);
+		hash = gx_hash_pending_commands_seed(hash);
+		ret = gx_submit_and_wait_finish("render-blit-scaled-row");
+		if (ret) {
+			pr_warn("gcn-gx: fenced final row %u failed: %d\n", y, ret);
+			return ret;
+		}
+		fifo_pos = 0;
+	}
+	*commands = hash;
+	return 0;
+}
+
 static int gx_drm_offscreen_capture(u16 width, u16 height)
 {
 	const u32 sentinel = 0xa55aa55a;
@@ -5154,6 +5185,7 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	size_t dst_bytes;
 	size_t horizontal_bytes;
 	size_t src_bytes;
+	bool final_submitted = false;
 	bool trace;
 	u32 crop_hash = 0;
 	u32 final_command_hash = 0;
@@ -5229,6 +5261,12 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	if (trace && (gx_scale_direct_color || gx_scale_clear_color) &&
 	    (!gx_scale_cpu_source || !gx_scale_cpu_uniform ||
 	     (gx_scale_direct_color && gx_scale_clear_color))) {
+		ret = -EINVAL;
+		goto out_unlock;
+	}
+
+	if (trace && gx_scale_row_fence &&
+	    (!gx_scale_direct_color || gx_scale_single_quad)) {
 		ret = -EINVAL;
 		goto out_unlock;
 	}
@@ -5486,7 +5524,15 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		} else {
 			gx_setup_vertex_color_state(dst_width, dst_height);
 			gx_set_scissor(0, 0, dst_width, dst_height);
-			if (gx_scale_single_quad) {
+			if (gx_scale_row_fence) {
+				ret = gx_submit_fenced_color_rows(dst_width, dst_height,
+								  r, g, b, &final_command_hash);
+				if (ret)
+					goto out_unlock;
+				final_submitted = true;
+				pr_info("gcn-gx: scale-row-fence seq=%u completed=%u commands=%08x\n",
+					trace_sequence, dst_height, final_command_hash);
+			} else if (gx_scale_single_quad) {
 				gx_draw_color_rect(0, 0, dst_width, dst_height, r, g, b);
 			} else {
 				/* Exact 2:1 trace: one quad per destination row. */
@@ -5508,15 +5554,17 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 					      crop_height,
 					      dst_rect_height);
 	}
-	if (!(trace && gx_scale_clear_color))
-		gx_load_bp_reg(0x45000002);
-	if (trace)
-		final_command_hash = gx_hash_pending_commands();
-	ret = gx_submit_and_wait_finish(trace && gx_scale_clear_color ?
-					"render-blit-scaled-final-clear" :
-					"render-blit-scaled-final-draw");
-	if (ret)
-		goto out_unlock;
+	if (!final_submitted) {
+		if (!(trace && gx_scale_clear_color))
+			gx_load_bp_reg(0x45000002);
+		if (trace)
+			final_command_hash = gx_hash_pending_commands();
+		ret = gx_submit_and_wait_finish(trace && gx_scale_clear_color ?
+						"render-blit-scaled-final-clear" :
+						"render-blit-scaled-final-draw");
+		if (ret)
+			goto out_unlock;
+	}
 	if (efb_snapshot) {
 		ret = gx_snapshot_scale_colors(efb_snapshot, dst_width, dst_height);
 		if (ret)

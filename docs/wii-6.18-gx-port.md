@@ -16214,3 +16214,37 @@ fingerprint of the whole authored row sequence, full EFB comparison, explicit
 uniform oracle and failure cleanup; document the extra 120 completion points.
 Do not present serializing every row as a production performance solution.
 No per-row-fenced candidate has yet been implemented.
+
+#### Stage separately fenced direct-color rows (2026-09-07)
+
+`scale_row_fence=1` keeps the 120 one-row direct-color quads but gives each
+row its own four-vertex packet, BP 0x45, submission and positive finish wait.
+The first row contains the normal authored setup; later rows retain that state
+and emit only their primitive plus finish. The FIFO is reused only after the
+row wait succeeds. An error reports the row number and returns through normal
+cleanup. After all 120 rows, the ordinary full EFB snapshot and readout copy
+run without an extra empty final-draw submission.
+
+A rolling FNV-1a fingerprint covers the concatenation of all authored row
+streams, before submit-time tokens and padding. The diagnostic logs the total
+completed row count and aggregate command hash. It requires direct-color mode,
+rejects single-quad mode, and inherits the uniform-source checks. Default paths
+retain their original stream and timing. This changes packet boundaries and
+CP submission timing as well as adding 120 completion waits; it is an isolation
+experiment, not a proposed performance solution.
+
+Strict checkpatch, `git diff --check`, and PowerPC `W=1` module build pass
+with `-j16`. Candidate SHA-256:
+
+```
+20529f0421ff735734a79988b926fb86e1312a1edafe0487c988130c3999c343  /media/anolis/dev/wii-gcn-linear-v12-build/drivers/video/fbdev/gcn-gx.ko
+```
+
+Run the same `8a5c7030...` uniform client at `10.3.10.59` with
+`scale_trace=1 render_only=1 scale_efb_full=1 scale_cpu_source=1
+scale_cpu_alt=1 scale_cpu_rgba8=1 scale_cpu_uniform=1 scale_direct_color=1
+scale_row_fence=1`; leave clear-only and single-quad disabled. Require 120
+completed rows on every successful iteration, stable aggregate command hashes,
+and exact full EFB/source/copy agreement. If 100 iterations pass, extend to
+500 more and recheck unfenced rows under the same binary before interpreting
+the contrast. A failure rejects positive per-row completion as sufficient.
