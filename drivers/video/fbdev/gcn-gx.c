@@ -184,6 +184,10 @@ static u32 gx_rgb888_timing_frames;
 
 #if IS_ENABLED(CONFIG_DRM_GCN_GX)
 static bool gx_scale_trace;
+static bool gx_scale_cpu_alt;
+module_param_named(scale_cpu_alt, gx_scale_cpu_alt, bool, 0444);
+MODULE_PARM_DESC(scale_cpu_alt,
+		 "Place the focused CPU texture source in the alternate MEM1 slot");
 static bool gx_scale_cpu_source;
 module_param_named(scale_cpu_source, gx_scale_cpu_source, bool, 0444);
 MODULE_PARM_DESC(scale_cpu_source,
@@ -5072,6 +5076,7 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	u32 *efb_snapshot = NULL;
 	void *crop = gx_tex_buf_alt;
 	void *horizontal = gx_tex_buf;
+	void *final_texture = horizontal;
 	u16 crop_height;
 	u16 crop_copy_width;
 	u16 crop_width;
@@ -5293,14 +5298,18 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 
 	if (trace && gx_scale_cpu_source) {
 		const u16 *source = src_addr;
-		u16 *pixels = horizontal;
+		u16 *pixels;
 		u32 expected_hash = 2166136261U;
 		u32 published_hash;
 		u16 x;
 		u16 y;
 
+		/* The prior horizontal draw no longer needs the crop workspace. */
+		if (gx_scale_cpu_alt)
+			final_texture = crop;
+		pixels = final_texture;
 		/* Synthetic input control, not an accelerated scaler repair. */
-		memset(horizontal, 0, horizontal_bytes);
+		memset(final_texture, 0, horizontal_bytes);
 		for (y = 0; y < src_rect_height; y++) {
 			for (x = 0; x < dst_rect_width; x++) {
 				u16 value = source[gx_tiled_rgb565_index(2 * x + 1,
@@ -5312,15 +5321,15 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 				expected_hash *= 16777619U;
 			}
 		}
-		flush_dcache_range((unsigned long)horizontal,
-				   (unsigned long)horizontal + horizontal_bytes);
-		invalidate_dcache_range((unsigned long)horizontal,
-					(unsigned long)horizontal + horizontal_bytes);
-		published_hash = gx_hash_tiled_region(horizontal, horizontal_width,
+		flush_dcache_range((unsigned long)final_texture,
+				   (unsigned long)final_texture + horizontal_bytes);
+		invalidate_dcache_range((unsigned long)final_texture,
+					(unsigned long)final_texture + horizontal_bytes);
+		published_hash = gx_hash_tiled_region(final_texture, horizontal_width,
 						      dst_rect_width, src_rect_height);
-		pr_info("gcn-gx: scale-cpu-source seq=%u producer=%08x expected=%08x published=%08x\n",
+		pr_info("gcn-gx: scale-cpu-source seq=%u producer=%08x expected=%08x published=%08x base=%08x\n",
 			trace_sequence, horizontal_delayed_hash, expected_hash,
-			published_hash);
+			published_hash, (u32)virt_to_phys(final_texture));
 		if (published_hash != expected_hash) {
 			ret = -EIO;
 			goto out_unlock;
@@ -5349,7 +5358,7 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	}
 
 	gx_setup_rgb565_texture_state_mode(dst_width, dst_height, true);
-	gx_setup_texture_rgb565(horizontal, horizontal_width, crop_height);
+	gx_setup_texture_rgb565(final_texture, horizontal_width, crop_height);
 	gx_setup_texture_coordinate_scale(horizontal_width, crop_height,
 					  false, false);
 	gx_set_scissor(dst_x, dst_y, dst_rect_width, dst_rect_height);

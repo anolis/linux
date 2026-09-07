@@ -15799,3 +15799,31 @@ Verify input hashes and account for the expected texture-base command change.
 Retain full EFB comparison. This tests whether the fault depends on the source
 physical address; it must not be interpreted as a fix merely because a short
 run passes. No relocation candidate has yet been implemented.
+
+#### Stage alternate MEM1 source-address control (2026-09-07)
+
+`scale_cpu_alt=1` changes only the destination slot used by the existing
+`scale_cpu_source=1` fixture and the final draw's texture binding. It constructs
+the same padded horizontal texture directly in the now-free crop workspace at
+physical `0x013c0000` instead of `0x01300000`. No extra copy or GX submission
+is introduced. The original horizontal producer remains in its original slot
+and retains its independent hashes. The fixture hash and physical base are
+logged. Both private slots have the same `GX_TEX_BUF_SLOT_SIZE` capacity;
+the focused horizontal fixture occupies 262144 bytes and fits either slot.
+The alternate flag only acts inside the exact CPU-source trace gate, which
+excludes system-memory destination restoration and partial destination draws.
+
+Strict checkpatch, `git diff --check`, and PowerPC `W=1` build pass with
+`-j16`. Candidate SHA-256:
+
+```
+674dd8e939671604d3216fe58ee8ddadc8932f25341b114f7053eeb0b9d9f7b4  /media/anolis/dev/wii-gcn-linear-v12-build/drivers/video/fbdev/gcn-gx.ko
+```
+
+Run on `10.3.10.59` with the same client and `scale_trace=1 render_only=1
+scale_efb_full=1 scale_cpu_source=1 scale_cpu_alt=1`. Require exact published
+hash `22ce6dc5`, logged base `013c0000`, stable authored final commands (their
+hash changes because the texture base changes), and complete EFB/copy/source
+comparisons. Any corruption rejects source relocation as a sufficient fix;
+a repeat of the same failing pixel would constrain source-base dependence.
+If 100 focused iterations pass, extend to 500 more before interpreting it.
