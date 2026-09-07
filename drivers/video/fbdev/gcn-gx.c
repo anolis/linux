@@ -4951,8 +4951,6 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	u32 crop_hash = 0;
 	u32 final_hash = 0;
 	u32 horizontal_hash = 0;
-	u32 horizontal_replay_hash = 0;
-	u32 replay_hash = 0;
 	u32 source_hash = 0;
 	u32 trace_sequence = 0;
 	int ret;
@@ -5073,7 +5071,7 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		gx_copy_efb_rect_to_rgb565_texture_stride(crop, 0, 0,
 							  crop_copy_width,
 							  crop_height,
-							  crop_width, true);
+							  crop_width, !trace);
 		ret = gx_submit_and_wait_finish("render-blit-scaled-crop-copy");
 		if (ret)
 			goto out_unlock;
@@ -5109,7 +5107,7 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	gx_copy_efb_rect_to_rgb565_texture_stride(horizontal, 0, 0,
 						  horizontal_copy_width,
 						  crop_height,
-						  horizontal_width, true);
+						  horizontal_width, !trace);
 	ret = gx_submit_and_wait_finish("render-blit-scaled-horizontal-copy");
 	if (ret)
 		goto out_unlock;
@@ -5120,44 +5118,6 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 						       horizontal_width,
 						       dst_rect_width,
 						       src_rect_height);
-
-		fifo_pos = 0;
-		gx_load_libogc_init_preamble();
-		gx_setup_display_copy_state();
-		gx_setup_rgb565_texture_state_mode(horizontal_width,
-						   crop_height, true);
-		gx_setup_texture_rgb565(crop, crop_width, crop_height);
-		gx_setup_texture_coordinate_scale(crop_width, crop_height,
-						  false, false);
-		gx_set_scissor(0, 0, dst_rect_width, src_rect_height);
-		gx_draw_nearest_horizontal_runs(src_rect_width, crop_width,
-						src_rect_height, crop_height,
-						dst_rect_width);
-		gx_load_bp_reg(0x45000002);
-		ret = gx_submit_and_wait_finish("render-blit-scaled-horizontal-replay-draw");
-		if (ret)
-			goto out_unlock;
-
-		flush_dcache_range((unsigned long)horizontal,
-				   (unsigned long)horizontal + horizontal_bytes);
-		fifo_pos = 0;
-		gx_load_libogc_init_preamble();
-		gx_setup_display_copy_state();
-		gx_set_copy_clear_rgb(0x00, 0x00, 0x00);
-		gx_copy_efb_rect_to_rgb565_texture_stride(horizontal, 0, 0,
-							  horizontal_copy_width,
-							  crop_height,
-							  horizontal_width,
-							  true);
-		ret = gx_submit_and_wait_finish("render-blit-scaled-horizontal-replay-copy");
-		if (ret)
-			goto out_unlock;
-		invalidate_dcache_range((unsigned long)horizontal,
-					(unsigned long)horizontal + horizontal_bytes);
-		horizontal_replay_hash = gx_hash_tiled_region(horizontal,
-							      horizontal_width,
-							      dst_rect_width,
-							      src_rect_height);
 	}
 
 	/* The crop workspace is free once the horizontal snapshot is complete. */
@@ -5200,7 +5160,7 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	gx_setup_display_copy_state();
 	gx_set_copy_clear_rgb(0x00, 0x00, 0x00);
 	gx_copy_efb_to_rgb565_texture(system_memory ? crop : dst_addr,
-				      dst_width, dst_height, true);
+				      dst_width, dst_height, !trace);
 	ret = gx_submit_and_wait_finish("render-blit-scaled-final-copy");
 	if (ret)
 		goto out_unlock;
@@ -5215,46 +5175,9 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		if (trace) {
 			final_hash = gx_hash_tiled_region(dst_addr, dst_width,
 							  dst_width, dst_height);
-
-			fifo_pos = 0;
-			gx_load_libogc_init_preamble();
-			gx_setup_display_copy_state();
-			gx_setup_rgb565_texture_state_mode(dst_width, dst_height,
-							   true);
-			gx_setup_texture_rgb565(horizontal, horizontal_width,
-						crop_height);
-			gx_setup_texture_coordinate_scale(horizontal_width,
-							  crop_height,
-							  false, false);
-			gx_set_scissor(0, 0, dst_width, dst_height);
-			gx_draw_nearest_vertical_runs(0, 0, dst_width,
-						      horizontal_width,
-						      src_rect_height,
-						      crop_height, dst_height);
-			gx_load_bp_reg(0x45000002);
-			ret = gx_submit_and_wait_finish("render-blit-scaled-final-replay-draw");
-			if (ret)
-				goto out_unlock;
-
-			flush_dcache_range((unsigned long)dst_addr,
-					   (unsigned long)dst_addr + dst_bytes);
-			fifo_pos = 0;
-			gx_load_libogc_init_preamble();
-			gx_setup_display_copy_state();
-			gx_set_copy_clear_rgb(0x00, 0x00, 0x00);
-			gx_copy_efb_to_rgb565_texture(dst_addr, dst_width, dst_height,
-						      true);
-			ret = gx_submit_and_wait_finish("render-blit-scaled-final-replay-copy");
-			if (ret)
-				goto out_unlock;
-			invalidate_dcache_range((unsigned long)dst_addr,
-						(unsigned long)dst_addr + dst_bytes);
-			replay_hash = gx_hash_tiled_region(dst_addr, dst_width,
-							   dst_width, dst_height);
-			pr_info("gcn-gx: scale-trace seq=%u src=%08x crop=%08x horizontal=%08x horizontal_replay=%08x final=%08x replay=%08x\n",
+			pr_info("gcn-gx: scale-trace seq=%u src=%08x crop=%08x horizontal=%08x final=%08x\n",
 				trace_sequence, source_hash, crop_hash,
-				horizontal_hash, horizontal_replay_hash,
-				final_hash, replay_hash);
+				horizontal_hash, final_hash);
 		}
 	}
 
