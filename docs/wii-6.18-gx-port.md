@@ -16560,3 +16560,52 @@ render_only=1 scale_efb_full=1 scale_cpu_source=1 scale_cpu_alt=1
 scale_cpu_rgba8=1 scale_cpu_uniform=1 scale_direct_color=1`, plus the two
 boundaries. Keep band height at default, single-quad/per-row-fence/clear-only
 off. No hardware results yet. Default production scaling is unchanged.
+
+#### Three-rectangle thin and broad controls both pass (2026-09-07)
+
+Hardware result for `60db54ece`: both planned configurations completed twenty
+100-frame cycles, using unchanged candidate `24010f69...` and uniform client
+`8a5c7030...`. Thin boundaries 90/91 and broad boundaries 40/80 each passed
+2,000 frames (76,800,000 pixels); combined, all 153,600,000 pixels matched
+the source oracle in EFB and copied output. Every frame had zero source/copy
+mismatches and the expected two-boundary/count=3 metadata.
+
+Authored horizontal commands remained `03506e62`; final commands were
+`9fabc7b8` for 90/91 and `df48454c` for 40/80. Source/crop remained
+`ad05e5c5`, final/delayed `e5c8efc5`, and the padded fixture remained
+`expected=published=c4c69dc5`, base `013c0000`, format 6, 524288 bytes.
+Earlier horizontal hashes differed from `d33901c5` in 18 thin-control frames
+and 13 broad-control frames; synthetic fixture publication and the final
+untextured draw were exact despite those upstream errors.
+
+All forty audits verified the candidate/client hashes, installed accepted
+provider `a2e7df8e...`, boot `444193a6-aee4-4ae3-a619-4f6dd90fccf1`, and
+target `10.3.10.59`. Every cycle unloaded the candidate and restored CPU
+scanout, with no timeout, stall or kernel fault in the captured interval.
+No candidate was permanently installed.
+
+Each manifest covers sixty client, trimmed-kernel and raw-audit artifacts,
+with stems `wii-gcn-wide-reduce-split90-91-2000-1` through `-20` and
+`wii-gcn-wide-reduce-split40-80-2000-1` through `-20`, respectively:
+
+```
+4a933138447d29ba2b3276e2b21084938869a01ec31ebeda1aca4695ed10bc59  /media/anolis/dev/wii-gcn-wide-reduce-split90-91-2000.sha256
+ac5f0610346803ba70541ee6c6ab0a22ba384e277a09eb8d2cc5286a12bd2a9e  /media/anolis/dev/wii-gcn-wide-reduce-split40-80-2000.sha256
+```
+
+A one-row interior primitive at the last observed failing row did not
+reproduce corruption in this bounded three-primitive test. This narrows the
+contrast with failing 60/120-primitive streams, but does not establish count,
+command length, cumulative raster work or another mechanism as the cause.
+These uniform controls do not implement general nearest-neighbor scaling.
+
+Next bounded diagnostic: measure and log authored final-stream byte counts,
+then add optional GX_NOP padding to the passing three-broad-rectangle control
+to match the authored length of the failing 120-row stream. Keep the three
+real rectangles and state fixed, append padding before final completion, and
+include padding in the authored fingerprint. This tests whether equal overall
+stream length alone reproduces failure; it does not simulate vertex-fetch or
+raster work from 120 real primitives. Bound padding by FIFO capacity and log
+both unpadded/padded byte counts after readout. Recheck the existing notes for
+prior equivalent padding controls before implementation. This experiment is
+not yet implemented or run. Default production scaling remains unchanged.
