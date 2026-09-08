@@ -16815,3 +16815,52 @@ Require real=3/extra=117/total=120/first=1 and 6409 authored bytes. Stop on
 first error or twenty 100-frame cycles. No hardware result yet. A pass does
 not prove identical hardware workload or absence of same-color overdraw.
 Default production scaling remains unchanged.
+
+#### Leading coincident-vertex quads pass 2,000 frames (2026-09-07)
+
+Hardware result for `2566fd51f`: 117 coincident-vertex quads followed by three
+broad rectangles at boundaries 40/80 passed twenty 100-frame cycles. All
+2,000 frames (76,800,000 pixels) matched the source oracle in EFB and copied
+output, with zero source/copy mismatches. Every frame logged
+real=3/extra=117/total=120/first=1, split count=120, 6409 unpadded/padded
+authored bytes and zero NOPs. Vertex count and length match the trailing
+control and failing real-row stream.
+
+Authored hashes remained `horizontal=03506e62 final=ca787f2f`, source/crop
+`ad05e5c5`, final/delayed `e5c8efc5`, and full fixture
+`expected=published=c4c69dc5`, base `013c0000`, format 6, 524288 bytes.
+Nineteen frames had earlier horizontal hashes differing from `d33901c5`,
+while fixture publication and the final direct-color output stayed exact.
+The broader corruption therefore remained observable upstream.
+
+All twenty audits completed without retrieval retries and verified candidate
+`54b53402...`, client `8a5c7030...`, installed accepted provider `a2e7df8e...`,
+boot `444193a6-aee4-4ae3-a619-4f6dd90fccf1`, and target `10.3.10.59`.
+Every cycle unloaded the candidate and restored CPU scanout. No timeout,
+stall or kernel fault appeared in the captured intervals. The candidate was
+not permanently installed.
+
+The sixty accepted client, trimmed-kernel and raw-audit artifacts have stems
+`wii-gcn-wide-reduce-degenerate-first-2000-1` through `-20`. Manifest:
+
+```
+227c286b6964c84a32511432702353e69ecef053ed5482e98041c2f75ded8115  /media/anolis/dev/wii-gcn-wide-reduce-degenerate-first-2000.sha256
+```
+
+Both leading and trailing coincident-vertex controls now have 2,000-frame
+passes. Moving those vertices before the visible draw did not reproduce the
+error. These bounded passes do not establish identical hardware workload,
+exclude primitive processing, or prove absence of same-color overdraw. The
+failing real-row stream still differs in vertex coordinates and raster work.
+This is not a scaler repair.
+
+Next bounded geometry comparison: emit 120 real vertical strips across the
+320x120 destination, using integer boundaries floor(i*320/120) through
+floor((i+1)*320/120), i=0..119. Widths are 2 or 3 pixels with no gaps or
+overlap. This keeps 120 quads, 480 vertices, 6409 authored bytes, total covered
+area, color and state matched to the failing 120-row stream while changing
+boundary direction and primitive dimensions. Require post-readout orientation,
+count and byte metadata; preserve the uniform/full-EFB oracle. Review earlier
+notes for an equivalent control before implementation. Run at most twenty
+100-frame cycles and stop on error. This vertical-strip control has not been
+implemented or run. Default production scaling remains unchanged.
