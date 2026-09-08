@@ -17326,3 +17326,62 @@ source/crop `a2c385c5`, hardware horizontal/delayed `22ce6dc5`, final/delayed
 error or twenty 100-frame cycles. No hardware result yet. Local scratch stays
 on the dev drive; remote Wii `/tmp` is allowed. This remains opt-in diagnostic
 code until broader dimensions/ratios and production paths are validated.
+
+#### GPU-only paired splits pass 2,000 frames and full suite (2026-09-08)
+
+Hardware result for `e244af0ec`: both texture stages split along their long
+axes completed twenty 100-frame ramp cycles without CPU fixture correction.
+All 2,000 frames (76,800,000 final pixels) had exact source/crop `a2c385c5`,
+hardware horizontal/delayed `22ce6dc5`, final/delayed `ae90ddc5`, and zero
+EFB source/copy mismatches. There were zero upstream hash mismatches, compared
+with 188 in the preceding RGB565 fixture-based run. No scale-cpu-source event
+appeared; the final draw consumed the ordinary hardware intermediate.
+
+Every frame logged 640 horizontal quads split at y=120, 52174 horizontal
+authored bytes and cpu_source=0, plus 240 final quads split at x=160 and
+20174 final authored bytes (zero NOPs). Authored hashes stayed
+`horizontal=716830f7 final=0c15301a`. RGB565 and normal workspace selection
+were used; CPU-source/alternate/RGBA8/uniform/direct-color overrides were off.
+
+A subsequent single full render-client run on the same candidate/options also
+passed. This covered allocator exhaustion/recovery, copies/fills/overlap,
+23 small-object scale/alias cases, fixed/indexed/textured/depth drawing,
+RGBA8 alpha and 64-pixel bilinear checks, system rendering, both 640-wide
+scale directions, tiled/linear system-object scaling and XRGB8888 conversion.
+The focused wide reduction again had exact intermediate/final hashes and EFB
+comparisons. The other shapes retain their existing unsplit paths; their one
+full-suite pass does not establish repeated stability or validate generalized
+splitting. System-object tests recovered all 524288 MEM1 bytes.
+
+All twenty-one audits verified candidate `ba4eed6d...`, client `8a5c7030...`,
+installed accepted provider `a2e7df8e...`, boot
+`444193a6-aee4-4ae3-a619-4f6dd90fccf1`, and target `10.3.10.59`. Each
+cycle unloaded the candidate and restored CPU scanout, with no timeout,
+stall or kernel fault. No candidate was permanently installed. Render-only
+mode retained CPU display presentation; this result validates GPU scaling,
+not concurrent GPU scanout. Local scratch remained on the dev drive.
+
+The sixty ramp artifacts have stems `wii-gcn-wide-reduce-gpu-split-2000-1`
+through `-20`. Manifest and the three full-suite artifacts:
+
+```
+4bdd7f3c57e1e3532151df16c24f5505e79f2a543ec555ce4963d5a38bc0cc5b  /media/anolis/dev/wii-gcn-wide-reduce-gpu-split-2000.sha256
+c2a3f6a83be929a598b90b0b84db95cc91e741b274f4c0f858a3e0e160646a08  /media/anolis/dev/wii-gcn-gpu-split-full-suite-audit.txt
+4f5d22acdbeb0a3ee34cf7c7c77b338c94254737fbd17bca9dca641c5cea5f92  /media/anolis/dev/wii-gcn-gpu-split-full-suite-client.txt
+f1c259fccefb9753279c151a448de6f7335533f24d8758e756bf741c31d8f4d6  /media/anolis/dev/wii-gcn-gpu-split-full-suite-kernel.txt
+```
+
+The focused 640x240 -> 320x120 GPU scaling path now has a bounded repeated
+pass without masking intermediate errors. The split pair remains gated by
+explicit diagnostic options and scale_trace; it is not yet a default-path fix.
+This does not prove the exact hardware mechanism or validate arbitrary
+geometry with generic splitting.
+
+Next bounded implementation: separate the validated shape predicate from
+trace instrumentation and enable this paired partition by default only for
+the validated full-surface, non-system-memory 640x240 -> 320x120 case. Keep
+all other shapes unchanged and retain an explicit diagnostic way to compare
+the unsplit stream. Validate the default path with trace/CPU-fixture overrides
+off, repeat the focused ramp and full suite, then check KMS presentation before
+considering installed-provider replacement. Review existing provider acceptance
+notes before promotion. No default-path promotion or installation has occurred.
