@@ -16700,3 +16700,35 @@ processing without the raster coverage of 120 thin rows; it does not guarantee
 the same hardware workload or timing. Review prior notes for an equivalent
 control before implementing it. This experiment is not yet implemented or run.
 Default production scaling remains unchanged.
+
+#### Stage coincident-vertex quad control (2026-09-07)
+
+Earlier degenerate entries describe UAPI rejection or private texture extents;
+no equivalent focused 117-extra-quad control was found. The opt-in
+`scale_degenerate_quads` now appends up to 117 quads with four coincident
+(0,0) vertices each, in the same packet after three real split rectangles.
+It requires the focused direct-color three-rectangle mode and rejects NOP
+padding. Existing ordered-boundary/incompatible-mode validation applies.
+A pre-emission FIFO capacity check covers all vertices, the header and the
+reserved trailer space. Zero preserves the existing stream.
+
+With boundaries 40/80 and 117 extras, the packet has 120 quads/480 vertices
+and should match the failing real-row stream's 6409 authored bytes. Metadata
+logs real/extra/total counts, total split quad count and byte lengths after
+readout. All vertices use the same uniform color. The full EFB oracle checks
+output correctness, but cannot detect same-color overdraw; a pass must not be
+claimed as proof that degenerate vertices generated no raster activity.
+
+PowerPC W=1 build, strict checkpatch (zero errors/warnings/checks), and
+`git diff --check` pass. Candidate SHA-256:
+
+```
+c4742d1d14e27b141989d9c83b0ada8bc7722e06efedbc3bd624118b10f05fde  /media/anolis/dev/wii-gcn-linear-v12-build/drivers/video/fbdev/gcn-gx.ko
+```
+
+Use the existing uniform client at `10.3.10.59` and usual focused trace,
+render-only, full EFB, CPU-source/alternate/RGBA8/uniform and direct-color
+options, plus `scale_split=40 scale_split_second=80
+scale_degenerate_quads=117`. Keep NOP padding off. Stop on first error or
+after twenty 100-frame cycles; verify count/length metadata before interpreting
+the comparison. No hardware results yet. Production scaling is unchanged.

@@ -188,6 +188,10 @@ static bool gx_scale_clear_color;
 module_param_named(scale_clear_color, gx_scale_clear_color, bool, 0444);
 MODULE_PARM_DESC(scale_clear_color,
 		 "Produce the focused uniform final EFB with copy-clear only");
+static unsigned int gx_scale_degenerate_quads;
+module_param_named(scale_degenerate_quads, gx_scale_degenerate_quads, uint, 0444);
+MODULE_PARM_DESC(scale_degenerate_quads,
+		 "Append up to 117 coincident-vertex quads to focused split draw");
 static unsigned int gx_scale_pad_bytes;
 module_param_named(scale_pad_bytes, gx_scale_pad_bytes, uint, 0444);
 MODULE_PARM_DESC(scale_pad_bytes,
@@ -5291,6 +5295,13 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		goto out_unlock;
 	}
 
+	if (trace && gx_scale_degenerate_quads &&
+	    (!gx_scale_direct_color || !gx_scale_split_second ||
+	     gx_scale_pad_bytes || gx_scale_degenerate_quads > 117)) {
+		ret = -EINVAL;
+		goto out_unlock;
+	}
+
 	if (trace && gx_scale_pad_bytes &&
 	    (!gx_scale_direct_color || gx_scale_row_fence ||
 	     gx_scale_pad_bytes > GX_FIFO_SIZE - 256)) {
@@ -5582,9 +5593,16 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 					trace_sequence, dst_height, final_command_hash);
 			} else if (gx_scale_split) {
 				u16 end = gx_scale_split_second ?: dst_height;
+				u16 quads = (gx_scale_split_second ? 3 : 2) +
+					    gx_scale_degenerate_quads;
 
+				/* Four twelve-byte vertices per quad, plus header. */
+				if (fifo_pos > GX_FIFO_SIZE - 256 - 3 - 48 * quads) {
+					ret = -E2BIG;
+					goto out_unlock;
+				}
 				gx_wr8(0x80);
-				gx_wr16be(gx_scale_split_second ? 12 : 8);
+				gx_wr16be(4 * quads);
 				gx_emit_color_rect(0, 0, dst_width, gx_scale_split,
 						   r, g, b);
 				gx_emit_color_rect(0, gx_scale_split, dst_width,
@@ -5592,6 +5610,8 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 				if (gx_scale_split_second)
 					gx_emit_color_rect(0, end, dst_width, dst_height,
 							   r, g, b);
+				for (y = 0; y < gx_scale_degenerate_quads; y++)
+					gx_emit_color_rect(0, 0, 0, 0, r, g, b);
 			} else if (gx_scale_single_quad) {
 				gx_draw_color_rect(0, 0, dst_width, dst_height, r, g, b);
 			} else {
@@ -5709,11 +5729,16 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 				pr_info("gcn-gx: scale-bytes seq=%u unpadded=%u padded=%u nops=%u\n",
 					trace_sequence, final_unpadded_bytes,
 					final_padded_bytes, gx_scale_pad_bytes);
+			if (gx_scale_degenerate_quads)
+				pr_info("gcn-gx: scale-degenerate seq=%u real=3 extra=%u total=%u\n",
+					trace_sequence, gx_scale_degenerate_quads,
+					3 + gx_scale_degenerate_quads);
 			if (gx_scale_split)
 				pr_info("gcn-gx: scale-split seq=%u row=%u second=%u quads=%u\n",
 					trace_sequence, gx_scale_split,
 					gx_scale_split_second,
-					gx_scale_split_second ? 3 : 2);
+					(gx_scale_split_second ? 3 : 2) +
+					gx_scale_degenerate_quads);
 			if (gx_scale_direct_color && !gx_scale_row_fence &&
 			    !gx_scale_single_quad && !gx_scale_split)
 				pr_info("gcn-gx: scale-bands seq=%u height=%u quads=%u\n",
