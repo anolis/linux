@@ -16968,3 +16968,48 @@ render-only, full EFB, CPU-source/alternate/RGBA8/uniform and direct-color
 options, plus `scale_reverse_rows=1`. Require height=1/quads=120/reverse=1
 and 6409 authored bytes. Stop on the first error or twenty 100-frame cycles.
 No hardware result yet. Production scaling remains unchanged.
+
+#### Reversed row order still fails (2026-09-07)
+
+Hardware result for `7a9d7ff26`: reversed rows passed iterations 1--50 and
+failed at iteration 51. Pixel `(29,69)` was raw EFB `009ce36f`, quantized
+EFB/copied `9f0d`, expected `9f1d`; raw blue bit 7 was lost before copying.
+The failing frame had one source mismatch and zero copy mismatches, with
+final/delayed both `553dd855`. The stop-on-failure runner did not start any
+extension cycles.
+
+All 51 frames logged height=1/quads=120/reverse=1, 6409 unpadded/padded bytes,
+zero NOPs, and stable authored hashes `horizontal=03506e62 final=10dac1b7`.
+The full padded fixture remained `expected=published=c4c69dc5`, base
+`013c0000`, format 6, 524288 bytes. Source/crop and horizontal were exact in
+the failing frame. All EFB-to-copy comparisons were exact, including the
+corrupt pixel. Reversal is rejected as sufficient to avoid the failure.
+
+The failing physical row 69 occupies zero-based packet position 50 in reverse
+order, instead of position 69 in forward order. The changed location does not
+establish a packet-position mechanism: prior forward failures occurred at
+multiple different locations and bits. Failure in both orders rules out a
+requirement for ascending submission, but not raster timing or other
+geometry/state mechanisms. Do not promote row reversal as a scaler repair.
+
+The complete audit verified candidate `9d556574...`, client `8a5c7030...`,
+installed accepted provider `a2e7df8e...`, boot
+`444193a6-aee4-4ae3-a619-4f6dd90fccf1`, and target `10.3.10.59`. The
+candidate unloaded and CPU scanout was restored. No timeout, stall or kernel
+fault appeared, and the candidate was not permanently installed.
+
+```
+e47d6885f7de6f6e2fb082264939319428e0ce9d2cd1f736b1d2bb2c13d60d29  /media/anolis/dev/wii-gcn-wide-reduce-reverse-rows-2000-1-audit.txt
+416090f13a3f93c24a6b1da373c116437761f5dd8d76e2cdc2460f3c59e2640d  /media/anolis/dev/wii-gcn-wide-reduce-reverse-rows-2000-1-client.txt
+7ae0a2d4141cd3801b5710936bcdd7191e2f4f5059e5926b5ca5c4541cf17964  /media/anolis/dev/wii-gcn-wide-reduce-reverse-rows-2000-1-kernel.txt
+```
+
+Next bounded topology comparison: emit the forward one-row rectangles as two
+explicit triangles each, preserving coordinates, winding, uniform color,
+coverage, state and completion. Use one triangle packet with 720 direct
+vertices and log topology/count/byte metadata. This changes primitive assembly
+and increases the stream length, so a pass would not individually isolate
+those effects. Review prior notes and existing triangle emitters before
+implementation. Retain the full EFB oracle and stop-on-error/up-to-2,000-frame
+bound; do not change production scaling based on a uniform control alone.
+This explicit row-triangle control has not been implemented or run.
