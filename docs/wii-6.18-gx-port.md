@@ -17521,3 +17521,37 @@ Run up to 2,000 RGB565 frames with the unchanged default candidate
 runner stages this client at its generic remote /tmp/wii-gcn-render-test path;
 that filename does not identify the binary in this experiment. Local scratch
 and artifacts remain under /media/anolis/dev. No hardware result yet.
+
+#### System upscale reproduces without client KMS presentation (2026-09-08)
+
+Hardware result for `074248cc9`: the offscreen RGB565 workload passed complete
+frames 0--259 (79,872,000 exact pixels), then stopped on frame 260 at
+`(219,358)`, got `001d`, expected `001f`. No later frames ran. This is the
+same copied-destination oracle as the presenting client, with no CPU repair.
+The client neither registered framebuffers nor set a mode nor submitted a
+page flip. Thus those client presentation operations are not necessary for
+the corruption. Module registration still enables the GX console accelerator;
+this experiment does not rule out all background scanout activity. Different
+pacing and failure coordinates do not establish a specific hardware cause.
+
+The initial sandbox attempt could not open an SSH socket and did not reach the
+Wii. The authorized network retry executed the single hardware cycle above.
+Its complete audit confirms candidate `1909447e...`, offscreen client
+`4352cccc...`, unchanged installed provider `a2e7df8e...`, and unchanged boot
+`444193a6-aee4-4ae3-a619-4f6dd90fccf1`. No GPU timeout, FIFO stall or kernel
+fault appeared in this cycle. The runner unloaded the candidate after failure,
+reported CPU console restored, and lsmod confirmed gcn_gx absent.
+
+The manifest includes client output, full raw audit, latest-cycle kernel
+extract and the exact offscreen binary:
+
+```
+566311e4b9e93437908c425cce0a7d2b7319a334cd9af1b542be4ed2fdc08b97  /media/anolis/dev/wii-gcn-system-upscale-offscreen.sha256
+```
+
+Next: use this smaller reproducer to add bounded source/intermediate/pre-copy
+EFB evidence for the system-memory 320x240 -> 640x480 shape. The existing
+reduction-only diagnostic gate cannot locate this failure. Do not assume the
+copied-buffer mismatch originates in rasterization until pre-copy evidence
+exists. No driver behavior changed in this step; installation and remaining
+Mesa/KMS/visual acceptance remain pending.
