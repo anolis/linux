@@ -17500,3 +17500,24 @@ unbounded generic splitting: a four-way split of 240 vertical runs would emit
 960 textured quads and exceed the 64 KiB FIFO. Any broader partition needs
 explicit bounded submission handling and separate validation. Keep the
 installed provider unchanged until the remaining acceptance gates pass.
+
+#### Isolate the system upscale from presentation (2026-09-08)
+
+Add optional final `--offscreen` argument to the KMS flip client. Example:
+`wii-gcn-kms-flip-test /dev/dri/card0 1999 rgb565 --offscreen` checks
+frames 0--1999. It reuses render_frame unchanged, the same linear system source,
+two alternating linear destinations, moving pattern and complete pixel oracle.
+It skips DRM master acquisition, framebuffer registration, modesetting and
+page-flip events. Consequently its pacing differs from the presenting client;
+a bounded pass would not prove presentation causes the original failure.
+Existing presenting modes retain their rendering and flip path.
+
+All four static PowerPC clients build with -Wall -Wextra -Werror. Strict
+checkpatch reports zero errors/warnings/checks; git diff --check passes.
+Offscreen-capable client SHA-256:
+`4352cccc29db0c282863f71860e9080df0d668f3aa2d7015011a1b9d6162db7e`.
+Run up to 2,000 RGB565 frames with the unchanged default candidate
+`1909447e...`, stopping on first mismatch and auditing cleanup. The cycle
+runner stages this client at its generic remote /tmp/wii-gcn-render-test path;
+that filename does not identify the binary in this experiment. Local scratch
+and artifacts remain under /media/anolis/dev. No hardware result yet.

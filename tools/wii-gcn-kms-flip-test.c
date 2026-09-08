@@ -431,11 +431,39 @@ static const char *source_format_name(__u32 format, bool native,
 	return format == DRM_GCN_GEM_FORMAT_XRGB8888 ? "xrgb8888" : "rgb565";
 }
 
+static int run_offscreen(int fd, __u32 ctx_id,
+			 struct drm_gcn_gem_create *src, void *src_map,
+			 struct render_buffer *buffers, unsigned int count,
+			 bool native, bool native_tiled)
+{
+	unsigned int frame;
+
+	for (frame = 0; frame <= count; frame++) {
+		uint64_t render_ns;
+
+		if (render_frame(fd, ctx_id, src, src_map, &buffers[frame & 1],
+				 frame, native, native_tiled, &render_ns) < 0) {
+			perror("render offscreen buffer");
+			return EXIT_FAILURE;
+		}
+		if (!(frame % 30)) {
+			printf("gcn-kms-flip-test: offscreen frame=%u render-us=%llu\n",
+			       frame, (unsigned long long)(render_ns / 1000));
+			fflush(stdout);
+		}
+	}
+	printf("gcn-kms-flip-test: PASS offscreen format=%s frames=%u pixels=%llu\n",
+	       source_format_name(src->format, native, native_tiled), count + 1,
+	       (unsigned long long)(count + 1) * DST_WIDTH * DST_HEIGHT);
+	return EXIT_SUCCESS;
+}
+
 int main(int argc, char **argv)
 {
 	const char *card = argc > 1 ? argv[1] : "/dev/dri/card0";
 	unsigned int flip_count = argc > 2 ? parse_flips(argv[2]) : DEFAULT_FLIPS;
 	const char *format_arg = argc > 3 ? argv[3] : "rgb565";
+	bool offscreen = argc > 4 && !strcmp(argv[4], "--offscreen");
 	bool native;
 	bool native_tiled;
 	__u32 src_format = parse_source_format(format_arg, &native,
@@ -466,12 +494,19 @@ int main(int argc, char **argv)
 	int fd = -1;
 	int ret = EXIT_FAILURE;
 
+	if (argc > 5 || (argc > 4 && !offscreen)) {
+		fprintf(stderr,
+			"usage: %s [card [count [format [--offscreen]]]]\n",
+			argv[0]);
+		return EXIT_FAILURE;
+	}
 	fd = open(card, O_RDWR | O_CLOEXEC);
 	if (fd < 0) {
 		perror(card);
 		goto out;
 	}
-	if (xioctl(fd, DRM_IOCTL_SET_MASTER, NULL) < 0 && errno != EINVAL) {
+	if (!offscreen && xioctl(fd, DRM_IOCTL_SET_MASTER, NULL) < 0 &&
+	    errno != EINVAL) {
 		perror("DRM_IOCTL_SET_MASTER");
 		goto out;
 	}
@@ -484,7 +519,7 @@ int main(int argc, char **argv)
 		if (create_linear_bo(fd, &buffers[created].bo, DST_WIDTH,
 				     DST_HEIGHT, DRM_GCN_GEM_FORMAT_RGB565,
 				     &buffers[created].map) < 0 ||
-		    add_framebuffer(fd, &buffers[created]) < 0) {
+		    (!offscreen && add_framebuffer(fd, &buffers[created]) < 0)) {
 			perror("create linear scanout buffer");
 			created++;
 			goto out;
@@ -492,6 +527,11 @@ int main(int argc, char **argv)
 	}
 	if (xioctl(fd, DRM_IOCTL_GCN_CTX_CREATE, &ctx) < 0) {
 		perror("DRM_IOCTL_GCN_CTX_CREATE");
+		goto out;
+	}
+	if (offscreen) {
+		ret = run_offscreen(fd, ctx.id, &src, src_map, buffers, flip_count,
+				    native, native_tiled);
 		goto out;
 	}
 	if (get_resources(fd, &resources, &crtc_ids, &connector_ids) < 0 ||
