@@ -188,6 +188,10 @@ static bool gx_scale_clear_color;
 module_param_named(scale_clear_color, gx_scale_clear_color, bool, 0444);
 MODULE_PARM_DESC(scale_clear_color,
 		 "Produce the focused uniform final EFB with copy-clear only");
+static bool gx_scale_columns;
+module_param_named(scale_columns, gx_scale_columns, bool, 0444);
+MODULE_PARM_DESC(scale_columns,
+		 "Use 120 vertical strips in the focused direct-color draw");
 static bool gx_scale_degenerate_first;
 module_param_named(scale_degenerate_first, gx_scale_degenerate_first, bool, 0444);
 MODULE_PARM_DESC(scale_degenerate_first,
@@ -5299,6 +5303,15 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		goto out_unlock;
 	}
 
+	if (trace && gx_scale_columns &&
+	    (!gx_scale_direct_color || gx_scale_split || gx_scale_split_second ||
+	     gx_scale_single_quad || gx_scale_row_fence ||
+	     gx_scale_band_height != 1 || gx_scale_pad_bytes ||
+	     gx_scale_degenerate_quads || gx_scale_degenerate_first)) {
+		ret = -EINVAL;
+		goto out_unlock;
+	}
+
 	if (trace && gx_scale_degenerate_first && !gx_scale_degenerate_quads) {
 		ret = -EINVAL;
 		goto out_unlock;
@@ -5627,6 +5640,13 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 					for (y = 0; y < gx_scale_degenerate_quads; y++)
 						gx_emit_color_rect(0, 0, 0, 0, r, g, b);
 				}
+			} else if (gx_scale_columns) {
+				gx_wr8(0x80);
+				gx_wr16be(4 * dst_height);
+				for (y = 0; y < dst_height; y++)
+					gx_emit_color_rect(y * dst_width / dst_height, 0,
+							   (y + 1) * dst_width / dst_height,
+							   dst_height, r, g, b);
 			} else if (gx_scale_single_quad) {
 				gx_draw_color_rect(0, 0, dst_width, dst_height, r, g, b);
 			} else {
@@ -5755,8 +5775,11 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 					gx_scale_split_second,
 					(gx_scale_split_second ? 3 : 2) +
 					gx_scale_degenerate_quads);
+			if (gx_scale_columns)
+				pr_info("gcn-gx: scale-columns seq=%u width=%u height=%u quads=%u\n",
+					trace_sequence, dst_width, dst_height, dst_height);
 			if (gx_scale_direct_color && !gx_scale_row_fence &&
-			    !gx_scale_single_quad && !gx_scale_split)
+			    !gx_scale_single_quad && !gx_scale_split && !gx_scale_columns)
 				pr_info("gcn-gx: scale-bands seq=%u height=%u quads=%u\n",
 					trace_sequence, gx_scale_band_height,
 					DIV_ROUND_UP(dst_height, gx_scale_band_height));

@@ -16864,3 +16864,31 @@ count and byte metadata; preserve the uniform/full-EFB oracle. Review earlier
 notes for an equivalent control before implementation. Run at most twenty
 100-frame cycles and stop on error. This vertical-strip control has not been
 implemented or run. Default production scaling remains unchanged.
+
+#### Stage 120 real vertical strips (2026-09-07)
+
+Earlier vertical-strip references concern oversized texture partitioning, not
+this focused 120-primitive geometry control. `scale_columns=1` now emits one
+GX_QUADS packet of 480 direct vertices with integer x boundaries
+floor(i*320/120), i=0..120, and full height 120. Adjacent strips share exact
+boundaries, widths are 2 or 3, and the packet covers the full destination.
+This retains the failing row stream's 120 real quads, 6409 authored bytes,
+color, state and total covered area, while changing orientation and dimensions.
+
+The opt-in requires focused direct-color mode and rejects split, single-quad,
+per-row-fence, nondefault band height, padding and degenerate-quad controls.
+Post-readout metadata identifies columns and width/height/count; byte counts
+and the full EFB oracle remain enabled. Default row behavior is unchanged.
+
+PowerPC W=1 build, strict checkpatch (zero errors/warnings/checks), and
+`git diff --check` pass. Candidate SHA-256:
+
+```
+96a0d1c67be26cffbd493b0917d6697dab0cac3f636142975f07bd9b7766f091  /media/anolis/dev/wii-gcn-linear-v12-build/drivers/video/fbdev/gcn-gx.ko
+```
+
+Use the existing uniform client at `10.3.10.59` with usual focused trace,
+render-only, full EFB, CPU-source/alternate/RGBA8/uniform and direct-color
+options, plus `scale_columns=1`. Stop at the first error or twenty 100-frame
+cycles; require width=320/height=120/quads=120 and 6409 unpadded/padded bytes.
+No hardware result yet. Production scaling remains unchanged.
