@@ -17117,3 +17117,49 @@ options plus `scale_half_rows=1`. Require rows=120/split=160/quads=240 and
 12169 unpadded/padded bytes. Stop on error or twenty 100-frame cycles. No
 hardware result yet. Local scratch stays on `/media/anolis/dev`; remote Wii
 `/tmp` is permitted. Production scaling remains unchanged.
+
+#### Half-width direct-color rows pass 2,000 frames (2026-09-08)
+
+Hardware result for `975516d84`: two 160x1 quads per forward row completed
+all twenty 100-frame cycles. All 2,000 frames (76,800,000 pixels) matched the
+source oracle in EFB and copied output, with zero source/copy mismatches.
+Every frame logged rows=120/split=160/quads=240, 12169 unpadded/padded authored
+bytes and zero NOPs. Authored hashes stayed
+`horizontal=03506e62 final=5f465f69`, source/crop `ad05e5c5`, final/delayed
+`e5c8efc5`, and full fixture `expected=published=c4c69dc5`, base `013c0000`,
+format 6, 524288 bytes. Twenty-four frames had earlier horizontal hashes
+differing from `d33901c5`; the synthetic fixture and final direct-color output
+were still exact, so the broader corruption remained observable upstream.
+
+All twenty audits verified candidate `f453d598...`, client `8a5c7030...`,
+installed accepted provider `a2e7df8e...`, boot
+`444193a6-aee4-4ae3-a619-4f6dd90fccf1`, and target `10.3.10.59`. Every
+cycle unloaded the candidate and restored CPU scanout. No timeout, stall or
+kernel fault appeared, and no candidate was permanently installed. Local
+scratch and orchestration artifacts stayed on the dev drive; only remote Wii
+upload paths used `/tmp`.
+
+The sixty accepted client, trimmed-kernel and raw-audit artifacts have stems
+`wii-gcn-wide-reduce-half-rows-2000-1` through `-20`. Manifest:
+
+```
+b9a98053825bc1214dd539dab7161b8973a5ac44988d9a208c2e3e9e90aab997  /media/anolis/dev/wii-gcn-wide-reduce-half-rows-2000.sha256
+```
+
+This is a bounded pass for one-row primitives after reducing horizontal span,
+contrasting with the earlier full-width quad and explicit-triangle failures.
+Count and byte length increased, so the result does not isolate span alone.
+It does not prove the split geometry cannot fail or validate a production
+nearest-neighbor scaler change. The test's final stage is untextured and the
+input is uniform; general textured/nonuniform correctness remains untested.
+
+Next bounded implementation: add an opt-in half-width split to the focused
+textured final row draw, preserving the exact texture-coordinate mapping at
+the shared x=160 boundary. Review the existing vertical-run emitter and prior
+coordinate/rounding notes first. Use the CPU-authored exact horizontal source
+fixture to avoid inheriting upstream errors, then run the nonuniform ramp
+client with the full EFB oracle. Retain the alternate source and RGBA8 controls
+for comparability; disable uniform/direct-color controls. Validate every
+pixel, authored hashes and geometry metadata, stopping on error or 2,000
+frames. A textured pass is required before considering any production change.
+This textured half-width control has not been implemented or run.
