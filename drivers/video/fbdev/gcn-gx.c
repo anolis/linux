@@ -188,6 +188,10 @@ static bool gx_scale_clear_color;
 module_param_named(scale_clear_color, gx_scale_clear_color, bool, 0444);
 MODULE_PARM_DESC(scale_clear_color,
 		 "Produce the focused uniform final EFB with copy-clear only");
+static bool gx_scale_split_reduce = true;
+module_param_named(scale_split_reduce, gx_scale_split_reduce, bool, 0444);
+MODULE_PARM_DESC(scale_split_reduce,
+		 "Split long primitives for full-surface MEM1 640x240 to 320x120 reduction");
 static bool gx_scale_gpu_split;
 module_param_named(scale_gpu_split, gx_scale_gpu_split, bool, 0444);
 MODULE_PARM_DESC(scale_gpu_split,
@@ -5268,6 +5272,9 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	size_t horizontal_bytes;
 	size_t src_bytes;
 	bool final_submitted = false;
+	bool focused;
+	bool split_horizontal;
+	bool split_vertical;
 	bool trace;
 	u32 crop_hash = 0;
 	u32 final_command_hash = 0;
@@ -5336,11 +5343,16 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		return -E2BIG;
 
 	mutex_lock(&gx_submit_lock);
-	trace = READ_ONCE(gx_scale_trace) && !system_memory && !src_x && !src_y &&
+	focused = !system_memory && !src_x && !src_y &&
 		!dst_x && !dst_y && src_width == 640 && src_height == 240 &&
 		dst_width == 320 && dst_height == 120 &&
 		src_rect_width == 640 && src_rect_height == 240 &&
 		dst_rect_width == 320 && dst_rect_height == 120;
+	trace = READ_ONCE(gx_scale_trace) && focused;
+	split_horizontal = (focused && gx_scale_split_reduce) ||
+		(trace && gx_scale_gpu_split);
+	split_vertical = (focused && gx_scale_split_reduce) ||
+		(trace && gx_scale_texture_half_rows);
 	if (trace)
 		trace_sequence = ++gx_scale_trace_sequence;
 	if (trace && (gx_scale_direct_color || gx_scale_clear_color) &&
@@ -5540,14 +5552,14 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	gx_setup_texture_coordinate_scale(crop_width, crop_height,
 					  false, false);
 	gx_set_scissor(0, 0, dst_rect_width, src_rect_height);
-	if (trace && gx_scale_gpu_split &&
+	if (split_horizontal &&
 	    fifo_pos > GX_FIFO_SIZE - 256 - 3 - 160 * dst_rect_width) {
 		ret = -E2BIG;
 		goto out_unlock;
 	}
 	gx_draw_nearest_horizontal_runs(src_rect_width, crop_width,
 					src_rect_height, crop_height,
-					dst_rect_width, trace && gx_scale_gpu_split);
+					dst_rect_width, split_horizontal);
 	gx_load_bp_reg(0x45000002);
 	if (trace) {
 		horizontal_command_hash = gx_hash_pending_commands();
@@ -5802,7 +5814,7 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		gx_setup_texture_coordinate_scale(horizontal_width, crop_height,
 						  false, false);
 		gx_set_scissor(dst_x, dst_y, dst_rect_width, dst_rect_height);
-		if (trace && gx_scale_texture_half_rows &&
+		if (split_vertical &&
 		    fifo_pos > GX_FIFO_SIZE - 256 - 3 - 160 * dst_rect_height) {
 			ret = -E2BIG;
 			goto out_unlock;
@@ -5811,10 +5823,10 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 					      horizontal_width, src_rect_height,
 					      crop_height,
 					      dst_rect_height,
-					      trace && gx_scale_texture_half_rows);
+					      split_vertical);
 	}
 	if (!final_submitted) {
-		if (trace && (gx_scale_direct_color || gx_scale_texture_half_rows)) {
+		if (trace && (gx_scale_direct_color || split_vertical)) {
 			/* Reserve the finish BP, submit token and alignment trailer. */
 			if (fifo_pos > GX_FIFO_SIZE - 256 ||
 			    gx_scale_pad_bytes > GX_FIFO_SIZE - 256 - fifo_pos) {
@@ -5914,11 +5926,12 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 					gx_scale_split_second,
 					(gx_scale_split_second ? 3 : 2) +
 					gx_scale_degenerate_quads);
-			if (gx_scale_gpu_split)
-				pr_info("gcn-gx: scale-gpu-split seq=%u horizontal_quads=%u split_y=%u bytes=%u cpu_source=0\n",
+			if (split_horizontal)
+				pr_info("gcn-gx: scale-gpu-split seq=%u horizontal_quads=%u split_y=%u bytes=%u cpu_source=%u\n",
 					trace_sequence, 2 * dst_rect_width,
-					src_rect_height / 2, horizontal_command_bytes);
-			if (gx_scale_texture_half_rows)
+					src_rect_height / 2, horizontal_command_bytes,
+					gx_scale_cpu_source);
+			if (split_vertical && !gx_scale_direct_color && !gx_scale_clear_color)
 				pr_info("gcn-gx: scale-texture-half seq=%u rows=%u split=%u quads=%u\n",
 					trace_sequence, dst_height, dst_width / 2,
 					2 * dst_height);

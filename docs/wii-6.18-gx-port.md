@@ -17385,3 +17385,36 @@ the unsplit stream. Validate the default path with trace/CPU-fixture overrides
 off, repeat the focused ramp and full suite, then check KMS presentation before
 considering installed-provider replacement. Review existing provider acceptance
 notes before promotion. No default-path promotion or installation has occurred.
+
+#### Stage default split for the validated reduction (2026-09-08)
+
+The full-surface non-system-memory 640x240 -> 320x120 predicate is now
+independent of scale_trace. `scale_split_reduce` defaults true and selects
+both validated partitions for that shape. Other shapes retain existing
+behavior. `scale_split_reduce=0` disables the new default for diagnostic
+comparison; explicit trace-only split options remain available. Reproducing
+older diagnostic experiments requires disabling this default to avoid changing
+their original horizontal geometry. Trace metadata reports actual selected
+splits and the actual CPU-source option rather than implying correction is off.
+
+Both capacity checks follow the selected partitions even without tracing.
+Default operation needs no trace, full-EFB snapshot, CPU fixture or render-only
+override; display acceleration retains its ordinary setting. Source, geometry,
+texture formats and workspace constraints otherwise stay unchanged.
+
+PowerPC W=1 build, strict checkpatch (zero errors/warnings/checks), and
+`git diff --check` pass. Candidate SHA-256:
+
+```
+1909447ed321436fa7f9188bf4d19d9b55d8460639ed4e5a3e54761b9c65f968  /media/anolis/dev/wii-gcn-linear-v12-build/drivers/video/fbdev/gcn-gx.ko
+```
+
+Run 2,000 ramp frames with no module arguments, requiring exact client output
+and no trace/CPU-fixture events. Capture default parameter values while loaded
+and exact artifact/boot hashes. Then run the full render suite and KMS pattern,
+triangle and page-flip clients, checking byte oracles, memory recovery and
+console restoration. Earlier acceptance notes also require Mesa regression
+and visual presentation evidence before installed-provider promotion; software
+KMS success alone will not be recorded as visual acceptance. No hardware
+result or installed-provider replacement yet. Local scratch stays on the dev
+drive; remote Wii `/tmp` remains permitted.
