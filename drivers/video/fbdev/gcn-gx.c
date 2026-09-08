@@ -188,6 +188,10 @@ static bool gx_scale_clear_color;
 module_param_named(scale_clear_color, gx_scale_clear_color, bool, 0444);
 MODULE_PARM_DESC(scale_clear_color,
 		 "Produce the focused uniform final EFB with copy-clear only");
+static bool gx_scale_reverse_rows;
+module_param_named(scale_reverse_rows, gx_scale_reverse_rows, bool, 0444);
+MODULE_PARM_DESC(scale_reverse_rows,
+		 "Submit focused one-row rectangles from bottom to top");
 static bool gx_scale_columns;
 module_param_named(scale_columns, gx_scale_columns, bool, 0444);
 MODULE_PARM_DESC(scale_columns,
@@ -5303,6 +5307,15 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		goto out_unlock;
 	}
 
+	if (trace && gx_scale_reverse_rows &&
+	    (!gx_scale_direct_color || gx_scale_columns || gx_scale_split ||
+	     gx_scale_split_second || gx_scale_single_quad || gx_scale_row_fence ||
+	     gx_scale_band_height != 1 || gx_scale_pad_bytes ||
+	     gx_scale_degenerate_quads || gx_scale_degenerate_first)) {
+		ret = -EINVAL;
+		goto out_unlock;
+	}
+
 	if (trace && gx_scale_columns &&
 	    (!gx_scale_direct_color || gx_scale_split || gx_scale_split_second ||
 	     gx_scale_single_quad || gx_scale_row_fence ||
@@ -5640,6 +5653,11 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 					for (y = 0; y < gx_scale_degenerate_quads; y++)
 						gx_emit_color_rect(0, 0, 0, 0, r, g, b);
 				}
+			} else if (gx_scale_reverse_rows) {
+				gx_wr8(0x80);
+				gx_wr16be(4 * dst_height);
+				for (y = dst_height; y > 0; y--)
+					gx_emit_color_rect(0, y - 1, dst_width, y, r, g, b);
 			} else if (gx_scale_columns) {
 				gx_wr8(0x80);
 				gx_wr16be(4 * dst_height);
@@ -5780,9 +5798,10 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 					trace_sequence, dst_width, dst_height, dst_height);
 			if (gx_scale_direct_color && !gx_scale_row_fence &&
 			    !gx_scale_single_quad && !gx_scale_split && !gx_scale_columns)
-				pr_info("gcn-gx: scale-bands seq=%u height=%u quads=%u\n",
+				pr_info("gcn-gx: scale-bands seq=%u height=%u quads=%u reverse=%u\n",
 					trace_sequence, gx_scale_band_height,
-					DIV_ROUND_UP(dst_height, gx_scale_band_height));
+					DIV_ROUND_UP(dst_height, gx_scale_band_height),
+					gx_scale_reverse_rows);
 			pr_info("gcn-gx: scale-commands seq=%u horizontal=%08x final=%08x\n",
 				trace_sequence, horizontal_command_hash,
 				final_command_hash);

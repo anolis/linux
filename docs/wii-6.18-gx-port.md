@@ -16945,3 +16945,26 @@ bits with the existing forward-row evidence, without assuming deterministic
 failure locations. Use the full EFB oracle, stop on error or 2,000 frames,
 and review notes for equivalent prior controls before implementation. Reverse
 row ordering has not been implemented or run. Production scaling is unchanged.
+
+#### Stage reversed row submission order (2026-09-07)
+
+No equivalent reversed-row control was found in the prior ledger search.
+`scale_reverse_rows=1` submits rows 119 down to 0 in one 480-vertex packet,
+keeping the coordinates and winding of each one-row rectangle unchanged.
+It requires focused direct-color mode and rejects columns, splits, single-quad,
+per-row-fence, nondefault band height, padding and degenerate controls.
+Post-readout band metadata now includes reverse=0/1. Default ordering remains
+unchanged; this changes primitive order, not per-rectangle geometry.
+
+PowerPC W=1 build, strict checkpatch (zero errors/warnings/checks), and
+`git diff --check` pass. Candidate SHA-256:
+
+```
+9d5565740790cd874b6e9a783c0a2d0fa3375785bf2330032d41f163df17df4f  /media/anolis/dev/wii-gcn-linear-v12-build/drivers/video/fbdev/gcn-gx.ko
+```
+
+Use the existing uniform client at `10.3.10.59`, usual focused trace,
+render-only, full EFB, CPU-source/alternate/RGBA8/uniform and direct-color
+options, plus `scale_reverse_rows=1`. Require height=1/quads=120/reverse=1
+and 6409 authored bytes. Stop on the first error or twenty 100-frame cycles.
+No hardware result yet. Production scaling remains unchanged.
