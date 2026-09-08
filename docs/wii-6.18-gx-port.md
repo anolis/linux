@@ -17295,3 +17295,34 @@ streams. Stop on error or 2,000 frames; if a stage fails, retain its uncorrected
 evidence rather than masking it with a CPU fixture. Review earlier coordinate
 and partitioning notes before implementation. No GPU-only split-pair control
 has yet been implemented or run. Production scaling remains unchanged.
+
+#### Stage GPU-only paired texture splits (2026-09-08)
+
+`scale_gpu_split=1` splits focused horizontal-reduction strips at y=120,
+using the existing semantic t helper with phase -2 at the shared boundary.
+Nearest source-column selection and s phase +2 are unchanged. It requires
+`scale_texture_half_rows=1`, pairing this with the validated final x=160
+split, and rejects CPU-source/alternate/RGBA8/uniform/republish overrides.
+Existing final-mode checks reject all incompatible geometry controls.
+
+The horizontal packet now contains 640 textured quads; the final packet has
+240. Both have pre-emission FIFO capacity checks. Post-readout metadata logs
+horizontal count, split, authored bytes and cpu_source=0, alongside final
+geometry/bytes and all existing hashes/EFB comparisons. Default production
+calls retain the unsplit streams. No CPU fixture overwrites an intermediate.
+
+PowerPC W=1 build, strict checkpatch (zero errors/warnings/checks), and
+`git diff --check` pass. Candidate SHA-256:
+
+```
+ba4eed6ddba485004fb8bf7f28e8eeb9081513c414aa40994563a725f66c08ba  /media/anolis/dev/wii-gcn-linear-v12-build/drivers/video/fbdev/gcn-gx.ko
+```
+
+Run the existing ramp client at `10.3.10.59` with `scale_trace=1 render_only=1
+scale_efb_full=1 scale_gpu_split=1 scale_texture_half_rows=1`. Leave all CPU
+fixture/format/alternate and uniform/direct-color overrides off. Require
+source/crop `a2c385c5`, hardware horizontal/delayed `22ce6dc5`, final/delayed
+`ae90ddc5`, full EFB/source/copy agreement and stable authored hashes. Stop on
+error or twenty 100-frame cycles. No hardware result yet. Local scratch stays
+on the dev drive; remote Wii `/tmp` is allowed. This remains opt-in diagnostic
+code until broader dimensions/ratios and production paths are validated.
