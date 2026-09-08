@@ -16643,3 +16643,60 @@ options. Measure up to 100 default-row frames, stopping on error; then run
 `scale_split=40 scale_split_second=80 scale_pad_bytes=5616` for up to twenty
 100-frame cycles, stopping on error. No hardware result yet. Production
 scaling remains unchanged.
+
+#### Equal-length NOP control passes; real rows fail (2026-09-07)
+
+Hardware result for `5509dd5e0`: the default 120-row stream measured 6409
+unpadded/padded authored bytes with zero NOPs on all 42 attempted frames.
+It failed at iteration 42, pixel `(285,0)`: raw EFB `009cc3ef`, quantized
+EFB/copied `9e1d`, expected `9f1d`. There was one source mismatch and zero
+copy mismatches; final/delayed were both `54b4fac5`. All 42 frames retained
+original authored hashes `horizontal=03506e62 final=b5e83197`, count=120,
+and exact padded fixture publication. This reproduces the known error on
+the candidate containing the new byte-count instrumentation.
+
+On the same module, boundaries 40/80 plus `scale_pad_bytes=5616` passed all
+twenty 100-frame cycles: 2,000 frames, 76,800,000 exact pixels. Every frame
+logged 793 unpadded bytes, 6409 padded bytes and 5616 NOPs, matching the row
+stream's authored length. Both therefore submit 6432 bytes after the two
+five-byte token commands and 32-byte alignment, as derived from the unchanged
+submit routine. All frames logged count=3, the expected boundaries, zero EFB
+source/copy mismatches, and hashes `horizontal=03506e62 final=c05ef44c`.
+Source/crop remained `ad05e5c5`, final/delayed `e5c8efc5`, and full fixture
+`expected=published=c4c69dc5`, base `013c0000`, format 6, 524288 bytes.
+Fifteen frames had earlier horizontal hashes differing from `d33901c5`,
+while synthetic fixture publication and the padded final draw stayed exact.
+
+All twenty-one audits verified candidate `99a9d146...`, client `8a5c7030...`,
+installed accepted provider `a2e7df8e...`, boot
+`444193a6-aee4-4ae3-a619-4f6dd90fccf1`, and target `10.3.10.59`. Every
+cycle unloaded the candidate and restored CPU scanout. No timeout, stall or
+kernel fault appeared. The candidate was not permanently installed.
+
+The sixty padded-control artifacts have stems
+`wii-gcn-wide-reduce-pad5616-2000-1` through `-20`. Manifest and the three
+row measurement artifacts:
+
+```
+e5f48d1b313d74fe18f0bfb0a801b0e729b7cd918beca6f77e03c31b6a213107  /media/anolis/dev/wii-gcn-wide-reduce-pad5616-2000.sha256
+4bb1d8c648bbfcc20976f0aa7f685229a5df9731f4d920bd68607055a41687dd  /media/anolis/dev/wii-gcn-wide-reduce-pad-row-measure-1-audit.txt
+3af6b9ed1567ff1a5dc7541be5f724c67e438e8209007269d52544d076561644  /media/anolis/dev/wii-gcn-wide-reduce-pad-row-measure-1-client.txt
+49ab6a9856d94aa9a09fe8dae470af15066bc60cb3ba77d22094c90c31609fe1  /media/anolis/dev/wii-gcn-wide-reduce-pad-row-measure-1-kernel.txt
+```
+
+Equal overall byte count alone did not reproduce failure in this bounded
+control. NOPs do not reproduce real vertex fetching, primitive assembly,
+raster work or their timing; do not conclude those components are correct
+or claim a production scaler fix from this result.
+
+Next bounded control: replace the 5616 NOP bytes with 117 zero-area quads in
+the same packet as the three broad rectangles. Use four coincident vertices
+per added quad and preserve the twelve-byte direct vertex format. This gives
+120 total quads/480 vertices and the same 6409 authored bytes as the failing
+row stream, while retaining three rectangles of intended visible coverage.
+Log real/degenerate counts and byte lengths, keep the full EFB oracle, and
+validate that no unexpected pixels appear. This tests added vertex/primitive
+processing without the raster coverage of 120 thin rows; it does not guarantee
+the same hardware workload or timing. Review prior notes for an equivalent
+control before implementing it. This experiment is not yet implemented or run.
+Default production scaling remains unchanged.
