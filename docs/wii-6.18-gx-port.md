@@ -17617,3 +17617,19 @@ Client, final raw audit, trimmed cycle and live log are recorded by:
 ```
 172d93102f0363a76227140a74a52ed767c6e9789c753e6d119de74dfb9bea02  /media/anolis/dev/wii-gcn-system-upscale-trace.sha256
 ```
+
+#### Observe horizontal EFB before copy (2026-09-08)
+
+Extend scale_system_trace to snapshot the active 640x240 horizontal EFB after
+its draw finish and before texture copy-clear. Reuse the existing bounded
+640x480 snapshot allocation; compare horizontal snapshot/source/tiled output
+before the final draw overwrites the snapshot. No geometry or command changes,
+CPU correction, extra submission or explicit sleep. Extra EFB reads affect
+pacing. Crop still has no EFB snapshot; horizontal now does.
+
+PowerPC W=1 build, strict checkpatch (zero errors/warnings/checks), and
+`git diff --check` pass. Candidate SHA-256:
+`89b6045c3c1275c6ba662d9358f5af9cea023ea870f102d20b0cfaa45e8e1fd8`.
+Run up to 2,000 offscreen RGB565 frames with scale_system_trace=1, stopping
+on first client failure. Installed provider remains unchanged. No hardware
+result yet; local scratch and evidence remain under /media/anolis/dev.

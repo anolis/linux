@@ -5621,6 +5621,11 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	ret = gx_submit_and_wait_finish("render-blit-scaled-horizontal-draw");
 	if (ret)
 		goto out_unlock;
+	if (system_trace) {
+		ret = gx_snapshot_scale_colors(efb_snapshot, dst_width, src_height);
+		if (ret)
+			goto out_unlock;
+	}
 
 	fifo_pos = 0;
 	gx_load_libogc_init_preamble();
@@ -5653,7 +5658,7 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		invalidate_dcache_range((unsigned long)horizontal,
 					(unsigned long)horizontal + horizontal_bytes);
 		gx_compare_system_scale(src_addr, horizontal, horizontal_width,
-					dst_width, src_height, NULL, trace_sequence,
+					dst_width, src_height, efb_snapshot, trace_sequence,
 					"horizontal");
 	}
 
