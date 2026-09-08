@@ -17194,3 +17194,52 @@ Expect exact logical fixture `22ce6dc5`, format 6, base `013c0000`, extent
 320x240 within the padded allocation, and 240 final quads. Stop on error or
 twenty 100-frame cycles. No hardware result yet. Local scratch is on the dev
 drive; remote Wii `/tmp` remains allowed.
+
+#### Textured half-width ramp passes 2,000 frames (2026-09-08)
+
+Hardware result for `9df3e1282`: the textured half-width final draw completed
+twenty 100-frame nonuniform-ramp cycles. All 2,000 frames (76,800,000 pixels)
+matched the source oracle in EFB and copied output, with zero source/copy
+mismatches. This validates the shared x=160 texture-coordinate mapping for
+this focused 640x240 to 320x120 case, beyond the prior uniform direct-color
+control. The texture source was the CPU-authored exact horizontal fixture,
+not the potentially corrupt preceding GPU output.
+
+Every frame logged rows=120/split=160/quads=240, 20174 unpadded/padded authored
+bytes, zero NOPs and stable hashes `horizontal=03506e62 final=93e6bf9a`.
+Source/crop remained `a2c385c5`, final/delayed `ae90ddc5`, and the RGBA8
+fixture verified `expected=published=22ce6dc5`, base `013c0000`, format 6,
+524288-byte allocation with logical hash extent 320x240. Earlier horizontal
+hashes differed from `22ce6dc5` in 180 frames, while corrected publication
+and the final draw remained exact. The whole hardware pipeline is therefore
+not fixed by this result.
+
+All twenty audits verified candidate `2cd78948...`, client `8a5c7030...`
+(invoked with `--wide-reduce-only`), installed accepted provider `a2e7df8e...`,
+boot `444193a6-aee4-4ae3-a619-4f6dd90fccf1`, and target `10.3.10.59`.
+Each cycle unloaded the candidate and restored CPU scanout. No timeout,
+stall or kernel fault appeared. No candidate was permanently installed.
+All local scratch remained on the dev drive; Wii `/tmp` uploads were unchanged.
+
+The sixty accepted artifacts have stems
+`wii-gcn-wide-reduce-texture-half-2000-1` through `-20`. Manifest:
+
+```
+44fc8a45ccebfb497ece3247f593e339260a2cb808da99c8766fd094b580640c  /media/anolis/dev/wii-gcn-wide-reduce-texture-half-2000.sha256
+```
+
+This is a bounded textured/nonuniform pass for the half-width geometry, with
+known-good input and RGBA8 interpretation. It does not establish arbitrary
+ratio correctness, production RGB565 behavior, or GPU-only intermediate
+correctness. Keep the split opt-in until those paths are validated.
+
+Next bounded control: use this same candidate and ramp client, retaining
+CPU-source/alternate and textured half-width geometry but setting
+`scale_cpu_rgba8=0`. This tests production RGB565 interpretation against the
+same exact logical fixture before removing CPU correction. Require format 4,
+logical fixture hash `22ce6dc5`, the full EFB oracle and stable commands;
+record the actual allocation/hash extent metadata. Stop on first error or
+2,000 frames. This RGB565 half-width run has not yet been performed. If it
+passes, investigate splitting the long axis of the earlier hardware horizontal
+runs before attempting the full GPU-only pipeline. Production scaling remains
+unchanged.
