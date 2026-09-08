@@ -16892,3 +16892,56 @@ render-only, full EFB, CPU-source/alternate/RGBA8/uniform and direct-color
 options, plus `scale_columns=1`. Stop at the first error or twenty 100-frame
 cycles; require width=320/height=120/quads=120 and 6409 unpadded/padded bytes.
 No hardware result yet. Production scaling remains unchanged.
+
+#### Columns pass 2,000 frames; same-module rows fail (2026-09-07)
+
+Hardware result for `38556e5cd`: the 120 real vertical strips completed twenty
+100-frame cycles. All 2,000 frames (76,800,000 pixels) matched the source
+oracle in EFB and copied output, with zero source/copy mismatches. Every frame
+logged width=320/height=120/quads=120, 6409 unpadded/padded authored bytes and
+zero NOPs. Authored hashes stayed `horizontal=03506e62 final=8f7544cf`,
+source/crop `ad05e5c5`, final/delayed `e5c8efc5`, and full fixture
+`expected=published=c4c69dc5`, base `013c0000`, format 6, 524288 bytes.
+Twenty-one frames had earlier horizontal hashes differing from `d33901c5`,
+while the synthetic fixture and final column draw stayed exact.
+
+The same-module recheck changed only `scale_columns=0`, restoring the 120
+one-row rectangles. Iterations 1--8 passed; iteration 9 failed at `(304,116)`:
+raw EFB `009ce3e7`, quantized/copied `9f1c`, expected `9f1d`. The raw blue
+channel lost bit 3 before copying. There was one source mismatch and zero
+copy mismatches; final/delayed were both `637d6584`. All nine frames retained
+6409 authored bytes, zero NOPs, height=1/count=120, exact fixture publication,
+and original authored hashes `horizontal=03506e62 final=b5e83197`.
+
+All twenty-one audits verified candidate `96a0d1c6...`, client `8a5c7030...`,
+installed accepted provider `a2e7df8e...`, boot
+`444193a6-aee4-4ae3-a619-4f6dd90fccf1`, and target `10.3.10.59`. Each
+cycle unloaded the candidate and restored CPU scanout. No timeout, stall or
+kernel fault appeared. The candidate was not permanently installed.
+
+The sixty column-control artifacts have stems
+`wii-gcn-wide-reduce-columns120-2000-1` through `-20`. Manifest and the three
+same-module row-recheck artifacts:
+
+```
+9a409ea23b521169716541c069fc6f14954f473731fc753227b210d449515d36  /media/anolis/dev/wii-gcn-wide-reduce-columns120-2000.sha256
+85672bb53411368b9ab06628b6a90800daa39c6303b7440c2d7959ccc622c143  /media/anolis/dev/wii-gcn-wide-reduce-columns-row-recheck-1-audit.txt
+311daaf4318a5bd3e8b45a5f3f5e97ccdd113b95b1a8c3d81abc7642a60e2d53  /media/anolis/dev/wii-gcn-wide-reduce-columns-row-recheck-1-client.txt
+9b932fdc378589f8fbc52a72a54562e6509dab83a5cfa1640b0692a72a34cc28  /media/anolis/dev/wii-gcn-wide-reduce-columns-row-recheck-1-kernel.txt
+```
+
+This is a bounded passing control with 120 real primitives, matching counts,
+byte length and total covered area to the failing row draw. It strengthens
+the geometry-dependent contrast but does not isolate orientation from aspect
+ratio, boundary positions or raster timing, and does not prove columns cannot
+fail. Uniform vertical strips are not a general nearest-neighbor scaler fix.
+
+Next bounded comparison: reverse only the submission order of the default
+120 one-row rectangles (row 119 down to row 0), preserving each rectangle's
+vertex winding and coordinates, state, coverage, count and authored length.
+Log ordering after readout. This moves a physical row to a different stream
+position without changing its shape; compare any failing pixel locations and
+bits with the existing forward-row evidence, without assuming deterministic
+failure locations. Use the full EFB oracle, stop on error or 2,000 frames,
+and review notes for equivalent prior controls before implementation. Reverse
+row ordering has not been implemented or run. Production scaling is unchanged.
