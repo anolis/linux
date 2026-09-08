@@ -17418,3 +17418,85 @@ and visual presentation evidence before installed-provider promotion; software
 KMS success alone will not be recorded as visual acceptance. No hardware
 result or installed-provider replacement yet. Local scratch stays on the dev
 drive; remote Wii `/tmp` remains permitted.
+
+#### Default reduction passes; sustained system upscale remains open (2026-09-08)
+
+Hardware result for `69075d3a1`: the module loaded with no arguments passed
+all twenty 100-frame reduction cycles (76,800,000 exact client pixels).
+No trace, EFB snapshot, CPU-source or explicit split diagnostic events appeared;
+render_only=0 was logged throughout. This validates the default reduction path
+without diagnostic delays or CPU fixture correction. It does not provide
+per-frame intermediate/EFB snapshots, because those diagnostics were off.
+
+Cycle 7's client passed, but its audit SSH transfer timed out. The runner
+stopped; a successful separate retry recovered the complete same cycle and
+confirmed cleanup before cycles 8--20 resumed. The partial file was preserved
+and excluded from accepted evidence. No frames were rerun or double-counted.
+An opportunistic parameter-read attempt missed a loaded-module interval and
+returned no values; it is not evidence of parameter state. Parameters were
+subsequently captured successfully after triangle presentation, before unload:
+
+```
+scale_split_reduce=Y
+scale_trace=N
+scale_efb_full=N
+scale_gpu_split=N
+scale_texture_half_rows=N
+scale_cpu_source=N
+render_only=N
+```
+
+Two complete render suites with module defaults passed, including the focused
+reduction and the retained allocation, scaling, drawing, filtering, system
+memory and XRGB8888 paths. MEM1 recovery checks reported all 524288 bytes.
+KMS pattern presentation verified all 307200 linear pixels, displayed for five
+seconds and restored the previous framebuffer. KMS triangle presentation
+passed its software checks (black=198388, red=12452, green=13356, blue=12392,
+distinct=2329), displayed for five seconds and restored the previous framebuffer.
+These are software/client checks; no new visual acceptance claim is made.
+
+Sustained RGB565 page flips did NOT pass. With defaults, the initial frame and
+frame-30 checkpoint passed; frame 60 failed at `(164,288)`, got `003f`,
+expected `001f`. The client restored the previous console framebuffer and the
+module unloaded cleanly. A same-module check with `scale_split_reduce=0`
+passed the 64-pixel linear-filter precheck, initial frame and 30/60/90 flip
+checkpoints, then failed frame 107 at `(541,296)`, got `fff7`, expected `ffff`.
+It also restored the console and unloaded. Both failures are copied-buffer
+oracles, not pre-copy EFB evidence.
+
+That flip client scales a linear system-memory 320x240 source to 640x480,
+which is outside the new default predicate. Failure with the new switch off
+shows enabling it is not necessary for this issue; it does not establish the
+underlying fault or constitute a complete driver acceptance. The planned
+XRGB8888 sustained flip run was not performed after the RGB565 failure. The
+triangle/full-suite check was completed separately without sustained flips.
+
+All accepted audits verified candidate `1909447e...`, client `8a5c7030...`,
+installed accepted provider `a2e7df8e...`, boot
+`444193a6-aee4-4ae3-a619-4f6dd90fccf1`, and target `10.3.10.59`. Every
+candidate load was followed by successful unload/CPU scanout restoration.
+The triangle cycle briefly retained the loaded module for parameter capture,
+then explicitly unloaded it and recorded restoration. No GPU timeout, FIFO
+stall or kernel fault appeared. The cycle-7 SSH timeout was log transport only.
+No installed-provider replacement occurred; Mesa regression and remaining KMS
+acceptance are still outstanding.
+
+The ramp manifest covers sixty accepted artifacts. The second manifest covers
+all pattern/disabled-flip/triangle client, kernel and raw audits, the successful
+parameter capture, cycle-7 partial/retry files, and the two KMS client binaries:
+
+```
+a5928acb3ced9f4cbd9c44ce5b71b346a297dc98601656d1285dd709bba542f3  /media/anolis/dev/wii-gcn-wide-reduce-default-split-2000.sha256
+7738d982747e8c83d286804013f23eecd66d71c12fbe38869aa33141f36888cf  /media/anolis/dev/wii-gcn-default-split-kms-and-audit.sha256
+```
+
+Next bounded work: diagnose the sustained linear-system 320x240 -> 640x480
+upscale independently of the now-default MEM1 reduction. Add focused source,
+intermediate and final evidence without CPU repair, or first make a repeatable
+offscreen client for that same moving-pattern workload, preserving the failing
+pixel oracle. The existing split/EFB trace gate excludes system memory, so
+current reduction diagnostics cannot locate this failure. Do not enable
+unbounded generic splitting: a four-way split of 240 vertical runs would emit
+960 textured quads and exceed the 64 KiB FIFO. Any broader partition needs
+explicit bounded submission handling and separate validation. Keep the
+installed provider unchanged until the remaining acceptance gates pass.
