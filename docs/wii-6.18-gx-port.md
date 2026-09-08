@@ -17578,3 +17578,42 @@ PowerPC W=1 build, strict checkpatch (zero errors/warnings/checks) and
 Run the offscreen client with scale_system_trace=1 for up to 2,000 frames,
 stopping at first client failure. Installed provider stays unchanged. No
 hardware result yet; local artifacts and scratch remain on the dev drive.
+
+#### First system upscale fault is in the horizontal intermediate (2026-09-08)
+
+Hardware result for `6abc92e9c`, scale_system_trace=1: client frames 0--444
+passed; frame 445 failed at (307,356), got 001b expected 001f. Driver sequence
+is frame+1. All 446 complete crop/horizontal/final summary triples were
+preserved and mechanically checked. Sequences 1--445 have zero mismatches
+at every stage. At sequence 446:
+
+- Crop: all 76800 active pixels match the linear source.
+- Horizontal: one of 153600 pixels differs, at (307,178), 001b vs 001f.
+- Final: two of 307200 pixels differ from source in both pre-copy EFB and
+  tiled copy. First is (307,356), raw EFB ARGB 000000de, quantized 001b.
+  EFB-to-copy mismatch count is zero across all 307200 pixels.
+
+The horizontal output is already wrong before vertical enlargement; the final
+stage propagates that wrong sample to two rows. Final copy preserves the EFB
+exactly in this failure. This localizes the earliest OBSERVED fault to the
+horizontal intermediate, not yet to horizontal rasterization versus its
+EFB-to-texture copy. Crop/horizontal log fields argb=0 and efb=actual are
+placeholders when no snapshot exists, not EFB evidence. Next bounded change:
+snapshot horizontal EFB after draw and before copy, reuse the allocated
+snapshot storage, and compare against source plus copied intermediate.
+
+The complete audit verifies candidate 11e1d89f..., client 4352cccc..., installed
+provider a2e7df8e..., and boot 444193a6-aee4-4ae3-a619-4f6dd90fccf1.
+Candidate unload and CPU console restoration succeeded, gcn_gx is absent,
+and the latest cycle has no GPU timeout, FIFO stall or kernel fault. A live
+full-dmesg capture also completed; only the final trimmed cycle is used for
+stage assertions, avoiding old diagnostic entries in that larger file.
+Reads/logging slowed frames and an additional SSH log transfer occurred;
+this is localization evidence, not a normal-speed failure-rate measurement.
+No installed-provider replacement or complete acceptance claim.
+
+Client, final raw audit, trimmed cycle and live log are recorded by:
+
+```
+172d93102f0363a76227140a74a52ed767c6e9789c753e6d119de74dfb9bea02  /media/anolis/dev/wii-gcn-system-upscale-trace.sha256
+```
