@@ -16732,3 +16732,61 @@ options, plus `scale_split=40 scale_split_second=80
 scale_degenerate_quads=117`. Keep NOP padding off. Stop on first error or
 after twenty 100-frame cycles; verify count/length metadata before interpreting
 the comparison. No hardware results yet. Production scaling is unchanged.
+
+#### Trailing coincident-vertex quads pass 2,000 frames (2026-09-07)
+
+Hardware result for `fe34b8819`: three broad rectangles at boundaries 40/80
+followed by 117 coincident-vertex quads passed twenty 100-frame cycles.
+All 2,000 frames (76,800,000 pixels) matched the source oracle in EFB and
+copied output, with zero source/copy mismatches. Every frame logged
+real=3/extra=117/total=120, split count=120, 6409 unpadded/padded authored
+bytes and zero NOPs. This matches the failing row stream's 120 quads,
+480 direct vertices and authored length; the 117 extras follow the real draw.
+
+Authored hashes stayed `horizontal=03506e62 final=fafcd8ef`, source/crop
+`ad05e5c5`, final/delayed `e5c8efc5`, and the full padded fixture stayed
+`expected=published=c4c69dc5`, base `013c0000`, format 6, 524288 bytes.
+Twenty-one frames had earlier horizontal hashes differing from `d33901c5`,
+while synthetic fixture publication and final direct-color output stayed
+exact. The broader corruption remained observable upstream.
+
+Cycle 15's client passed, but SSH timed out while retrieving its audit.
+The runner stopped before cycle 16. A separate successful SSH retry recovered
+the entire same cycle, including 100 exact EFB comparisons, module/client
+checksums, unchanged boot ID and CPU console restoration. The partial download
+was retained as `-audit-partial.txt` and excluded from accepted test evidence;
+the recovered bytes populate both `-audit-retry.txt` and the canonical audit.
+Only after verifying that recovery did cycles 16--20 run. No frame was rerun
+or double-counted because of the retrieval interruption.
+
+All twenty complete audits verified candidate `c4742d1d...`, client
+`8a5c7030...`, installed accepted provider `a2e7df8e...`, boot
+`444193a6-aee4-4ae3-a619-4f6dd90fccf1`, and target `10.3.10.59`. Each
+cycle unloaded the candidate and restored CPU scanout. No GPU timeout, stall
+or kernel fault appeared in the accepted intervals. The SSH retrieval timeout
+above is an artifact transport failure. No candidate was permanently installed.
+
+The sixty accepted artifacts have stems
+`wii-gcn-wide-reduce-degenerate117-2000-1` through `-20`. Manifest and the
+separately retained interrupted/retried audit files:
+
+```
+0454caf9f1c70842a339da5389ed9585d745cb189a2dedf96687bd0005a253eb  /media/anolis/dev/wii-gcn-wide-reduce-degenerate117-2000.sha256
+4251e7450d0bab495bda2ed26dfaf15e3048ede1c3b13afb35db306f42a0b086  /media/anolis/dev/wii-gcn-wide-reduce-degenerate117-2000-15-audit-partial.txt
+5de8b2c9aa0e145db083d7a013d91ffd50583ff633ab310a1dba71acaf010159  /media/anolis/dev/wii-gcn-wide-reduce-degenerate117-2000-15-audit-retry.txt
+```
+
+Matching counts and length with trailing coincident vertices did not reproduce
+corruption in this bounded run. This does not establish identical hardware
+workload or exclude vertex/primitive processing: coincident vertices may be
+handled differently, their coordinates differ from real rows, and they follow
+the visible draw. The uniform oracle cannot detect same-color overdraw. This
+is diagnostic evidence, not a scaler repair.
+
+Next bounded comparison: optionally place the same 117 coincident quads before
+the three real rectangles, keeping vertex data, total count, authored length,
+state and coverage otherwise unchanged. Log their placement after readout.
+This tests primitive order/timing without introducing another geometry or
+byte-count change. Use the same full EFB oracle and up-to-2,000-frame bound,
+stopping on the first error. The leading placement has not been implemented
+or run. Default production scaling remains unchanged.
