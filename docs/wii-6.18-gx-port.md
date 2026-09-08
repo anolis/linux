@@ -17243,3 +17243,55 @@ record the actual allocation/hash extent metadata. Stop on first error or
 passes, investigate splitting the long axis of the earlier hardware horizontal
 runs before attempting the full GPU-only pipeline. Production scaling remains
 unchanged.
+
+#### RGB565 textured half-width ramp passes 2,000 frames (2026-09-08)
+
+The planned same-candidate format control completed twenty 100-frame ramp
+cycles with `2cd78948...` from `9df3e1282`. Parameters retained focused trace,
+render-only, full EFB, CPU-source/alternate and textured half-width mode,
+changing only `scale_cpu_rgba8=0`. No source change or rebuild was needed.
+
+All 2,000 frames (76,800,000 pixels) matched the source oracle in EFB and
+copied output, with zero source/copy mismatches. Every frame logged
+rows=120/split=160/quads=240, 20174 unpadded/padded authored bytes, zero NOPs,
+and stable hashes `horizontal=03506e62 final=c99ea0fa`. Source/crop remained
+`a2c385c5`, final/delayed `ae90ddc5`, and fixture publication verified
+`expected=published=22ce6dc5`, base `013c0000`, RGB565 format 4,
+262144-byte allocation with logical hash extent 320x240.
+
+Earlier horizontal hashes differed from `22ce6dc5` in 188 frames. The
+CPU-authored correction and final split draw remained exact in all of them.
+This validates the bounded final-stage ramp control with production RGB565
+interpretation; it does not validate the full GPU-only pipeline, because
+upstream corruption is still being replaced by the exact fixture.
+
+All twenty audits verified candidate `2cd78948...`, client `8a5c7030...`
+(invoked with `--wide-reduce-only`), installed accepted provider `a2e7df8e...`,
+boot `444193a6-aee4-4ae3-a619-4f6dd90fccf1`, and target `10.3.10.59`.
+Every cycle unloaded the candidate and restored CPU scanout. No timeout,
+stall or kernel fault appeared, and no candidate was permanently installed.
+Local scratch stayed on the dev drive; remote Wii `/tmp` was unchanged.
+
+The sixty accepted artifacts have stems
+`wii-gcn-wide-reduce-texture-half-rgb565-2000-1` through `-20`. Manifest:
+
+```
+80028bb6f807aeb56581509e941d4d1989941e3827621cad516dda3f9f96fa06  /media/anolis/dev/wii-gcn-wide-reduce-texture-half-rgb565-2000.sha256
+```
+
+Both RGBA8 and RGB565 final-stage half-width ramp controls now have 2,000-frame
+passes. Keep the split opt-in: arbitrary ratios and uncorrected intermediates
+remain unvalidated.
+
+Next bounded implementation: split the focused horizontal-reduction run quads
+along their long vertical axis at y=120, preserving the existing semantic t
+mapping at the shared boundary. Combine this with the tested final half-width
+split and allow that paired focused mode without CPU-source correction. Keep
+RGB565 and the ordinary workspace selection; disable CPU-source/alternate,
+RGBA8 and uniform/direct-color overrides. Log horizontal geometry/count/hash
+and verify the original source/crop, hardware horizontal/delayed, final/delayed
+and full EFB oracle on the nonuniform ramp. Bound FIFO capacity before both
+streams. Stop on error or 2,000 frames; if a stage fails, retain its uncorrected
+evidence rather than masking it with a CPU fixture. Review earlier coordinate
+and partitioning notes before implementation. No GPU-only split-pair control
+has yet been implemented or run. Production scaling remains unchanged.
