@@ -16609,3 +16609,37 @@ raster work from 120 real primitives. Bound padding by FIFO capacity and log
 both unpadded/padded byte counts after readout. Recheck the existing notes for
 prior equivalent padding controls before implementation. This experiment is
 not yet implemented or run. Default production scaling remains unchanged.
+
+#### Stage authored-length/NOP control (2026-09-07)
+
+Review of the ledger's earlier padding entries found ordinary 32-byte submit
+alignment and unrelated UAPI/texture padding, not a matching authored-length
+control for the focused direct-color draw. `scale_pad_bytes` now optionally
+appends zero-byte GX_NOP commands after its primitives and before its finish
+BP. It requires focused direct-color mode and rejects per-row fences. Both
+configured and remaining-space checks reserve 256 FIFO bytes, covering the
+five-byte finish BP, two five-byte submit tokens and up to 31 alignment bytes.
+Default zero leaves existing authored bytes unchanged.
+
+Post-readout `scale-bytes` metadata reports unpadded/padded authored lengths
+including the finish BP but excluding submit tokens and alignment. The command
+fingerprint includes NOP bytes. Direct XY+RGBA8 is twelve bytes per vertex,
+four vertices per rectangle; replacing 117 of 120 rectangles with NOP bytes
+therefore requires 117*48 = 5616 bytes. First measure the default 120-row
+stream on this module, then require the padded three-broad-rectangle stream
+to have exactly the same reported authored length. This tests overall length,
+not equivalent vertex/raster workload or timing.
+
+PowerPC W=1 build, strict checkpatch (zero errors/warnings/checks), and
+`git diff --check` pass. Candidate SHA-256:
+
+```
+99a9d1467fc37bb53101783b7b86c489e89171b5bec01cbbf21d4ba10ed22dea  /media/anolis/dev/wii-gcn-linear-v12-build/drivers/video/fbdev/gcn-gx.ko
+```
+
+Use the existing uniform client at `10.3.10.59` with the usual focused trace,
+render-only, full EFB, CPU-source/alternate/RGBA8/uniform and direct-color
+options. Measure up to 100 default-row frames, stopping on error; then run
+`scale_split=40 scale_split_second=80 scale_pad_bytes=5616` for up to twenty
+100-frame cycles, stopping on error. No hardware result yet. Production
+scaling remains unchanged.

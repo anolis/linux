@@ -188,6 +188,10 @@ static bool gx_scale_clear_color;
 module_param_named(scale_clear_color, gx_scale_clear_color, bool, 0444);
 MODULE_PARM_DESC(scale_clear_color,
 		 "Produce the focused uniform final EFB with copy-clear only");
+static unsigned int gx_scale_pad_bytes;
+module_param_named(scale_pad_bytes, gx_scale_pad_bytes, uint, 0444);
+MODULE_PARM_DESC(scale_pad_bytes,
+		 "Append focused direct-color NOP bytes before final completion");
 static unsigned int gx_scale_split_second;
 module_param_named(scale_split_second, gx_scale_split_second, uint, 0444);
 MODULE_PARM_DESC(scale_split_second,
@@ -5201,6 +5205,8 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	bool trace;
 	u32 crop_hash = 0;
 	u32 final_command_hash = 0;
+	u32 final_unpadded_bytes = 0;
+	u32 final_padded_bytes = 0;
 	u32 final_delayed_hash = 0;
 	u32 final_hash = 0;
 	u32 horizontal_command_hash = 0;
@@ -5281,6 +5287,13 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	    (!gx_scale_band_height || gx_scale_band_height > dst_height ||
 	     ((gx_scale_row_fence || gx_scale_single_quad) &&
 	      gx_scale_band_height != 1))) {
+		ret = -EINVAL;
+		goto out_unlock;
+	}
+
+	if (trace && gx_scale_pad_bytes &&
+	    (!gx_scale_direct_color || gx_scale_row_fence ||
+	     gx_scale_pad_bytes > GX_FIFO_SIZE - 256)) {
 		ret = -EINVAL;
 		goto out_unlock;
 	}
@@ -5607,6 +5620,18 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 					      dst_rect_height);
 	}
 	if (!final_submitted) {
+		if (trace && gx_scale_direct_color) {
+			/* Reserve the finish BP, submit token and alignment trailer. */
+			if (fifo_pos > GX_FIFO_SIZE - 256 ||
+			    gx_scale_pad_bytes > GX_FIFO_SIZE - 256 - fifo_pos) {
+				ret = -E2BIG;
+				goto out_unlock;
+			}
+			final_unpadded_bytes = fifo_pos + 5;
+			for (i = 0; i < gx_scale_pad_bytes; i++)
+				gx_wr8(0); /* GX_NOP */
+			final_padded_bytes = fifo_pos + 5;
+		}
 		if (!(trace && gx_scale_clear_color))
 			gx_load_bp_reg(0x45000002);
 		if (trace)
@@ -5680,6 +5705,10 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 						copied, expected);
 				}
 			}
+			if (final_unpadded_bytes)
+				pr_info("gcn-gx: scale-bytes seq=%u unpadded=%u padded=%u nops=%u\n",
+					trace_sequence, final_unpadded_bytes,
+					final_padded_bytes, gx_scale_pad_bytes);
 			if (gx_scale_split)
 				pr_info("gcn-gx: scale-split seq=%u row=%u second=%u quads=%u\n",
 					trace_sequence, gx_scale_split,
