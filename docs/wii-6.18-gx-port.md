@@ -16790,3 +16790,28 @@ This tests primitive order/timing without introducing another geometry or
 byte-count change. Use the same full EFB oracle and up-to-2,000-frame bound,
 stopping on the first error. The leading placement has not been implemented
 or run. Default production scaling remains unchanged.
+
+#### Stage leading coincident-vertex placement (2026-09-07)
+
+`scale_degenerate_first=1` moves the existing coincident-vertex quads before
+the real split rectangles in the same packet. It requires a nonzero extra
+quad count and inherits all existing focused-mode and capacity checks. False
+(default) preserves trailing placement. Post-readout metadata now includes
+`first=0/1`. Vertex data, total count, authored length, state, completion and
+intended coverage are unchanged; only primitive order differs.
+
+PowerPC W=1 build, strict checkpatch (zero errors/warnings/checks), and
+`git diff --check` pass. Candidate SHA-256:
+
+```
+54b534020e8d0a56d27e1ca49924084353d8c5f65e0df36530393119a582f50b  /media/anolis/dev/wii-gcn-linear-v12-build/drivers/video/fbdev/gcn-gx.ko
+```
+
+Use the existing uniform client at `10.3.10.59` with the usual focused trace,
+render-only, full EFB, CPU-source/alternate/RGBA8/uniform and direct-color
+options, plus `scale_split=40 scale_split_second=80
+scale_degenerate_quads=117 scale_degenerate_first=1`. Keep NOP padding off.
+Require real=3/extra=117/total=120/first=1 and 6409 authored bytes. Stop on
+first error or twenty 100-frame cycles. No hardware result yet. A pass does
+not prove identical hardware workload or absence of same-color overdraw.
+Default production scaling remains unchanged.

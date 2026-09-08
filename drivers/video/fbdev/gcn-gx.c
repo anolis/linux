@@ -188,6 +188,10 @@ static bool gx_scale_clear_color;
 module_param_named(scale_clear_color, gx_scale_clear_color, bool, 0444);
 MODULE_PARM_DESC(scale_clear_color,
 		 "Produce the focused uniform final EFB with copy-clear only");
+static bool gx_scale_degenerate_first;
+module_param_named(scale_degenerate_first, gx_scale_degenerate_first, bool, 0444);
+MODULE_PARM_DESC(scale_degenerate_first,
+		 "Place focused coincident-vertex quads before the real rectangles");
 static unsigned int gx_scale_degenerate_quads;
 module_param_named(scale_degenerate_quads, gx_scale_degenerate_quads, uint, 0444);
 MODULE_PARM_DESC(scale_degenerate_quads,
@@ -5295,6 +5299,11 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		goto out_unlock;
 	}
 
+	if (trace && gx_scale_degenerate_first && !gx_scale_degenerate_quads) {
+		ret = -EINVAL;
+		goto out_unlock;
+	}
+
 	if (trace && gx_scale_degenerate_quads &&
 	    (!gx_scale_direct_color || !gx_scale_split_second ||
 	     gx_scale_pad_bytes || gx_scale_degenerate_quads > 117)) {
@@ -5603,6 +5612,10 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 				}
 				gx_wr8(0x80);
 				gx_wr16be(4 * quads);
+				if (gx_scale_degenerate_first) {
+					for (y = 0; y < gx_scale_degenerate_quads; y++)
+						gx_emit_color_rect(0, 0, 0, 0, r, g, b);
+				}
 				gx_emit_color_rect(0, 0, dst_width, gx_scale_split,
 						   r, g, b);
 				gx_emit_color_rect(0, gx_scale_split, dst_width,
@@ -5610,8 +5623,10 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 				if (gx_scale_split_second)
 					gx_emit_color_rect(0, end, dst_width, dst_height,
 							   r, g, b);
-				for (y = 0; y < gx_scale_degenerate_quads; y++)
-					gx_emit_color_rect(0, 0, 0, 0, r, g, b);
+				if (!gx_scale_degenerate_first) {
+					for (y = 0; y < gx_scale_degenerate_quads; y++)
+						gx_emit_color_rect(0, 0, 0, 0, r, g, b);
+				}
 			} else if (gx_scale_single_quad) {
 				gx_draw_color_rect(0, 0, dst_width, dst_height, r, g, b);
 			} else {
@@ -5730,9 +5745,10 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 					trace_sequence, final_unpadded_bytes,
 					final_padded_bytes, gx_scale_pad_bytes);
 			if (gx_scale_degenerate_quads)
-				pr_info("gcn-gx: scale-degenerate seq=%u real=3 extra=%u total=%u\n",
+				pr_info("gcn-gx: scale-degenerate seq=%u real=3 extra=%u total=%u first=%u\n",
 					trace_sequence, gx_scale_degenerate_quads,
-					3 + gx_scale_degenerate_quads);
+					3 + gx_scale_degenerate_quads,
+					gx_scale_degenerate_first);
 			if (gx_scale_split)
 				pr_info("gcn-gx: scale-split seq=%u row=%u second=%u quads=%u\n",
 					trace_sequence, gx_scale_split,
