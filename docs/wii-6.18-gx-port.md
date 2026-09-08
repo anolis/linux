@@ -17555,3 +17555,26 @@ reduction-only diagnostic gate cannot locate this failure. Do not assume the
 copied-buffer mismatch originates in rasterization until pre-copy evidence
 exists. No driver behavior changed in this step; installation and remaining
 Mesa/KMS/visual acceptance remain pending.
+
+#### Instrument the offscreen system upscale (2026-09-08)
+
+Add opt-in scale_system_trace, gated to full-surface linear RGB565 system
+320x240 -> 640x480. Compare every active crop and horizontal texture pixel
+against the linear source with the exact integer 2x mapping. Capture all
+640x480 final EFB colors after final draw completion and before copy-clear;
+compare quantized EFB, tiled copy and source. Existing client still checks
+linear output against its independently generated pattern. Stage summaries
+include counts and first mismatch details. An absent EFB snapshot at crop or
+horizontal stages gives no pre-copy evidence for those stages.
+
+No CPU correction, geometry changes, extra submissions or explicit sleeps.
+Reads and logging affect timing. Snapshot allocation is bounded to 1,228,800
+bytes for the new gate and is released on every exit. Existing reduction
+trace stays independently gated. The new option defaults off.
+
+PowerPC W=1 build, strict checkpatch (zero errors/warnings/checks) and
+`git diff --check` pass. Candidate SHA-256:
+`11e1d89fcc730684ad054643e78f1d1309d47379218cf7bc903f95964ca23243`.
+Run the offscreen client with scale_system_trace=1 for up to 2,000 frames,
+stopping at first client failure. Installed provider stays unchanged. No
+hardware result yet; local artifacts and scratch remain on the dev drive.
