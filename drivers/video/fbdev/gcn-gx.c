@@ -188,6 +188,10 @@ static bool gx_scale_clear_color;
 module_param_named(scale_clear_color, gx_scale_clear_color, bool, 0444);
 MODULE_PARM_DESC(scale_clear_color,
 		 "Produce the focused uniform final EFB with copy-clear only");
+static bool gx_scale_texture_half_rows;
+module_param_named(scale_texture_half_rows, gx_scale_texture_half_rows, bool, 0444);
+MODULE_PARM_DESC(scale_texture_half_rows,
+		 "Split focused textured vertical runs into half-width quads");
 static bool gx_scale_half_rows;
 module_param_named(scale_half_rows, gx_scale_half_rows, bool, 0444);
 MODULE_PARM_DESC(scale_half_rows,
@@ -2318,14 +2322,15 @@ static void gx_draw_nearest_vertical_runs(u16 x, u16 y, u16 width,
 					  u16 texture_width,
 					  u16 src_height,
 					  u16 texture_height,
-					  u16 dst_height)
+					  u16 dst_height, bool split)
 {
 	u32 s0 = gx_semantic_texcoord_bits_phase(0, texture_width, -2);
 	u32 s1 = gx_semantic_texcoord_bits_phase(width, texture_width, -2);
+	u32 middle = gx_semantic_texcoord_bits_phase(width / 2, texture_width, -2);
 	u16 dst_start = 0;
 
 	gx_wr8(0x80); /* GX_QUADS | vtxfmt 0 */
-	gx_wr16be(4 * gx_nearest_run_count(src_height, dst_height));
+	gx_wr16be((split ? 8 : 4) * gx_nearest_run_count(src_height, dst_height));
 
 	while (dst_start < dst_height) {
 		u16 src_index = gx_nearest_source_index(dst_start, src_height,
@@ -2338,8 +2343,15 @@ static void gx_draw_nearest_vertical_runs(u16 x, u16 y, u16 width,
 		       src_index)
 			dst_end++;
 		t = gx_semantic_texcoord_bits_phase(src_index, texture_height, 2);
-		gx_emit_textured_rect(x, y + dst_start, x + width,
-				      y + dst_end, s0, t, s1, t);
+		if (split) {
+			gx_emit_textured_rect(x, y + dst_start, x + width / 2,
+					      y + dst_end, s0, t, middle, t);
+			gx_emit_textured_rect(x + width / 2, y + dst_start,
+					      x + width, y + dst_end, middle, t, s1, t);
+		} else {
+			gx_emit_textured_rect(x, y + dst_start, x + width,
+					      y + dst_end, s0, t, s1, t);
+		}
 		dst_start = dst_end;
 	}
 }
@@ -5333,6 +5345,17 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		goto out_unlock;
 	}
 
+	if (trace && gx_scale_texture_half_rows &&
+	    (!gx_scale_cpu_source || gx_scale_cpu_uniform || gx_scale_direct_color ||
+	     gx_scale_clear_color || gx_scale_half_rows || gx_scale_row_triangles ||
+	     gx_scale_reverse_rows || gx_scale_columns || gx_scale_split ||
+	     gx_scale_split_second || gx_scale_single_quad || gx_scale_row_fence ||
+	     gx_scale_band_height != 1 || gx_scale_pad_bytes ||
+	     gx_scale_degenerate_quads || gx_scale_degenerate_first)) {
+		ret = -EINVAL;
+		goto out_unlock;
+	}
+
 	if (trace && gx_scale_half_rows &&
 	    (!gx_scale_direct_color || gx_scale_row_triangles ||
 	     gx_scale_reverse_rows || gx_scale_columns || gx_scale_split ||
@@ -5751,13 +5774,19 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		gx_setup_texture_coordinate_scale(horizontal_width, crop_height,
 						  false, false);
 		gx_set_scissor(dst_x, dst_y, dst_rect_width, dst_rect_height);
+		if (trace && gx_scale_texture_half_rows &&
+		    fifo_pos > GX_FIFO_SIZE - 256 - 3 - 160 * dst_rect_height) {
+			ret = -E2BIG;
+			goto out_unlock;
+		}
 		gx_draw_nearest_vertical_runs(dst_x, dst_y, dst_rect_width,
 					      horizontal_width, src_rect_height,
 					      crop_height,
-					      dst_rect_height);
+					      dst_rect_height,
+					      trace && gx_scale_texture_half_rows);
 	}
 	if (!final_submitted) {
-		if (trace && gx_scale_direct_color) {
+		if (trace && (gx_scale_direct_color || gx_scale_texture_half_rows)) {
 			/* Reserve the finish BP, submit token and alignment trailer. */
 			if (fifo_pos > GX_FIFO_SIZE - 256 ||
 			    gx_scale_pad_bytes > GX_FIFO_SIZE - 256 - fifo_pos) {
@@ -5857,6 +5886,10 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 					gx_scale_split_second,
 					(gx_scale_split_second ? 3 : 2) +
 					gx_scale_degenerate_quads);
+			if (gx_scale_texture_half_rows)
+				pr_info("gcn-gx: scale-texture-half seq=%u rows=%u split=%u quads=%u\n",
+					trace_sequence, dst_height, dst_width / 2,
+					2 * dst_height);
 			if (gx_scale_half_rows)
 				pr_info("gcn-gx: scale-half-rows seq=%u rows=%u split=%u quads=%u\n",
 					trace_sequence, dst_height, dst_width / 2,
