@@ -188,6 +188,10 @@ static bool gx_scale_clear_color;
 module_param_named(scale_clear_color, gx_scale_clear_color, bool, 0444);
 MODULE_PARM_DESC(scale_clear_color,
 		 "Produce the focused uniform final EFB with copy-clear only");
+static bool gx_scale_row_triangles;
+module_param_named(scale_row_triangles, gx_scale_row_triangles, bool, 0444);
+MODULE_PARM_DESC(scale_row_triangles,
+		 "Emit focused one-row rectangles as explicit triangle pairs");
 static bool gx_scale_reverse_rows;
 module_param_named(scale_reverse_rows, gx_scale_reverse_rows, bool, 0444);
 MODULE_PARM_DESC(scale_reverse_rows,
@@ -1938,6 +1942,24 @@ static void gx_draw_color_rect(u16 x0, u16 y0, u16 x1, u16 y1,
 }
 
 #if IS_ENABLED(CONFIG_DRM_GCN_GX)
+static void gx_emit_color_row_triangles(u16 width, u16 y, u8 r, u8 g, u8 b)
+{
+	const u16 xy[6][2] = {
+		{ 0, y }, { width, y }, { width, y + 1 },
+		{ 0, y }, { width, y + 1 }, { 0, y + 1 },
+	};
+	unsigned int i;
+
+	for (i = 0; i < ARRAY_SIZE(xy); i++) {
+		wg_f32_bits(f32_from_u16(xy[i][0]));
+		wg_f32_bits(f32_from_u16(xy[i][1]));
+		gx_wr8(r);
+		gx_wr8(g);
+		gx_wr8(b);
+		gx_wr8(0xff);
+	}
+}
+
 static void
 gx_draw_color_triangles(const struct gcn_drm_color_vertex *vertices,
 			unsigned int triangle_count)
@@ -5307,6 +5329,15 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		goto out_unlock;
 	}
 
+	if (trace && gx_scale_row_triangles &&
+	    (!gx_scale_direct_color || gx_scale_reverse_rows || gx_scale_columns ||
+	     gx_scale_split || gx_scale_split_second || gx_scale_single_quad ||
+	     gx_scale_row_fence || gx_scale_band_height != 1 || gx_scale_pad_bytes ||
+	     gx_scale_degenerate_quads || gx_scale_degenerate_first)) {
+		ret = -EINVAL;
+		goto out_unlock;
+	}
+
 	if (trace && gx_scale_reverse_rows &&
 	    (!gx_scale_direct_color || gx_scale_columns || gx_scale_split ||
 	     gx_scale_split_second || gx_scale_single_quad || gx_scale_row_fence ||
@@ -5653,6 +5684,11 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 					for (y = 0; y < gx_scale_degenerate_quads; y++)
 						gx_emit_color_rect(0, 0, 0, 0, r, g, b);
 				}
+			} else if (gx_scale_row_triangles) {
+				gx_wr8(0x90); /* GX_TRIANGLES | vtxfmt 0 */
+				gx_wr16be(6 * dst_height);
+				for (y = 0; y < dst_height; y++)
+					gx_emit_color_row_triangles(dst_width, y, r, g, b);
 			} else if (gx_scale_reverse_rows) {
 				gx_wr8(0x80);
 				gx_wr16be(4 * dst_height);
@@ -5793,11 +5829,16 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 					gx_scale_split_second,
 					(gx_scale_split_second ? 3 : 2) +
 					gx_scale_degenerate_quads);
+			if (gx_scale_row_triangles)
+				pr_info("gcn-gx: scale-triangles seq=%u rows=%u triangles=%u vertices=%u\n",
+					trace_sequence, dst_height, 2 * dst_height,
+					6 * dst_height);
 			if (gx_scale_columns)
 				pr_info("gcn-gx: scale-columns seq=%u width=%u height=%u quads=%u\n",
 					trace_sequence, dst_width, dst_height, dst_height);
 			if (gx_scale_direct_color && !gx_scale_row_fence &&
-			    !gx_scale_single_quad && !gx_scale_split && !gx_scale_columns)
+			    !gx_scale_single_quad && !gx_scale_split && !gx_scale_columns &&
+			    !gx_scale_row_triangles)
 				pr_info("gcn-gx: scale-bands seq=%u height=%u quads=%u reverse=%u\n",
 					trace_sequence, gx_scale_band_height,
 					DIV_ROUND_UP(dst_height, gx_scale_band_height),

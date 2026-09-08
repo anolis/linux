@@ -17013,3 +17013,33 @@ those effects. Review prior notes and existing triangle emitters before
 implementation. Retain the full EFB oracle and stop-on-error/up-to-2,000-frame
 bound; do not change production scaling based on a uniform control alone.
 This explicit row-triangle control has not been implemented or run.
+
+#### Stage explicit row triangles and local scratch policy (2026-09-07)
+
+User clarification: local scratch/scripts/artifacts must use
+`/media/anolis/dev`, never local `/tmp`. Remote `/tmp` on the Wii is allowed.
+The render-cycle tool now creates its local SSH socket under
+`/media/anolis/dev/wii-gcn-scratch`, exports that path as TMPDIR, and defaults
+its local client path there. Wii upload paths remain `/tmp`. Build scratch,
+patches and orchestration scripts for this experiment use the dev drive.
+
+`scale_row_triangles=1` emits one GX_TRIANGLES packet containing 240 triangles
+and 720 direct XY/RGBA8 vertices. Each forward one-row rectangle becomes
+triangles (top-left, top-right, bottom-right) and (top-left, bottom-right,
+bottom-left). Coordinates, winding, coverage, uniform color, state and final
+completion stay fixed. The focused option rejects other geometry/padding
+controls. Metadata logs rows/triangles/vertices after readout instead of quad
+counts. Authored length should grow from 6409 to 9289 bytes. This changes
+assembly and length, so a pass would not isolate those effects individually.
+
+PowerPC W=1 build, strict checkpatch (zero errors/warnings/checks),
+`git diff --check` and render-cycle shell syntax pass. Candidate SHA-256:
+
+```
+c25fa52e9c933a725aa8cf548eae21351e629ef040cf43c04c7010cfb61d887a  /media/anolis/dev/wii-gcn-linear-v12-build/drivers/video/fbdev/gcn-gx.ko
+```
+
+Test at `10.3.10.59` with the existing uniform client, usual focused trace,
+render-only, full EFB, CPU-source/alternate/RGBA8/uniform and direct-color
+options plus `scale_row_triangles=1`. Stop on error or twenty 100-frame cycles.
+No hardware result yet. Default production scaling remains unchanged.

@@ -12,7 +12,7 @@ Upload and run the GCN render-UAPI hardware test over SSH.
 Options:
   --host HOST          Wii address (default: WII_SSH_HOST or 10.3.10.12)
   --module FILE        gcn-gx module (default: drivers/video/fbdev/gcn-gx.ko)
-  --client FILE        test client (default: /tmp/wii-gcn-render-test)
+  --client FILE        test client (default: /media/anolis/dev/wii-gcn-scratch/wii-gcn-render-test)
   --client-args ARGS   arguments passed to the test client
   --kms-client FILE    optional linear-render/KMS presentation client
   --kms-hold SECONDS   presentation duration (default: 5)
@@ -33,7 +33,7 @@ EOF
 
 ssh_host=${WII_SSH_HOST:-10.3.10.12}
 module=
-client=/tmp/wii-gcn-render-test
+client=/media/anolis/dev/wii-gcn-scratch/wii-gcn-render-test
 client_args=
 kms_client=
 kms_hold=5
@@ -165,7 +165,9 @@ if [[ $ssh_host == *@* ]]; then
 else
 	remote=root@$ssh_host
 fi
-ssh_control_path=${TMPDIR:-/tmp}/wii-gcn-render-ssh-${UID}-$$
+mkdir -p /media/anolis/dev/wii-gcn-scratch
+export TMPDIR=/media/anolis/dev/wii-gcn-scratch
+ssh_control_path=/media/anolis/dev/wii-gcn-scratch/wii-gcn-render-ssh-${UID}-$$
 ssh_options=(
 	-i "$ssh_key"
 	-o IdentitiesOnly=yes
