@@ -17089,3 +17089,31 @@ capacity check before emission. Review earlier notes for equivalent controls,
 then stop on error or 2,000 frames. The half-width row-quad experiment has not
 been implemented or run. Production scaling remains unchanged. All future
 local scratch remains under `/media/anolis/dev`; Wii `/tmp` remains permitted.
+
+#### Stage half-width row quads (2026-09-07)
+
+No equivalent earlier 160x1 row-segmentation control was found. The opt-in
+`scale_half_rows=1` emits each forward row as left [0,160) and right [160,320)
+quads in a single GX_QUADS packet: 240 quads, 960 direct vertices, expected
+12169 authored bytes. Winding, row height, uniform color, coverage, state and
+completion are unchanged; span decreases while count and length increase.
+
+The focused option rejects all other geometry/padding controls and requires
+direct-color mode. A pre-emission capacity check reserves header/vertices and
+256 trailer bytes. Metadata reports rows/split/quads after readout; existing
+byte logs and the full EFB oracle remain active. Default behavior is unchanged.
+
+PowerPC W=1 build, strict checkpatch (zero errors/warnings/checks), and
+`git diff --check` pass. Build scratch and the diff artifact are on the dev
+drive. Candidate SHA-256:
+
+```
+f453d598bb93881bb569fdec66afb947deeab5d69119ced130fa7672031af6bd  /media/anolis/dev/wii-gcn-linear-v12-build/drivers/video/fbdev/gcn-gx.ko
+```
+
+Use the existing uniform client at `10.3.10.59`, usual focused trace,
+render-only, full EFB, CPU-source/alternate/RGBA8/uniform and direct-color
+options plus `scale_half_rows=1`. Require rows=120/split=160/quads=240 and
+12169 unpadded/padded bytes. Stop on error or twenty 100-frame cycles. No
+hardware result yet. Local scratch stays on `/media/anolis/dev`; remote Wii
+`/tmp` is permitted. Production scaling remains unchanged.
