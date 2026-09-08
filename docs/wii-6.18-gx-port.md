@@ -17633,3 +17633,47 @@ PowerPC W=1 build, strict checkpatch (zero errors/warnings/checks), and
 Run up to 2,000 offscreen RGB565 frames with scale_system_trace=1, stopping
 on first client failure. Installed provider remains unchanged. No hardware
 result yet; local scratch and evidence remain under /media/anolis/dev.
+
+#### Horizontal draw is already wrong before texture copy (2026-09-08)
+
+Hardware result for d91907a98 with scale_system_trace=1: client frames 0--445
+pass; frame 446 fails at (317,352), got 001b expected 001f. All 447 complete
+stage triples were preserved and mechanically checked. Sequences 1--446
+have zero mismatches throughout. At sequence 447 (client frame 446):
+
+- Crop: all 76800 active pixels match the linear source.
+- Horizontal: one mismatch at (317,176) in both pre-copy EFB and copied
+  texture. Raw EFB ARGB=000000db, quantized RGB565=001b, expected=001f.
+  All 153600 quantized EFB pixels match their copied texture pixels.
+- Final: two source mismatches in EFB and copied output, first (317,352),
+  raw ARGB=000000de, quantized=001b. All 307200 EFB/copy comparisons pass.
+
+Thus this fault exists after the horizontal draw and before its texture
+copy. Vertical expansion propagates the wrong horizontal sample; neither
+copy introduces or changes the quantized error in this frame. Correct CPU
+crop readback does not prove what the texture unit fetched. This narrows the
+fault to the horizontal draw path (texture fetch/sampling, shading or EFB
+write), without identifying the exact internal unit or mechanism. Raw blue
+db versus de reflects the intermediate RGB565 quantization/re-expansion;
+both quantize to the same wrong five-bit value.
+
+Candidate 89b6045c..., client 4352cccc..., installed provider a2e7df8e...,
+and boot 444193a6-aee4-4ae3-a619-4f6dd90fccf1 match the audit. Successful
+unload/CPU console restoration and gcn_gx absence are verified. No GPU timeout,
+FIFO stall or kernel fault appears in the trimmed cycle. No installed-provider
+replacement. This is instrumented localization, not normal-speed acceptance.
+
+Manifest (client output, raw audit and trimmed cycle):
+
+```
+b4a07c1127abaadb747f81ec73f2bbda78b30eabe4a8d875356177762a035c6f  /media/anolis/dev/wii-gcn-system-horizontal-efb.sha256
+```
+
+Next bounded control: consider splitting only the horizontal stage's tall
+runs at y=120 while retaining both EFB snapshots and the exact client oracle.
+For 320->640 expansion there are 320 selected-source runs, not 640; doubling
+those gives 640 quads. Derive and check the actual authored FIFO budget before
+emission rather than using destination width as run count. Keep the final
+stage unchanged to separate effects, and retain the unsplit baseline switch.
+Do not treat a passing geometry control as proof of a specific hardware cause
+or enable generic splitting beyond the bounded gate.
