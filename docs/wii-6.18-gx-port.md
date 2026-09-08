@@ -17677,3 +17677,25 @@ emission rather than using destination width as run count. Keep the final
 stage unchanged to separate effects, and retain the unsplit baseline switch.
 Do not treat a passing geometry control as proof of a specific hardware cause
 or enable generic splitting beyond the bounded gate.
+
+#### Bounded horizontal split control for system upscale (2026-09-08)
+
+Add scale_system_split (default off), effective only inside the existing
+scale_system_trace exact linear RGB565 320x240 -> 640x480 gate. It splits
+each horizontal run at y=120, preserving texture coordinates and leaving
+vertical rendering unchanged. The 320 selected-source runs emit 640 quads,
+51200 vertex bytes. Before emission, budget uses gx_nearest_run_count rather
+than destination width, rejects vertex payload exceeding capacity before
+subtraction, and reserves header plus 256 bytes for finish/token/alignment.
+The existing focused reduction also uses this accurate budget; its run count
+and emitted commands are unchanged. Log authored horizontal count/bytes/hash
+for both split and unsplit system traces. No CPU correction or extra GPU
+submissions. Both pre-copy EFB comparisons remain enabled.
+
+W=1 PowerPC build, strict checkpatch (zero errors/warnings/checks), and
+`git diff --check` pass. Candidate SHA-256:
+`ae8e7cabf7ac293fba13a3a457f1e2b16ee28a93f5bc9728ba37365c8171bdcd`.
+Run up to 2,000 offscreen frames with scale_system_trace=1 scale_system_split=1,
+stopping on client failure, and compare complete stage evidence. This is an
+opt-in geometry control, not default behavior or installed-provider promotion.
+No hardware result yet. Local scratch and artifacts remain on the dev drive.

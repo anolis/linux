@@ -272,6 +272,10 @@ static bool gx_scale_cpu_publish;
 module_param_named(scale_cpu_publish, gx_scale_cpu_publish, bool, 0444);
 MODULE_PARM_DESC(scale_cpu_publish,
 		 "CPU-republish the horizontal texture in the focused scale trace");
+static bool gx_scale_system_split;
+module_param_named(scale_system_split, gx_scale_system_split, bool, 0444);
+MODULE_PARM_DESC(scale_system_split,
+		 "Halve horizontal primitive height in the focused system trace");
 static bool gx_scale_system_trace;
 module_param_named(scale_system_trace, gx_scale_system_trace, bool, 0444);
 MODULE_PARM_DESC(scale_system_trace,
@@ -5399,7 +5403,8 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		dst_rect_width == 640 && dst_rect_height == 480;
 	trace = READ_ONCE(gx_scale_trace) && focused;
 	split_horizontal = (focused && gx_scale_split_reduce) ||
-		(trace && gx_scale_gpu_split);
+		(trace && gx_scale_gpu_split) ||
+		(system_trace && gx_scale_system_split);
 	split_vertical = (focused && gx_scale_split_reduce) ||
 		(trace && gx_scale_texture_half_rows);
 	if (trace || system_trace)
@@ -5605,10 +5610,16 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	gx_setup_texture_coordinate_scale(crop_width, crop_height,
 					  false, false);
 	gx_set_scissor(0, 0, dst_rect_width, src_rect_height);
-	if (split_horizontal &&
-	    fifo_pos > GX_FIFO_SIZE - 256 - 3 - 160 * dst_rect_width) {
-		ret = -E2BIG;
-		goto out_unlock;
+	if (split_horizontal) {
+		u32 vertex_bytes = 160 * gx_nearest_run_count(src_rect_width,
+							     dst_rect_width);
+
+		/* Two 80-byte quads per run, header and submission reserve. */
+		if (vertex_bytes > GX_FIFO_SIZE - 256 - 3 ||
+		    fifo_pos > GX_FIFO_SIZE - 256 - 3 - vertex_bytes) {
+			ret = -E2BIG;
+			goto out_unlock;
+		}
 	}
 	gx_draw_nearest_horizontal_runs(src_rect_width, crop_width,
 					src_rect_height, crop_height,
@@ -5618,6 +5629,12 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		horizontal_command_hash = gx_hash_pending_commands();
 		horizontal_command_bytes = fifo_pos;
 	}
+	if (system_trace)
+		pr_info("gcn-gx: system-horizontal seq=%u split=%u quads=%u bytes=%u hash=%08x\n",
+			trace_sequence, split_horizontal,
+			(split_horizontal ? 2 : 1) *
+			gx_nearest_run_count(src_rect_width, dst_rect_width),
+			fifo_pos, gx_hash_pending_commands());
 	ret = gx_submit_and_wait_finish("render-blit-scaled-horizontal-draw");
 	if (ret)
 		goto out_unlock;
