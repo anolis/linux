@@ -17043,3 +17043,49 @@ Test at `10.3.10.59` with the existing uniform client, usual focused trace,
 render-only, full EFB, CPU-source/alternate/RGBA8/uniform and direct-color
 options plus `scale_row_triangles=1`. Stop on error or twenty 100-frame cycles.
 No hardware result yet. Default production scaling remains unchanged.
+
+#### Explicit row triangles still fail (2026-09-07)
+
+Hardware result for `73c150917`: explicit row triangles passed iterations
+1--6 and failed at iteration 7. Pixel `(44,0)` was raw EFB `009ce3e7`,
+quantized/copied `9f1c`, expected `9f1d`; raw blue bit 3 was lost before
+copying. The frame had one source mismatch and zero copy mismatches;
+final/delayed were both `710d5814`. The runner stopped without extensions.
+
+All seven frames logged rows=120/triangles=240/vertices=720, 9289
+unpadded/padded bytes, zero NOPs and stable authored hashes
+`horizontal=03506e62 final=d58bbcb0`. Full fixture publication remained
+`expected=published=c4c69dc5`, base `013c0000`, format 6, 524288 bytes.
+Source/crop and horizontal were exact in the failing frame. All EFB-to-copy
+comparisons remained exact, including the bad pixel.
+
+Replacing each row quad with explicit triangles is rejected as sufficient
+to correct corruption. The failure does not require a GX_QUADS packet, but
+this does not identify the exact raster/state mechanism or exclude command
+processing generally. Do not replace production scaler primitives based on
+this rejected uniform control.
+
+The complete audit verified candidate `c25fa52e...`, client `8a5c7030...`,
+installed accepted provider `a2e7df8e...`, boot
+`444193a6-aee4-4ae3-a619-4f6dd90fccf1`, and target `10.3.10.59`. The
+candidate unloaded and CPU scanout was restored, with no timeout, stall or
+kernel fault. No candidate was permanently installed. The updated runner
+used dev-drive local scratch and the unchanged remote Wii `/tmp` paths.
+Strict checkpatch on the final committed implementation also passed with zero
+diagnostics after the remote-path clarification.
+
+```
+1ca2b14beb74c744553cc0fd2c675f9427b444652e4895e0479c835d609ff448  /media/anolis/dev/wii-gcn-wide-reduce-row-triangles-2000-1-audit.txt
+237cf29e054f1d0938c6a0678ef8d20fa04121ba67cbeac157183e4539699118  /media/anolis/dev/wii-gcn-wide-reduce-row-triangles-2000-1-client.txt
+0b618fdfe5ad66a150e8193c173bddadb44248f551e5e967f50baad954424542  /media/anolis/dev/wii-gcn-wide-reduce-row-triangles-2000-1-kernel.txt
+```
+
+Next bounded geometry comparison: split each forward one-row quad into two
+160x1 quads at x=160, preserving row height, winding, color, coverage and
+state. This reduces horizontal span while increasing count to 240 quads and
+stream length, so a passing result would not isolate span alone. Keep one
+packet and the full EFB oracle; require count/segment/byte metadata and a
+capacity check before emission. Review earlier notes for equivalent controls,
+then stop on error or 2,000 frames. The half-width row-quad experiment has not
+been implemented or run. Production scaling remains unchanged. All future
+local scratch remains under `/media/anolis/dev`; Wii `/tmp` remains permitted.
