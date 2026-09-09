@@ -18159,3 +18159,49 @@ W=1 PowerPC build, strict checkpatch (zero errors/warnings/checks), and
 Run the existing native-tiled offscreen client, up to 2,000 frames stopping
 on first failure, with scale_native_trace=1 and both existing splits enabled.
 No hardware result yet. Installed provider unchanged; scratch on dev drive.
+
+#### Native rectangle damage occurs outside the active rectangle (2026-09-08)
+
+Hardware result for 00dd56740: client frames 0--2 pass; frame 3 fails at
+(114,366), got 041f expected 001f. All 16 rectangle submissions and all 48
+crop/horizontal/final summaries were preserved and mechanically checked.
+Every crop and horizontal check passes. Final mismatches occur at two points:
+
+- Sequence 7 (frame 1, lower-left origin 0,240): outside pixel (351,374)
+  changes from prior 5a5a to 4a5a. Raw EFB ARGB=004a49d6; quantized copy
+  agrees. This pixel is in the not-yet-drawn lower-right quadrant, whose
+  source is subsequently drawn by sequence 8. Its final check and the
+  end-of-frame client oracle pass, hiding the transient preservation fault.
+- Sequence 16 (frame 3, lower-right origin 320,240): outside pixel (114,366)
+  changes from prior 001f to 041f. Raw EFB ARGB=000080ff. Lower-left sequence
+  15 had been entirely correct, so the last operation damages an earlier
+  completed rectangle, and the end-of-frame client catches it.
+
+Each affected final summary reports one source/prior mismatch in both EFB
+and copy, with zero EFB-to-copy mismatches across all 307200 pixels. All
+other final summaries pass. No CPU correction or early stop by diagnostics;
+the existing client stops after detecting its frame-level error.
+
+This localizes observed damage to preservation of pixels outside the current
+rectangle during final rendering. It does not yet distinguish the full-surface
+prior-destination draw from the subsequent scissored row draw/state transition.
+Both share the final submission. Correct crop/horizontal output does not
+verify the separate tiled prior-destination upload, which currently lacks its
+own check. Next: check that upload against prior_snapshot, and use an explicit
+opt-in completion/snapshot boundary after the preservation draw to locate
+whether pixels are already wrong before the active rectangle draw. Such a
+boundary changes command timing and must be described as a diagnostic control.
+
+Complete audit verifies candidate fdbfaaee..., client 4352cccc..., unchanged
+installed provider a2e7df8e..., boot 444193a6-aee4-4ae3-a619-4f6dd90fccf1,
+successful module unload, CPU console restoration, and gcn_gx absent. No GPU
+timeout, FIFO stall or kernel fault. Installed provider remains unchanged.
+
+Client/raw-audit/trimmed-kernel manifest:
+
+```
+8006cdf4bde39e3e614587edb82ea2319d9e4a70a402a0e8fd63d47629dcde4f  /media/anolis/dev/wii-gcn-native-trace.sha256
+```
+
+Mesa suite remains prepared but unrun. No default-enablement, promotion or
+visual-acceptance claim. Local scratch and evidence remain on the dev drive.
