@@ -18205,3 +18205,22 @@ Client/raw-audit/trimmed-kernel manifest:
 
 Mesa suite remains prepared but unrun. No default-enablement, promotion or
 visual-acceptance claim. Local scratch and evidence remain on the dev drive.
+
+#### Separate native destination preservation from rectangle draw (2026-09-08)
+
+Add upload/prior comparison to scale_native_trace, checking all 307200 tiled
+preservation texture pixels against the linear pre-submission destination.
+Add scale_native_preserve_fence (default off), effective only in native trace:
+finish the preservation draw in its own submission, snapshot full EFB, compare
+against prior destination and uploaded texture, then continue active-rectangle
+commands in a fresh FIFO retaining GPU state. Reuse existing snapshot storage.
+No CPU repair or geometry changes. This adds a completion boundary and reads,
+so it is a timing-changing diagnostic, not default behavior or a fix.
+
+W=1 PowerPC build, strict checkpatch (zero errors/warnings/checks), and
+`git diff --check` pass. Candidate SHA-256:
+`e35583bf65bcc56da977fb7ab00af876391218423fa6f02d54960da18b70a91c`.
+Run native-tiled offscreen with scale_native_trace=1
+scale_native_preserve_fence=1 and both existing split switches enabled,
+up to 2,000 frames stopping on first client failure. No hardware result yet.
+Local scratch stays on dev drive; installed provider unchanged.

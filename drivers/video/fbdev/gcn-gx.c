@@ -280,6 +280,10 @@ static bool gx_scale_offset_split;
 module_param_named(scale_offset_split, gx_scale_offset_split, bool, 0444);
 MODULE_PARM_DESC(scale_offset_split,
 		 "Halve final primitive width for the focused tiled offset enlargement");
+static bool gx_scale_native_preserve_fence;
+module_param_named(scale_native_preserve_fence, gx_scale_native_preserve_fence, bool, 0444);
+MODULE_PARM_DESC(scale_native_preserve_fence,
+		 "Fence and snapshot destination preservation in the native trace");
 static bool gx_scale_native_trace;
 module_param_named(scale_native_trace, gx_scale_native_trace, bool, 0444);
 MODULE_PARM_DESC(scale_native_trace,
@@ -1011,6 +1015,35 @@ static void gx_compare_offset_scale(const u16 *source, const u16 *prior,
 	pr_info("gcn-gx: offset-scale seq=%u stage=%s pixels=%u mismatches=%u efb_mismatches=%u copy_mismatches=%u\n",
 		sequence, name, width * height, mismatches, efb_mismatches,
 		copy_mismatches);
+}
+
+static void gx_compare_native_prior(const u16 *prior, const u16 *texture,
+				    const u32 *efb, u32 sequence)
+{
+	u32 texture_mismatches = 0;
+	u32 efb_mismatches = 0;
+	u16 x;
+	u16 y;
+
+	for (y = 0; y < 480; y++) {
+		for (x = 0; x < 640; x++) {
+			size_t linear = (size_t)y * 640 + x;
+			u16 expected = prior[linear];
+			u16 uploaded = texture[gx_tiled_rgb565_index(x, y, 640)];
+			u32 argb = efb ? efb[linear] : 0;
+			u16 rendered = efb ? gx_argb_to_rgb565(argb) : expected;
+
+			if ((uploaded != expected || rendered != expected) &&
+			    !texture_mismatches && !efb_mismatches)
+				pr_info("gcn-gx: native-prior-first seq=%u snapshot=%u x=%u y=%u uploaded=%04x expected=%04x argb=%08x efb=%04x\n",
+					sequence, !!efb, x, y, uploaded, expected,
+					argb, rendered);
+			texture_mismatches += uploaded != expected;
+			efb_mismatches += rendered != expected;
+		}
+	}
+	pr_info("gcn-gx: native-prior seq=%u snapshot=%u pixels=307200 texture_mismatches=%u efb_mismatches=%u\n",
+		sequence, !!efb, texture_mismatches, efb_mismatches);
 }
 
 /* Four native-resolution rectangles; prior destination is linear RGB565. */
@@ -5943,6 +5976,8 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		flush_dcache_range((unsigned long)crop,
 				   (unsigned long)crop + dst_bytes);
 	}
+	if (native_trace)
+		gx_compare_native_prior(prior_snapshot, crop, NULL, trace_sequence);
 	fifo_pos = 0;
 	gx_load_libogc_init_preamble();
 	gx_setup_display_copy_state();
@@ -5954,6 +5989,20 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		gx_draw_color_quad(dst_width, dst_height, 0xff, 0xff, 0xff);
 		for (i = 0; i < 32; i++)
 			gx_wr8(0);
+		if (native_trace && gx_scale_native_preserve_fence) {
+			gx_load_bp_reg(0x45000002);
+			ret = gx_submit_and_wait_finish("render-native-preserve");
+			if (ret)
+				goto out_unlock;
+			ret = gx_snapshot_scale_colors(efb_snapshot, dst_width,
+						       dst_height);
+			if (ret)
+				goto out_unlock;
+			gx_compare_native_prior(prior_snapshot, crop, efb_snapshot,
+						trace_sequence);
+			/* Continue with the preserved GPU state in a fresh FIFO. */
+			fifo_pos = 0;
+		}
 	}
 
 	if (trace && (gx_scale_direct_color || gx_scale_clear_color)) {
