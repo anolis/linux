@@ -18224,3 +18224,54 @@ Run native-tiled offscreen with scale_native_trace=1
 scale_native_preserve_fence=1 and both existing split switches enabled,
 up to 2,000 frames stopping on first client failure. No hardware result yet.
 Local scratch stays on dev drive; installed provider unchanged.
+
+#### Preservation is exact; active draw introduces outside damage (2026-09-08)
+
+Hardware result for 90a886341: client frames 0--15 pass, frame 16 fails at
+(166,227), got f900 expected f800. All 68 rectangle stage triples and 136
+prior-upload/preservation-snapshot checks were preserved and mechanically
+verified. Every crop, horizontal intermediate, uploaded prior texture and
+post-preservation EFB matches its oracle. Thus the bad pixels appear after
+the preservation checkpoint, during the active rectangle submission.
+
+Final stage new mismatches occur at sequences 3,11,19,43,47,66 (counts
+1,1,2,1,1,1 respectively); final EFB/copy mismatch count is always zero.
+Sequences 3,11,19,43,47 draw lower-left origin (0,240) and their first bad
+pixel is outside it, in lower-right not-yet-drawn territory. Subsequent draws
+overwrite these errors before the frame-level client check. Sequence 19 has
+two mismatches; only the first coordinate is logged, so do not assert the
+second coordinate or its outside/inside classification.
+
+Sequence 66 (frame 16, upper-right origin 320,0) damages prior upper-left
+pixel (166,227): raw EFB 00ff2000 quantizes to f900, expected f800. Its
+preservation snapshot had been entirely correct. Later sequences 67/68
+preserve that already-bad pixel and report zero *new* mismatches against their
+per-submission prior oracle; the independent client finally detects it.
+This distinction matters: a clean later per-submission summary does not
+mean the complete frame has recovered.
+
+Completion fencing did not prevent the corruption. This result narrows the
+fault to active drawing/state after a correct preservation checkpoint, not
+the preservation upload/draw or final copy in this control. It does not
+identify an internal GPU mechanism or prove scissor encoding itself is wrong.
+The checkpoint changes timing; no normal-speed acceptance claim.
+
+Complete audit verifies candidate e35583bf..., client 4352cccc..., installed
+provider a2e7df8e..., boot 444193a6-aee4-4ae3-a619-4f6dd90fccf1, successful
+unload/CPU console restoration and gcn_gx absent. No GPU timeout, FIFO stall
+or kernel fault. Earlier native-trace entries in the raw audit are excluded
+by trimming from this cycle's connected marker. Installed provider unchanged.
+
+Client/raw-audit/trimmed-kernel manifest:
+
+```
+0bf454863ad1a87e6e3e88f698c6905e5c5e2e95ccfd9ca9a96f412cd8b5f979  /media/anolis/dev/wii-gcn-native-preserve.sha256
+```
+
+Next bounded control: split active final row primitives within each 320-wide
+rectangle into two 160-wide primitives, preserving origins/scissor and the
+preservation checkpoint. There are 240 source rows, so 480 quads require
+38400 vertex bytes, plus explicit state/header/submission capacity allowance.
+Keep opt-in and exact native rectangle gate; compare all per-operation oracles
+and independent frame output, then same-module unsplit control. No generic
+predicate expansion or installed-provider promotion; Mesa remains pending.
