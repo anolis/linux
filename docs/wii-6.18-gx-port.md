@@ -18044,3 +18044,51 @@ is deliberately RGB565-only; do not assume XRGB8888 receives or validates the
 same fix. Preserve exact evidence and isolate any failures before broadening
 predicates. Default-enablement/promotion and visual acceptance remain pending;
 these clean bounded regressions are not complete provider acceptance.
+
+#### XRGB8888 full-frame flips pass; native tiled mode fails (2026-09-08)
+
+Run existing XRGB8888 KMS modes on unchanged candidate 7bbf3639... with
+scale_offset_split=1 scale_system_split=1, all tracing off. Each cycle first
+passes the 64-pixel linear-filter precheck. Scaled xrgb8888 (320x240->640x480)
+passes initial frame plus 120 flips, 37,171,200 pixels, render average 21379 us,
+maximum 30188 us. Native full-frame xrgb8888-native also passes initial plus
+120 flips, 37,171,200 pixels, average 21528 us, maximum 37223 us. Both advance
+vblank and restore the previous console framebuffer. The focused RGB565 split
+does not apply to either XRGB8888 source, so these are bounded regressions,
+not validation of applying that fix to another source format.
+
+Native tiled xrgb8888-native-tiled fails at frame 7, destination (111,374),
+got 07bf expected 07ff. Frames 0--6 pass. This mode uses four 320x240 rectangle
+blits in a 640x480 source/destination, preserving native resolution; the bad
+pixel lies in the lower-left rectangle. It is copied-buffer evidence only.
+Do not conflate the mode name with a tiled GEM layout: this client uses linear
+objects, and tiles its rectangle submissions. No stage or pre-copy EFB evidence
+exists for this failure yet. The client restores the console framebuffer.
+
+All three audits verify candidate 7bbf3639..., render client 6337bdcb...,
+flip client 4352cccc..., installed provider a2e7df8e..., and boot
+444193a6-aee4-4ae3-a619-4f6dd90fccf1. Each module unload and CPU console
+restoration succeeds; gcn_gx is absent. No GPU timeout, FIFO stall, kernel
+fault or diagnostic trace appears. Installed provider unchanged.
+
+Prepared, but DID NOT RUN, a candidate-provider Mesa wrapper derived from the
+accepted 8c2789b 35 functional modes plus lifecycle suite. It pins the four
+accepted Mesa artifact hashes, records parameters, and compares before/after
+kernel logs. The render-cycle runner would own candidate loading/cleanup.
+Local script: /media/anolis/dev/wii-gcn-scratch/both-splits-mesa-suite.sh,
+SHA-256 952847970afb9e239a1af1a28b245043b1df655f78ebcbc54fc2303d0a549d07.
+Bash syntax check passes; no candidate Mesa result is claimed. Deferred after
+the native tiled regression failure.
+
+Nine run/audit/kernel artifacts plus the unrun wrapper are covered by:
+
+```
+75d83102386cd475928a1cc92755fdbedbe1a0c2be12412381a0877778dc6823  /media/anolis/dev/wii-gcn-both-splits-xrgb-regression.sha256
+```
+
+Next: reuse the existing flip client's --offscreen mode with format
+xrgb8888-native-tiled to isolate its four-rectangle workload from presentation.
+Preserve the same moving pattern, full destination oracle and exact frame
+number. If reproduced, add a distinct system-XRGB8888 offset diagnostic gate;
+do not reuse RGB565/full-surface assumptions. Mesa, visual acceptance, default
+enablement and provider promotion remain pending.
