@@ -280,6 +280,10 @@ static bool gx_scale_offset_split;
 module_param_named(scale_offset_split, gx_scale_offset_split, bool, 0444);
 MODULE_PARM_DESC(scale_offset_split,
 		 "Halve final primitive width for the focused tiled offset enlargement");
+static bool gx_scale_native_trace;
+module_param_named(scale_native_trace, gx_scale_native_trace, bool, 0444);
+MODULE_PARM_DESC(scale_native_trace,
+		 "Compare native XRGB8888 320x240 rectangles in linear 640x480 objects");
 static bool gx_scale_offset_trace;
 module_param_named(scale_offset_trace, gx_scale_offset_trace, bool, 0444);
 MODULE_PARM_DESC(scale_offset_trace,
@@ -1007,6 +1011,51 @@ static void gx_compare_offset_scale(const u16 *source, const u16 *prior,
 	pr_info("gcn-gx: offset-scale seq=%u stage=%s pixels=%u mismatches=%u efb_mismatches=%u copy_mismatches=%u\n",
 		sequence, name, width * height, mismatches, efb_mismatches,
 		copy_mismatches);
+}
+
+/* Four native-resolution rectangles; prior destination is linear RGB565. */
+static void gx_compare_native_scale(const u32 *source, const u16 *prior,
+				    const u16 *output, const u32 *efb,
+				    u16 origin_x, u16 origin_y, u32 sequence,
+				    unsigned int stage)
+{
+	const char *name = stage == 0 ? "crop" : stage == 1 ? "horizontal" : "final";
+	u16 width = stage == 2 ? 640 : 320;
+	u16 height = stage == 2 ? 480 : 240;
+	u16 stride = stage == 2 ? 640 : 512;
+	u32 mismatches = 0;
+	u32 efb_mismatches = 0;
+	u32 copy_mismatches = 0;
+	u16 x;
+	u16 y;
+
+	for (y = 0; y < height; y++) {
+		for (x = 0; x < width; x++) {
+			u16 sx = stage == 2 ? x : x + origin_x;
+			u16 sy = stage == 2 ? y : y + origin_y;
+			u16 expected;
+			u16 actual = output[gx_tiled_rgb565_index(x, y, stride)];
+			u32 argb = efb ? efb[(size_t)y * width + x] : 0;
+			u16 rendered = efb ? gx_argb_to_rgb565(argb) : actual;
+
+			if (stage == 2 && (x < origin_x || x >= origin_x + 320 ||
+					   y < origin_y || y >= origin_y + 240))
+				expected = prior[(size_t)y * 640 + x];
+			else
+				expected = gx_argb_to_rgb565(source[(size_t)sy * 640 + sx]);
+			if ((actual != expected || rendered != expected) &&
+			    !mismatches && !efb_mismatches)
+				pr_info("gcn-gx: native-first seq=%u origin=%u,%u stage=%s x=%u y=%u actual=%04x expected=%04x argb=%08x efb=%04x\n",
+					sequence, origin_x, origin_y, name, x, y,
+					actual, expected, argb, rendered);
+			mismatches += actual != expected;
+			efb_mismatches += efb && rendered != expected;
+			copy_mismatches += efb && rendered != actual;
+		}
+	}
+	pr_info("gcn-gx: native-scale seq=%u origin=%u,%u stage=%s pixels=%u mismatches=%u efb_mismatches=%u copy_mismatches=%u\n",
+		sequence, origin_x, origin_y, name, width * height, mismatches,
+		efb_mismatches, copy_mismatches);
 }
 
 static void gx_compare_scale_colors(const u32 *pixels, const u16 *output,
@@ -5352,7 +5401,7 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		{ .x = 319, .y = 119 },
 	};
 	u32 *efb_snapshot = NULL;
-	u16 *offset_prior = NULL;
+	u16 *prior_snapshot = NULL;
 	void *crop = gx_tex_buf_alt;
 	void *horizontal = gx_tex_buf;
 	void *final_texture = horizontal;
@@ -5368,6 +5417,7 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	size_t src_bytes;
 	bool final_submitted = false;
 	bool focused;
+	bool native_trace;
 	bool offset_focused;
 	bool offset_trace;
 	bool system_focused;
@@ -5466,6 +5516,16 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		!src_x && src_y == 43 && !dst_x && dst_y == 97 &&
 		src_rect_width == 255 && src_rect_height == 79 &&
 		dst_rect_width == 256 && dst_rect_height == 79;
+	native_trace = READ_ONCE(gx_scale_native_trace) && system_memory &&
+		src_format == DRM_GCN_GEM_FORMAT_XRGB8888 &&
+		src_layout == DRM_GCN_GEM_LAYOUT_LINEAR &&
+		dst_layout == DRM_GCN_GEM_LAYOUT_LINEAR &&
+		src_width == 640 && src_height == 480 &&
+		dst_width == 640 && dst_height == 480 &&
+		src_x == dst_x && src_y == dst_y &&
+		(src_x == 0 || src_x == 320) && (src_y == 0 || src_y == 240) &&
+		src_rect_width == 320 && src_rect_height == 240 &&
+		dst_rect_width == 320 && dst_rect_height == 240;
 	offset_trace = READ_ONCE(gx_scale_offset_trace) && offset_focused;
 	system_trace = READ_ONCE(gx_scale_system_trace) && system_focused;
 	trace = READ_ONCE(gx_scale_trace) && focused;
@@ -5475,7 +5535,7 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	split_vertical = (focused && gx_scale_split_reduce) ||
 		(trace && gx_scale_texture_half_rows) ||
 		(offset_focused && gx_scale_offset_split);
-	if (trace || system_trace || offset_trace)
+	if (trace || system_trace || offset_trace || native_trace)
 		trace_sequence = ++gx_scale_trace_sequence;
 	if (trace && (gx_scale_direct_color || gx_scale_clear_color) &&
 	    (!gx_scale_cpu_source || !gx_scale_cpu_uniform ||
@@ -5588,7 +5648,7 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		goto out_unlock;
 	}
 
-	if ((trace && gx_scale_efb_full) || system_trace || offset_trace) {
+	if ((trace && gx_scale_efb_full) || system_trace || offset_trace || native_trace) {
 		efb_snapshot = kvmalloc_array((size_t)dst_width * dst_height,
 					      sizeof(*efb_snapshot),
 					      GFP_KERNEL);
@@ -5598,13 +5658,13 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		}
 	}
 
-	if (offset_trace) {
-		offset_prior = kvmalloc(dst_bytes, GFP_KERNEL);
-		if (!offset_prior) {
+	if (offset_trace || native_trace) {
+		prior_snapshot = kvmalloc(dst_bytes, GFP_KERNEL);
+		if (!prior_snapshot) {
 			ret = -ENOMEM;
 			goto out_unlock;
 		}
-		memcpy(offset_prior, dst_addr, dst_bytes);
+		memcpy(prior_snapshot, dst_addr, dst_bytes);
 	}
 
 	if (!system_memory) {
@@ -5683,9 +5743,12 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	if (offset_trace) {
 		invalidate_dcache_range((unsigned long)crop,
 					(unsigned long)crop + crop_bytes);
-		gx_compare_offset_scale(src_addr, offset_prior, crop, efb_snapshot,
+		gx_compare_offset_scale(src_addr, prior_snapshot, crop, efb_snapshot,
 					trace_sequence, 0);
 	}
+	if (native_trace)
+		gx_compare_native_scale(src_addr, prior_snapshot, crop, NULL,
+					src_x, src_y, trace_sequence, 0);
 	if (system_trace)
 		gx_compare_system_scale(src_addr, crop, crop_width, src_width,
 					src_height, NULL, trace_sequence, "crop");
@@ -5726,7 +5789,7 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	ret = gx_submit_and_wait_finish("render-blit-scaled-horizontal-draw");
 	if (ret)
 		goto out_unlock;
-	if (system_trace || offset_trace) {
+	if (system_trace || offset_trace || native_trace) {
 		ret = gx_snapshot_scale_colors(efb_snapshot, dst_rect_width,
 					       src_rect_height);
 		if (ret)
@@ -5771,8 +5834,15 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	if (offset_trace) {
 		invalidate_dcache_range((unsigned long)horizontal,
 					(unsigned long)horizontal + horizontal_bytes);
-		gx_compare_offset_scale(src_addr, offset_prior, horizontal,
+		gx_compare_offset_scale(src_addr, prior_snapshot, horizontal,
 					efb_snapshot, trace_sequence, 1);
+	}
+
+	if (native_trace) {
+		invalidate_dcache_range((unsigned long)horizontal,
+					(unsigned long)horizontal + horizontal_bytes);
+		gx_compare_native_scale(src_addr, prior_snapshot, horizontal,
+					efb_snapshot, src_x, src_y, trace_sequence, 1);
 	}
 
 	if (trace && gx_scale_cpu_publish) {
@@ -6068,12 +6138,16 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 			gx_compare_system_scale(src_addr, crop, dst_width, dst_width,
 						dst_height, efb_snapshot, trace_sequence,
 						"final");
+		if (native_trace)
+			gx_compare_native_scale(src_addr, prior_snapshot, crop,
+						efb_snapshot, src_x, src_y,
+						trace_sequence, 2);
 		gx_copy_tiled_to_layout(crop, dst_addr, dst_width, dst_height, dst_layout);
 	} else {
 		invalidate_dcache_range((unsigned long)dst_addr,
 					(unsigned long)dst_addr + dst_bytes);
 		if (offset_trace)
-			gx_compare_offset_scale(src_addr, offset_prior, dst_addr,
+			gx_compare_offset_scale(src_addr, prior_snapshot, dst_addr,
 						efb_snapshot, trace_sequence, 2);
 		if (trace) {
 			final_hash = gx_hash_tiled_region(dst_addr, dst_width,
@@ -6162,7 +6236,7 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	}
 
 out_unlock:
-	kvfree(offset_prior);
+	kvfree(prior_snapshot);
 	kvfree(efb_snapshot);
 	mutex_unlock(&gx_submit_lock);
 	return ret;

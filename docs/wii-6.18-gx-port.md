@@ -18135,3 +18135,27 @@ use EFB snapshots before each copy. Log rectangle origin and sequence to
 locate the first operation/stage that diverges, including preserved outside
 pixels. Do not assume a full-surface fast path or RGB565 source representation.
 Mesa suite remains prepared but unrun; default/promotion/visual gates pending.
+
+#### Trace native XRGB8888 rectangle submissions (2026-09-08)
+
+Add scale_native_trace (default off), gated to linear system 640x480
+XRGB8888 source/RGB565 destination and matching 320x240 source/destination
+rectangles at the four quadrant origins. Compare active converted crop against
+XRGB8888 source quantized to RGB565. CPU-prepared crop has no EFB snapshot.
+Capture horizontal and full final EFB before each copy and compare them with
+tiled output and expected source. Full final oracle preserves the linear
+pre-submission destination outside the current rectangle. Log submission
+sequence and rectangle origin to expose later damage to earlier rectangles.
+
+Reuse bounded snapshot allocation (1228800 bytes) plus prior destination
+(614400 bytes), released on every exit. Existing offset prior buffer is renamed
+prior_snapshot to reflect shared diagnostic use. No geometry changes, CPU
+repair, extra GPU submissions or explicit sleeps. Diagnostic reads affect
+pacing. Existing split gates remain unchanged and exclude this workload.
+
+W=1 PowerPC build, strict checkpatch (zero errors/warnings/checks), and
+`git diff --check` pass. Candidate SHA-256:
+`fdbfaaee9e3a67f17e56980ac97ac0e5ffa2b2d72c95b857d0e4c9b3316d93a3`.
+Run the existing native-tiled offscreen client, up to 2,000 frames stopping
+on first failure, with scale_native_trace=1 and both existing splits enabled.
+No hardware result yet. Installed provider unchanged; scratch on dev drive.
