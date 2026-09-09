@@ -17830,3 +17830,39 @@ Run on unchanged candidate 6c5a5a25... with scale_system_split=1, as in the
 failed regression; that switch's shape gate excludes this workload. No
 hardware result yet. Local scratch stays under /media/anolis/dev, remote
 Wii /tmp remains permitted, and installed provider stays unchanged.
+
+#### Offset enlargement fails independently at frame 24 (2026-09-08)
+
+Hardware result for 2d4cd3ba7: focused client frames 0--23 pass the complete
+65536-pixel destination oracle and source-preservation check. Frame 24 fails
+at destination (30,138), got 141e expected 541e. The client stops immediately;
+its source-preservation loop is not reached for that failing frame. No later
+frames run. All 524288 MEM1 bytes are recovered after resource cleanup.
+
+Thus the exact offset 255x79 -> 256x79 workload reproduces without preceding
+render-suite operations. This is copied-destination evidence only; neither
+source state at the failing instant nor crop/intermediate/EFB stages were
+captured. It does not yet locate the first bad stage or prove the same internal
+cause as the system upscale. The explicit system split switch remains outside
+this workload's shape gate; no broader geometry change was made.
+
+The complete audit verifies unchanged candidate 6c5a5a25..., focused client
+6337bdcb..., installed provider a2e7df8e..., and boot
+444193a6-aee4-4ae3-a619-4f6dd90fccf1. Candidate unload, CPU console restoration
+and gcn_gx absence are verified. No GPU timeout, FIFO stall or kernel fault
+appears in the latest cycle. No installed-provider replacement.
+
+Manifest includes client output, raw audit, trimmed kernel cycle and exact
+focused binary:
+
+```
+089d5ba2a09a4cdab7cf30dceaed0b1c5556870c937113b701477d73d9e27470  /media/anolis/dev/wii-gcn-offset-enlarge.sha256
+```
+
+Next: add a separate exact-shape offset diagnostic gate. Compare GPU-cropped
+texture against tiled source rectangle, horizontal intermediate against the
+255->256 nearest mapping, then final EFB/copied destination including preserved
+outside pixels. Account explicitly for source y=43 and destination y=97, and
+capture pre-copy EFB as needed to distinguish draw from copy faults. Reuse the
+focused client, avoid CPU correction, and do not repurpose the full-surface
+system trace's hard-coded 2x oracle for this offset case.
