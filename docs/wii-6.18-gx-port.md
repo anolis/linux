@@ -18092,3 +18092,46 @@ Preserve the same moving pattern, full destination oracle and exact frame
 number. If reproduced, add a distinct system-XRGB8888 offset diagnostic gate;
 do not reuse RGB565/full-surface assumptions. Mesa, visual acceptance, default
 enablement and provider promotion remain pending.
+
+#### Native tiled workload fails offscreen at frame 5 (2026-09-08)
+
+Run the existing flip client as
+`/dev/dri/card0 1999 xrgb8888-native-tiled --offscreen`, unchanged candidate
+7bbf3639..., both opt-in splits enabled, all diagnostics off. Frames 0--4
+pass all 307200 destination pixels (1,536,000 complete verified pixels).
+Frame 5 fails at (590,398), got 7fff expected ffff. No later frames run.
+The client uses four native-resolution 320x240 rectangle submissions in linear
+640x480 XRGB8888/RGB565 objects, with the same moving pattern and alternating
+destinations as presentation mode. It makes no framebuffer registration,
+modeset or page-flip calls. GX console acceleration remains registered during
+the test, so this does not exclude all background scanout activity.
+
+The failure reproduces independently of client presentation. It lies in the
+lower-right rectangle (origin 320,240; local pixel 270,158), whereas the prior
+presenting failure was lower-left. No stage localization is implied: the
+oracle checks after all four rectangle submissions, so prior/outside-pixel
+preservation in later operations can also matter. Both failures are final
+copied-buffer evidence. Existing RGB565 and MEM1 split predicates exclude
+this system XRGB8888 workload.
+
+Complete audit verifies candidate 7bbf3639..., offscreen binary 4352cccc...
+at the runner's generic /tmp/wii-gcn-render-test path, unchanged installed
+provider a2e7df8e..., and boot 444193a6-aee4-4ae3-a619-4f6dd90fccf1.
+Candidate unload and CPU console restoration succeed; gcn_gx is absent.
+No GPU timeout, FIFO stall, kernel fault or trace event appears. No driver or
+client source changed in this step; no installed-provider promotion.
+
+Client/raw-audit/trimmed-kernel manifest:
+
+```
+fad8cea169ef75bd9c7e87b64ec11a1b7816de2782b8deea89060753bb23f8e7  /media/anolis/dev/wii-gcn-native-tiled-offscreen.sha256
+```
+
+Next: add an opt-in system XRGB8888 four-rectangle diagnostic gate (640x480
+linear objects; matching source/destination origin in {0,320}x{0,240},
+320x240 rectangles). Compare converted crop, horizontal intermediate and
+full final destination with source plus pre-submission destination oracle;
+use EFB snapshots before each copy. Log rectangle origin and sequence to
+locate the first operation/stage that diverges, including preserved outside
+pixels. Do not assume a full-surface fast path or RGB565 source representation.
+Mesa suite remains prepared but unrun; default/promotion/visual gates pending.
