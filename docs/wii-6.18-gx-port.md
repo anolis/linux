@@ -17808,3 +17808,25 @@ MEM1 enlargement workload and preserve its source/outside-pixel oracle. Locate
 its first bad stage before broadening geometry fixes. The validated system
 split remains opt-in. Triangle, remaining format/Mesa/visual acceptance and
 default-enablement decision remain pending; the broad suite is not clean.
+
+#### Isolate offset MEM1 enlargement (2026-09-08)
+
+Add --offset-enlarge-only to the render client: up to 2,000 frames of the
+exact full-width enlargement case, source (0,43,255,79) to destination
+(0,97,256,79), in two 256x256 tiled RGB565 MEM1 objects. Reuse the existing
+test_scaled_blit_case unmodified, including source pattern, destination
+initialization, scaled sampling oracle and every outside pixel. Retain one
+context/syncobj and two allocations across frames; each frame initializes
+both surfaces. After a successful destination check, verify the source is
+unchanged. Stop at first failure; release resources and verify MEM1 recovery.
+This omits earlier suite operations, so a bounded pass would not rule out
+state-history dependence. No driver changes in this step.
+
+All four static PowerPC clients build with -Wall -Wextra -Werror; strict
+checkpatch reports zero errors/warnings/checks and git diff --check passes.
+Focused client SHA-256:
+`6337bdcb5bbb26de3ff8836117bd0767c1bdc45866139838e648d966b1a3bd27`.
+Run on unchanged candidate 6c5a5a25... with scale_system_split=1, as in the
+failed regression; that switch's shape gate excludes this workload. No
+hardware result yet. Local scratch stays under /media/anolis/dev, remote
+Wii /tmp remains permitted, and installed provider stays unchanged.

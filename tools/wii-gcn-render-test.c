@@ -3694,6 +3694,86 @@ out:
 		fail("close 640-wide scaled-blit source");
 }
 
+static void test_offset_enlarge(int fd)
+{
+	const struct scaled_blit_case test = {
+		"full-width enlargement", 0, 43, 255, 79, 0, 97, 256, 79, false,
+	};
+	struct drm_gcn_ctx_create ctx = {};
+	struct drm_gcn_ctx_free free_ctx = {};
+	struct drm_syncobj_create sync = {};
+	struct drm_syncobj_destroy destroy = {};
+	struct drm_gcn_gem_create src = {};
+	struct drm_gcn_gem_create dst = {};
+	uint16_t *src_map = MAP_FAILED;
+	uint16_t *dst_map = MAP_FAILED;
+	uint64_t free_before;
+	uint64_t free_after;
+
+	if (get_param(fd, DRM_GCN_PARAM_MEM1_FREE_BYTES, &free_before)) {
+		fail("query offset-enlargement initial memory");
+		return;
+	}
+	if (create_bo(fd, &src) || create_bo(fd, &dst)) {
+		fail("create offset-enlargement objects");
+		goto out;
+	}
+	src_map = map_bo(fd, &src);
+	dst_map = map_bo(fd, &dst);
+	if (src_map == MAP_FAILED || dst_map == MAP_FAILED) {
+		fail("map offset-enlargement objects");
+		goto out;
+	}
+	if (ioctl(fd, DRM_IOCTL_GCN_CTX_CREATE, &ctx) ||
+	    ioctl(fd, DRM_IOCTL_SYNCOBJ_CREATE, &sync)) {
+		fail("create offset-enlargement context or syncobj");
+		goto out;
+	}
+	for (unsigned int frame = 0; frame < 2000 && !failures; frame++) {
+		printf("OFFSET ENLARGE: frame=%u\n", frame);
+		if (test_scaled_blit_case(fd, ctx.id, sync.handle, src.handle,
+					  dst.handle, src_map, dst_map, &test))
+			break;
+		for (unsigned int y = 0; y < TEST_HEIGHT; y++) {
+			for (unsigned int x = 0; x < TEST_WIDTH; x++) {
+				size_t pixel = tiled_rgb565_index(x, y, TEST_WIDTH);
+
+				if (src_map[pixel] != same_object_pattern(x, y)) {
+					fail("offset-enlargement source changed");
+					goto out;
+				}
+			}
+		}
+	}
+out:
+	if (sync.handle) {
+		destroy.handle = sync.handle;
+		if (ioctl(fd, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy))
+			fail("destroy offset-enlargement syncobj");
+	}
+	if (ctx.id) {
+		free_ctx.id = ctx.id;
+		if (ioctl(fd, DRM_IOCTL_GCN_CTX_FREE, &free_ctx))
+			fail("free offset-enlargement context");
+	}
+	if (dst_map != MAP_FAILED && munmap(dst_map, dst.size))
+		fail("unmap offset-enlargement destination");
+	if (src_map != MAP_FAILED && munmap(src_map, src.size))
+		fail("unmap offset-enlargement source");
+	if (dst.handle && close_bo(fd, dst.handle))
+		fail("close offset-enlargement destination");
+	if (src.handle && close_bo(fd, src.handle))
+		fail("close offset-enlargement source");
+	if (get_param(fd, DRM_GCN_PARAM_MEM1_FREE_BYTES, &free_after))
+		fail("query offset-enlargement final memory");
+	else if (free_after != free_before)
+		fail_value("offset-enlargement memory recovery", free_after,
+			   free_before);
+	else
+		printf("OFFSET ENLARGE: recovered %llu MEM1 bytes\n",
+		       (unsigned long long)free_after);
+}
+
 static void test_wide_scaled_reduce(int fd, bool uniform)
 {
 	struct drm_gcn_ctx_create ctx = {};
@@ -4177,7 +4257,9 @@ int main(int argc, char **argv)
 				!strcmp(argv[1], "--wide-reduce-only");
 	bool uniform_only = argc > 1 &&
 			    !strcmp(argv[1], "--wide-reduce-uniform-only");
-	int mode_args = hold + linear_only + wide_reduce_only + uniform_only;
+	bool offset_only = argc > 1 && !strcmp(argv[1], "--offset-enlarge-only");
+	int mode_args = hold + linear_only + wide_reduce_only + uniform_only +
+			offset_only;
 	const char *node = argc > 1 + mode_args ? argv[1 + mode_args] :
 			   "/dev/dri/renderD128";
 	uint64_t provider = 0;
@@ -4262,6 +4344,14 @@ int main(int argc, char **argv)
 			else
 				fail_value("linear texture capability", features,
 					   DRM_GCN_FEATURE_TEXTURE_LINEAR);
+			goto out_close;
+		}
+		if (offset_only) {
+			if (features & DRM_GCN_FEATURE_BLIT_SCALED_RGB565)
+				test_offset_enlarge(fd);
+			else
+				fail_value("scaled RGB565 capability", features,
+					   DRM_GCN_FEATURE_BLIT_SCALED_RGB565);
 			goto out_close;
 		}
 		if (wide_reduce_only || uniform_only) {
