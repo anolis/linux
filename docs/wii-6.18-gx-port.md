@@ -17987,3 +17987,18 @@ then run 2,000 focused frames without diagnostic reads/logging. After a pass,
 run the broader suite and pending triangle/KMS checks with both validated
 splits explicitly enabled. Keep default changes and installed-provider
 promotion pending the remaining acceptance evidence.
+
+#### Validate offset split without diagnostics (2026-09-08)
+
+Decouple scale_offset_split from tracing via the same exact distinct-object
+MEM1 rectangle predicate. Both system and offset splits remain default off.
+With offset trace disabled, skip snapshots, comparisons, prior-destination
+allocation and trace logs; keep identical split geometry and FIFO bounds.
+
+W=1 PowerPC build, strict checkpatch (zero errors/warnings/checks) and
+`git diff --check` pass. Candidate SHA-256:
+`7bbf3639a97f142d43654d553a9c39c93505ec06a516695a2aac7e930e2690ca`.
+Run 2,000 focused offset frames with scale_offset_split=1 scale_system_split=1
+and tracing off. After successful audit, run complete render suite and KMS
+pattern/triangle/RGB565 flips using the same flags. Keep installed provider
+unchanged; no hardware result yet. Local scratch stays on the dev drive.

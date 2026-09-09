@@ -279,7 +279,7 @@ MODULE_PARM_DESC(scale_system_split,
 static bool gx_scale_offset_split;
 module_param_named(scale_offset_split, gx_scale_offset_split, bool, 0444);
 MODULE_PARM_DESC(scale_offset_split,
-		 "Halve final primitive width in the focused offset trace");
+		 "Halve final primitive width for the focused tiled offset enlargement");
 static bool gx_scale_offset_trace;
 module_param_named(scale_offset_trace, gx_scale_offset_trace, bool, 0444);
 MODULE_PARM_DESC(scale_offset_trace,
@@ -5368,6 +5368,7 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	size_t src_bytes;
 	bool final_submitted = false;
 	bool focused;
+	bool offset_focused;
 	bool offset_trace;
 	bool system_focused;
 	bool system_trace;
@@ -5455,7 +5456,7 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		dst_width == 640 && dst_height == 480 &&
 		src_rect_width == 320 && src_rect_height == 240 &&
 		dst_rect_width == 640 && dst_rect_height == 480;
-	offset_trace = READ_ONCE(gx_scale_offset_trace) && !system_memory &&
+	offset_focused = !system_memory &&
 		src_addr != dst_addr &&
 		src_format == DRM_GCN_GEM_FORMAT_RGB565 &&
 		src_layout == DRM_GCN_GEM_LAYOUT_TILED_4X4 &&
@@ -5465,6 +5466,7 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		!src_x && src_y == 43 && !dst_x && dst_y == 97 &&
 		src_rect_width == 255 && src_rect_height == 79 &&
 		dst_rect_width == 256 && dst_rect_height == 79;
+	offset_trace = READ_ONCE(gx_scale_offset_trace) && offset_focused;
 	system_trace = READ_ONCE(gx_scale_system_trace) && system_focused;
 	trace = READ_ONCE(gx_scale_trace) && focused;
 	split_horizontal = (focused && gx_scale_split_reduce) ||
@@ -5472,7 +5474,7 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		(system_focused && gx_scale_system_split);
 	split_vertical = (focused && gx_scale_split_reduce) ||
 		(trace && gx_scale_texture_half_rows) ||
-		(offset_trace && gx_scale_offset_split);
+		(offset_focused && gx_scale_offset_split);
 	if (trace || system_trace || offset_trace)
 		trace_sequence = ++gx_scale_trace_sequence;
 	if (trace && (gx_scale_direct_color || gx_scale_clear_color) &&
