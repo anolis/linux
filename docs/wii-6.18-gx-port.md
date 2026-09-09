@@ -17887,3 +17887,44 @@ Run --offset-enlarge-only with scale_offset_trace=1 scale_system_split=1,
 stopping on first client failure (maximum 2,000 frames). The existing system
 split remains outside this gate. Client stays 6337bdcb.... No hardware result
 yet; local scratch on dev drive, installed provider unchanged.
+
+#### Offset corruption first appears in final EFB (2026-09-08)
+
+Hardware result for e7dc42da7: frames 0--55 pass; frame 56 fails at (30,138),
+got 141e expected 541e, matching the uninstrumented reproducer's coordinate
+and values. All 57 crop/horizontal/final stage triples were preserved and
+mechanically checked. Sequences 1--56 have zero mismatches. Sequence 57:
+
+- Crop: all 20145 active pixels match both source and pre-copy EFB.
+- Horizontal: all 20224 pixels match both mapped source and pre-copy EFB.
+- Final: one of 65536 pixels differs from the expected source/prior-destination
+  oracle, in both pre-copy EFB and copied destination. At (30,138), raw EFB
+  ARGB=001282f7, quantized RGB565=141e instead of 541e. EFB-to-copy mismatch
+  count is zero across the whole destination, including outside pixels.
+
+The earliest observed fault is now final rendering, with a correct horizontal
+input. It is present before final copy, unlike a copy-introduced error. This
+does not distinguish texture fetch/shading/EFB write or prove the mechanism
+is shared with the system upscale's horizontal fault. Final stage also
+includes prior-destination preservation setup; no internal-unit attribution.
+The independent client agrees with the diagnostic oracle. Its source loop
+is not reached on the failing frame. MEM1 recovery reports all 524288 bytes.
+
+Complete audit verifies candidate 7ca7087c..., client 6337bdcb..., unchanged
+installed provider a2e7df8e..., boot 444193a6-aee4-4ae3-a619-4f6dd90fccf1,
+successful unload, CPU console restored and gcn_gx absent. No GPU timeout,
+FIFO stall or kernel fault appears. No installed-provider replacement.
+
+Client/raw-audit/trimmed-kernel manifest:
+
+```
+6895a03286f8965896b34cb19f8ad163b2671dddd311e856875650265708cf36  /media/anolis/dev/wii-gcn-offset-trace.sha256
+```
+
+Next bounded geometry control: split only final row primitives at x=128,
+keeping the horizontal stage unchanged and retaining all three EFB checks.
+The 79 selected rows become 158 textured quads (12640 vertex bytes), with
+explicit header/state/finish/token/alignment capacity checks. Preserve offset
+and outside-pixel behavior and keep the switch opt-in with the exact shape
+gate. Follow a pass with a same-module unsplit control before testing without
+diagnostic timing. Do not broaden to arbitrary rectangles without evidence.
