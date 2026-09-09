@@ -17761,3 +17761,50 @@ Run 2,000 offscreen RGB565 frames with only scale_system_split=1, stopping on
 failure. After a pass, run full render and existing RGB565 KMS tests with the
 same switch. No XRGB8888 split or installed-provider promotion. Local scratch
 and artifacts stay on the dev drive. No hardware result yet.
+
+#### Trace-free split and RGB565 flips pass; another scale case fails (2026-09-08)
+
+Hardware results for 027edd421 / 6c5a5a25..., with only
+scale_system_split=1: all 2,000 offscreen RGB565 frames pass, 614,400,000
+exact client pixels. The trimmed audit contains no system/reduction trace
+or EFB diagnostic events. This validates the focused split without diagnostic
+read/logging delays; it supplies final-client evidence rather than per-frame
+intermediate snapshots. Render timing was generally about 20--28 ms.
+
+The next cycle passed the complete render UAPI suite, including MEM1 recovery
+checks of all 524288 bytes. KMS pattern verified all 307200 linear pixels,
+presented for five seconds, and restored the previous framebuffer. RGB565
+KMS flips passed initial frame plus 120 flips (121 frames, 37,171,200 exact
+pixels), advancing vblank and restoring the console framebuffer. Average
+render time 22199 us, maximum 40729 us. These are software presentation checks,
+not new visual acceptance evidence.
+
+A subsequent full-suite/triangle cycle failed in the render precheck, so the
+triangle client was NOT run. Failure: full-width enlargement at (34,146),
+got 5822 expected 5c22. That test scales source rectangle (0,43,255,79) to
+(0,97,256,79) in the ordinary tiled MEM1 objects, outside the focused linear
+system gate. The test_submit scale loop exits on this failure; later top-level
+render tests continued, including passing the focused linear system upscale.
+This case passed in the preceding complete suite. Its intermittent failure
+is not localized yet; do not attribute it to the new switch without evidence.
+No retry is substituted for this failed regression.
+
+All three complete audits verify candidate 6c5a5a25..., boot
+444193a6-aee4-4ae3-a619-4f6dd90fccf1, and unchanged installed provider
+a2e7df8e.... Offscreen executable is 4352cccc...; KMS cycles use render suite
+8a5c7030..., KMS render a8a46755..., and flip client 4352cccc.... Every cycle
+unloaded gcn_gx and restored CPU console; lsmod confirms it absent. No GPU
+timeout, FIFO stall or kernel fault appears in any trimmed cycle. No diagnostic
+trace events appear. No installed-provider promotion or complete acceptance.
+
+Nine client/raw-audit/trimmed-kernel artifacts are covered by:
+
+```
+82ef5d5e16bc194d137613833b9ebd1b664cd00560d9d9a60f833d1c17fabee2  /media/anolis/dev/wii-gcn-system-split-no-trace-regression.sha256
+```
+
+Next: make a focused repeatable client for the exact offset 255x79 -> 256x79
+MEM1 enlargement workload and preserve its source/outside-pixel oracle. Locate
+its first bad stage before broadening geometry fixes. The validated system
+split remains opt-in. Triangle, remaining format/Mesa/visual acceptance and
+default-enablement decision remain pending; the broad suite is not clean.
