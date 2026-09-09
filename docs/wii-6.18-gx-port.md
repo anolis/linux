@@ -17699,3 +17699,49 @@ Run up to 2,000 offscreen frames with scale_system_trace=1 scale_system_split=1,
 stopping on client failure, and compare complete stage evidence. This is an
 opt-in geometry control, not default behavior or installed-provider promotion.
 No hardware result yet. Local scratch and artifacts remain on the dev drive.
+
+#### Horizontal split passes 2,000; same-module unsplit fails (2026-09-08)
+
+Hardware result for d038a83fd / ae8e7cab...: with scale_system_trace=1 and
+scale_system_split=1, all 2,000 offscreen RGB565 frames passed (614,400,000
+exact client pixels). Complete logs contain every sequence 1--2000 with
+crop/horizontal/final summaries, all zero mismatches. Both horizontal and
+final pre-copy EFB match source and copied texture in every frame. Authored
+horizontal stream is consistently 640 quads, 52174 bytes, hash 81d3fca4.
+This includes 51200 vertex bytes, command header/state/finish BP; submission
+adds its token and alignment within the reserved space.
+
+After verifying the complete successful audit and cleanup, reran the same
+checksum-verified module/client with scale_system_split=0 (trace still on),
+up to 2,000 frames stopping on failure. Frames 0--205 pass. Frame 206 fails
+at (303,356), got 001b expected 001f. All 207 stage triples were preserved
+and mechanically checked. At sequence 207, crop is exact; horizontal has one
+wrong pre-copy EFB and copied pixel at (303,178), raw ARGB 000000df,
+quantized 001b. Final has two wrong EFB/copied pixels, first (303,356), raw
+000000de. Both copy mismatch counts remain zero. Earlier sequences are clean.
+Unsplit horizontal commands remain 320 quads, 26574 bytes, hash 89bff809 in
+every frame, including the failure.
+
+This supports the shorter-horizontal-primitive control under diagnostic timing.
+It does not establish a hardware mechanism, a normal-speed fix, or complete
+KMS acceptance. The final geometry was unchanged, and had no independent
+mismatch in the split run. No generic split or default system behavior changed.
+
+Both audits verify candidate ae8e7cab..., client 4352cccc..., installed
+provider a2e7df8e..., and boot 444193a6-aee4-4ae3-a619-4f6dd90fccf1.
+Both candidate loads ended with unload, CPU console restoration and gcn_gx
+absent. Neither trimmed cycle has a GPU timeout, FIFO stall or kernel fault.
+The first audit preserves all 8,000 stage/command summary records before the
+second cycle starts; no old-cycle or partial-transfer evidence is counted.
+
+Six client/raw-audit/trimmed-kernel artifacts are covered by:
+
+```
+b2212a10d861a9d07e891ff49bb46c9dc9c2faf15590c080bde6aaf1b64ae728  /media/anolis/dev/wii-gcn-system-horizontal-split-comparison.sha256
+```
+
+Next: decouple this opt-in split from EFB tracing while retaining the same
+exact RGB565 system-memory shape gate, then validate 2,000 offscreen frames
+without snapshot/logging delays. Follow a pass with existing render/KMS
+regression, retaining installed provider until remaining acceptance gates pass.
+Do not expand to XRGB8888 or other dimensions without separate evidence.
