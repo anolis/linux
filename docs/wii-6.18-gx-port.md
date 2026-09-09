@@ -18275,3 +18275,22 @@ preservation checkpoint. There are 240 source rows, so 480 quads require
 Keep opt-in and exact native rectangle gate; compare all per-operation oracles
 and independent frame output, then same-module unsplit control. No generic
 predicate expansion or installed-provider promotion; Mesa remains pending.
+
+#### Native active-row split control (2026-09-08)
+
+Add scale_native_split (default off), effective only within the native trace
+rectangle gate. Split each 320-wide active row into two 160-wide primitives;
+240 rows emit 480 quads/38400 vertex bytes. Existing actual-run FIFO checks
+reserve header/state/finish/token/alignment. Preserve rectangle origin, scissor,
+texture coordinates and optional preservation checkpoint. No CPU correction.
+Log authored active stream count/bytes/hash for both switch settings.
+
+W=1 PowerPC build, strict checkpatch (zero errors/warnings/checks), and
+`git diff --check` pass. Candidate SHA-256:
+`591583b28b8a0aaa759992c0d953272b28716021c5ab648bb80f76b4e1ca8b40`.
+Initial bounded control: 120 offscreen frames (480 rectangle submissions),
+with native trace, preservation fence and native split enabled, plus both
+prior split switches. Stop on client failure; inspect intermediate faults even
+if frame-level output passes. This short initial control is not the 2,000-frame
+endurance gate. If clean, compare the same candidate with native split off.
+No hardware result yet; local scratch on dev drive, installed provider unchanged.
