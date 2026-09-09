@@ -17947,3 +17947,43 @@ Run up to 2,000 focused frames with scale_offset_trace=1 scale_offset_split=1
 scale_system_split=1. Stop on failure. After a pass and verified cleanup, run
 the same module with offset split disabled as control. No hardware result yet;
 no installed-provider promotion; scratch and artifacts remain on dev drive.
+
+#### Offset split passes 2,000; unsplit control fails at 47 (2026-09-08)
+
+Hardware result for 326c685b2 / 4a834bf9...: offset split enabled passes all
+2,000 client frames, including all 65536 destination pixels per frame
+(131,072,000 exact pixels), outside preservation, and source preservation.
+Every sequence 1--2000 has complete crop/horizontal/final summaries, all zero
+mismatches, including all three pre-copy EFB/copy comparisons. Authored final
+stream remains 158 quads, 14293 bytes, hash 879a421b throughout. That includes
+12640 vertex bytes plus existing preservation/setup/header/finish commands;
+submission tokens and alignment fit within the reserved FIFO budget.
+
+After complete audit and cleanup verification, the same checksum-verified
+module/client with offset split disabled passes frames 0--46, then fails
+frame 47 at (30,138), got 141e expected 541e. All 48 stage triples verified:
+crop and horizontal are exact throughout; only final sequence 48 has one
+wrong pixel in both EFB and copied destination, raw ARGB 001282f7. Final
+copy_mismatches stays zero. Unsplit authored stream is consistently 79 quads,
+7973 bytes, hash b2d2827a, including the failing submission.
+
+This validates the shorter final-row geometry control under diagnostic timing,
+not an exact hardware mechanism or a default production fix. Both runs recover
+all 524288 MEM1 bytes. Candidate 4a834bf9..., client 6337bdcb..., installed
+provider a2e7df8e..., and boot 444193a6-aee4-4ae3-a619-4f6dd90fccf1 match
+both complete audits. Both loads end with successful unload/CPU console
+restoration and gcn_gx absent. No GPU timeout, FIFO stall or kernel fault.
+The split audit transfer completed and was verified before the unsplit run;
+no partial or old-cycle data is accepted. Installed provider stays unchanged.
+
+Six client/raw-audit/trimmed-kernel artifacts:
+
+```
+b977e5f915837828a6717ff0b7a7334a4e2e48155c1d8b128982dc503cdaebb3  /media/anolis/dev/wii-gcn-offset-split-comparison.sha256
+```
+
+Next: decouple offset split from tracing while retaining the exact shape gate,
+then run 2,000 focused frames without diagnostic reads/logging. After a pass,
+run the broader suite and pending triangle/KMS checks with both validated
+splits explicitly enabled. Keep default changes and installed-provider
+promotion pending the remaining acceptance evidence.
