@@ -17866,3 +17866,24 @@ outside pixels. Account explicitly for source y=43 and destination y=97, and
 capture pre-copy EFB as needed to distinguish draw from copy faults. Reuse the
 focused client, avoid CPU correction, and do not repurpose the full-surface
 system trace's hard-coded 2x oracle for this offset case.
+
+#### Trace all stages of the offset enlargement (2026-09-08)
+
+Add scale_offset_trace (default off), gated to distinct tiled RGB565 MEM1
+256x256 surfaces, source (0,43,255,79) and destination (0,97,256,79).
+Snapshot active crop EFB (255x79), horizontal EFB (256x79), and full final
+EFB (256x256) before their respective copies. Compare each tiled copy with
+quantized EFB and the tiled source using the exact nearest mapping. Preserve
+a CPU copy of the original destination solely as an outside-pixel oracle;
+never write it back. Full final comparison includes all outside pixels.
+The snapshot buffer is reused, with bounded 262144-byte EFB storage and
+131072-byte prior destination storage, freed on exit. No geometry or command
+changes, extra submissions, CPU repair or explicit sleeps; reads affect timing.
+
+W=1 PowerPC build, strict checkpatch (zero errors/warnings/checks) and
+`git diff --check` pass. Candidate SHA-256:
+`7ca7087c114d4e5513482b4fcb3ccd5971dd514aadd50b4f89d69f4d9741b5dd`.
+Run --offset-enlarge-only with scale_offset_trace=1 scale_system_split=1,
+stopping on first client failure (maximum 2,000 frames). The existing system
+split remains outside this gate. Client stays 6337bdcb.... No hardware result
+yet; local scratch on dev drive, installed provider unchanged.

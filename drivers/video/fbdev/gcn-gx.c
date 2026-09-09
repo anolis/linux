@@ -276,6 +276,10 @@ static bool gx_scale_system_split;
 module_param_named(scale_system_split, gx_scale_system_split, bool, 0444);
 MODULE_PARM_DESC(scale_system_split,
 		 "Halve horizontal primitive height for RGB565 linear 2x system upscale");
+static bool gx_scale_offset_trace;
+module_param_named(scale_offset_trace, gx_scale_offset_trace, bool, 0444);
+MODULE_PARM_DESC(scale_offset_trace,
+		 "Compare the focused tiled offset 255x79-to-256x79 enlargement");
 static bool gx_scale_system_trace;
 module_param_named(scale_system_trace, gx_scale_system_trace, bool, 0444);
 MODULE_PARM_DESC(scale_system_trace,
@@ -955,6 +959,49 @@ static void gx_compare_system_scale(const u16 *source, const u16 *output,
 	}
 	pr_info("gcn-gx: system-scale seq=%u stage=%s pixels=%u mismatches=%u efb_mismatches=%u copy_mismatches=%u\n",
 		sequence, stage, width * height, mismatches, efb_mismatches,
+		copy_mismatches);
+}
+
+/* Exact offset test: tiled 256x256 surfaces, source y=43, destination y=97. */
+static void gx_compare_offset_scale(const u16 *source, const u16 *prior,
+				    const u16 *output, const u32 *efb,
+				    u32 sequence, unsigned int stage)
+{
+	const char *name = stage == 0 ? "crop" : stage == 1 ? "horizontal" : "final";
+	u16 width = stage == 0 ? 255 : 256;
+	u16 height = stage == 2 ? 256 : 79;
+	u32 mismatches = 0;
+	u32 efb_mismatches = 0;
+	u32 copy_mismatches = 0;
+	u16 x;
+	u16 y;
+
+	for (y = 0; y < height; y++) {
+		for (x = 0; x < width; x++) {
+			size_t index = gx_tiled_rgb565_index(x, y, 256);
+			u16 sx = stage == 0 ? x : (2 * x + 1) * 255 / 512;
+			u16 sy = stage == 2 ? y - 97 : y;
+			u16 expected;
+			u16 actual = output[index];
+			u32 argb = efb[(size_t)y * width + x];
+			u16 rendered = gx_argb_to_rgb565(argb);
+
+			if (stage == 2 && (y < 97 || y >= 176))
+				expected = prior[index];
+			else
+				expected = source[gx_tiled_rgb565_index(sx, sy + 43, 256)];
+			if ((actual != expected || rendered != expected) &&
+			    !mismatches && !efb_mismatches)
+				pr_info("gcn-gx: offset-first seq=%u stage=%s x=%u y=%u actual=%04x expected=%04x argb=%08x efb=%04x\n",
+					sequence, name, x, y, actual, expected,
+					argb, rendered);
+			mismatches += actual != expected;
+			efb_mismatches += rendered != expected;
+			copy_mismatches += rendered != actual;
+		}
+	}
+	pr_info("gcn-gx: offset-scale seq=%u stage=%s pixels=%u mismatches=%u efb_mismatches=%u copy_mismatches=%u\n",
+		sequence, name, width * height, mismatches, efb_mismatches,
 		copy_mismatches);
 }
 
@@ -5301,6 +5348,7 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		{ .x = 319, .y = 119 },
 	};
 	u32 *efb_snapshot = NULL;
+	u16 *offset_prior = NULL;
 	void *crop = gx_tex_buf_alt;
 	void *horizontal = gx_tex_buf;
 	void *final_texture = horizontal;
@@ -5316,6 +5364,7 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	size_t src_bytes;
 	bool final_submitted = false;
 	bool focused;
+	bool offset_trace;
 	bool system_focused;
 	bool system_trace;
 	bool split_horizontal;
@@ -5402,6 +5451,16 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		dst_width == 640 && dst_height == 480 &&
 		src_rect_width == 320 && src_rect_height == 240 &&
 		dst_rect_width == 640 && dst_rect_height == 480;
+	offset_trace = READ_ONCE(gx_scale_offset_trace) && !system_memory &&
+		src_addr != dst_addr &&
+		src_format == DRM_GCN_GEM_FORMAT_RGB565 &&
+		src_layout == DRM_GCN_GEM_LAYOUT_TILED_4X4 &&
+		dst_layout == DRM_GCN_GEM_LAYOUT_TILED_4X4 &&
+		src_width == 256 && src_height == 256 &&
+		dst_width == 256 && dst_height == 256 &&
+		!src_x && src_y == 43 && !dst_x && dst_y == 97 &&
+		src_rect_width == 255 && src_rect_height == 79 &&
+		dst_rect_width == 256 && dst_rect_height == 79;
 	system_trace = READ_ONCE(gx_scale_system_trace) && system_focused;
 	trace = READ_ONCE(gx_scale_trace) && focused;
 	split_horizontal = (focused && gx_scale_split_reduce) ||
@@ -5409,7 +5468,7 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		(system_focused && gx_scale_system_split);
 	split_vertical = (focused && gx_scale_split_reduce) ||
 		(trace && gx_scale_texture_half_rows);
-	if (trace || system_trace)
+	if (trace || system_trace || offset_trace)
 		trace_sequence = ++gx_scale_trace_sequence;
 	if (trace && (gx_scale_direct_color || gx_scale_clear_color) &&
 	    (!gx_scale_cpu_source || !gx_scale_cpu_uniform ||
@@ -5522,7 +5581,7 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		goto out_unlock;
 	}
 
-	if ((trace && gx_scale_efb_full) || system_trace) {
+	if ((trace && gx_scale_efb_full) || system_trace || offset_trace) {
 		efb_snapshot = kvmalloc_array((size_t)dst_width * dst_height,
 					      sizeof(*efb_snapshot),
 					      GFP_KERNEL);
@@ -5530,6 +5589,15 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 			ret = -ENOMEM;
 			goto out_unlock;
 		}
+	}
+
+	if (offset_trace) {
+		offset_prior = kvmalloc(dst_bytes, GFP_KERNEL);
+		if (!offset_prior) {
+			ret = -ENOMEM;
+			goto out_unlock;
+		}
+		memcpy(offset_prior, dst_addr, dst_bytes);
 	}
 
 	if (!system_memory) {
@@ -5580,6 +5648,11 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		ret = gx_submit_and_wait_finish("render-blit-scaled-crop-draw");
 		if (ret)
 			goto out_unlock;
+		if (offset_trace) {
+			ret = gx_snapshot_scale_colors(efb_snapshot, 255, 79);
+			if (ret)
+				goto out_unlock;
+		}
 
 		fifo_pos = 0;
 		gx_load_libogc_init_preamble();
@@ -5599,6 +5672,12 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 							 crop_copy_width,
 							 src_rect_height);
 		}
+	}
+	if (offset_trace) {
+		invalidate_dcache_range((unsigned long)crop,
+					(unsigned long)crop + crop_bytes);
+		gx_compare_offset_scale(src_addr, offset_prior, crop, efb_snapshot,
+					trace_sequence, 0);
 	}
 	if (system_trace)
 		gx_compare_system_scale(src_addr, crop, crop_width, src_width,
@@ -5640,8 +5719,9 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	ret = gx_submit_and_wait_finish("render-blit-scaled-horizontal-draw");
 	if (ret)
 		goto out_unlock;
-	if (system_trace) {
-		ret = gx_snapshot_scale_colors(efb_snapshot, dst_width, src_height);
+	if (system_trace || offset_trace) {
+		ret = gx_snapshot_scale_colors(efb_snapshot, dst_rect_width,
+					       src_rect_height);
 		if (ret)
 			goto out_unlock;
 	}
@@ -5679,6 +5759,13 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		gx_compare_system_scale(src_addr, horizontal, horizontal_width,
 					dst_width, src_height, efb_snapshot, trace_sequence,
 					"horizontal");
+	}
+
+	if (offset_trace) {
+		invalidate_dcache_range((unsigned long)horizontal,
+					(unsigned long)horizontal + horizontal_bytes);
+		gx_compare_offset_scale(src_addr, offset_prior, horizontal,
+					efb_snapshot, trace_sequence, 1);
 	}
 
 	if (trace && gx_scale_cpu_publish) {
@@ -5966,6 +6053,9 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	} else {
 		invalidate_dcache_range((unsigned long)dst_addr,
 					(unsigned long)dst_addr + dst_bytes);
+		if (offset_trace)
+			gx_compare_offset_scale(src_addr, offset_prior, dst_addr,
+						efb_snapshot, trace_sequence, 2);
 		if (trace) {
 			final_hash = gx_hash_tiled_region(dst_addr, dst_width,
 							  dst_width, dst_height);
@@ -6053,6 +6143,7 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	}
 
 out_unlock:
+	kvfree(offset_prior);
 	kvfree(efb_snapshot);
 	mutex_unlock(&gx_submit_lock);
 	return ret;
