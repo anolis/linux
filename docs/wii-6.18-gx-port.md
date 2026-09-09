@@ -18002,3 +18002,45 @@ Run 2,000 focused offset frames with scale_offset_split=1 scale_system_split=1
 and tracing off. After successful audit, run complete render suite and KMS
 pattern/triangle/RGB565 flips using the same flags. Keep installed provider
 unchanged; no hardware result yet. Local scratch stays on the dev drive.
+
+#### Both opt-in splits pass trace-free regression (2026-09-08)
+
+Hardware results for aec70c12d / 7bbf3639..., with only scale_offset_split=1
+scale_system_split=1: all 2,000 focused offset frames pass, including
+131,072,000 exact destination pixels, outside preservation and source checks.
+All 524288 MEM1 bytes recover. No diagnostic trace/snapshot events appear in
+the trimmed cycle. This establishes the offset control without diagnostic
+reads/logging, supplementing the earlier system split's trace-free 2,000 pass.
+
+Two subsequent complete render suites pass with both switches enabled,
+including the previously failing full-width enlargement and MEM1 recovery.
+KMS pattern verifies all 307200 pixels, presents for five seconds, and restores
+the previous framebuffer. RGB565 KMS initial frame plus 120 flips pass
+(121 frames, 37,171,200 pixels), advancing vblank, render average 21895 us,
+maximum 32695 us. Console framebuffer restoration succeeds.
+
+The second cycle reaches and passes the pending triangle test: black=198388,
+red=12452, green=13356, blue=12392, distinct=2329; five-second presentation
+and previous framebuffer restoration succeed. These remain software/client
+presentation checks, not new visual acceptance evidence.
+
+All three complete audits verify candidate 7bbf3639..., render client
+6337bdcb..., installed provider a2e7df8e..., and boot
+444193a6-aee4-4ae3-a619-4f6dd90fccf1. KMS render is a8a46755..., flip
+client 4352cccc.... Both new split switches remain default off; all loads
+used explicit switches. Every load ends in successful unload, CPU console
+restoration and gcn_gx absent. No GPU timeout, FIFO stall, kernel fault or
+trace events appear in the latest cycles. Installed provider remains unchanged.
+
+Nine client/raw-audit/trimmed-kernel artifacts:
+
+```
+d2ced25945c1b32d130bab5dae9fee6c9c2ef03afc189801f42fd18f86faa897  /media/anolis/dev/wii-gcn-both-splits-no-trace-regression.sha256
+```
+
+Next acceptance work: sustained XRGB8888 KMS paths and Mesa functional/native
+fence/lifecycle regression remain untested on this candidate. The system split
+is deliberately RGB565-only; do not assume XRGB8888 receives or validates the
+same fix. Preserve exact evidence and isolate any failures before broadening
+predicates. Default-enablement/promotion and visual acceptance remain pending;
+these clean bounded regressions are not complete provider acceptance.
