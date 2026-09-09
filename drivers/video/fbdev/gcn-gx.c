@@ -275,7 +275,7 @@ MODULE_PARM_DESC(scale_cpu_publish,
 static bool gx_scale_system_split;
 module_param_named(scale_system_split, gx_scale_system_split, bool, 0444);
 MODULE_PARM_DESC(scale_system_split,
-		 "Halve horizontal primitive height in the focused system trace");
+		 "Halve horizontal primitive height for RGB565 linear 2x system upscale");
 static bool gx_scale_system_trace;
 module_param_named(scale_system_trace, gx_scale_system_trace, bool, 0444);
 MODULE_PARM_DESC(scale_system_trace,
@@ -5316,6 +5316,7 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 	size_t src_bytes;
 	bool final_submitted = false;
 	bool focused;
+	bool system_focused;
 	bool system_trace;
 	bool split_horizontal;
 	bool split_vertical;
@@ -5392,7 +5393,7 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		dst_width == 320 && dst_height == 120 &&
 		src_rect_width == 640 && src_rect_height == 240 &&
 		dst_rect_width == 320 && dst_rect_height == 120;
-	system_trace = READ_ONCE(gx_scale_system_trace) && system_memory &&
+	system_focused = system_memory &&
 		src_format == DRM_GCN_GEM_FORMAT_RGB565 &&
 		src_layout == DRM_GCN_GEM_LAYOUT_LINEAR &&
 		dst_layout == DRM_GCN_GEM_LAYOUT_LINEAR &&
@@ -5401,10 +5402,11 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		dst_width == 640 && dst_height == 480 &&
 		src_rect_width == 320 && src_rect_height == 240 &&
 		dst_rect_width == 640 && dst_rect_height == 480;
+	system_trace = READ_ONCE(gx_scale_system_trace) && system_focused;
 	trace = READ_ONCE(gx_scale_trace) && focused;
 	split_horizontal = (focused && gx_scale_split_reduce) ||
 		(trace && gx_scale_gpu_split) ||
-		(system_trace && gx_scale_system_split);
+		(system_focused && gx_scale_system_split);
 	split_vertical = (focused && gx_scale_split_reduce) ||
 		(trace && gx_scale_texture_half_rows);
 	if (trace || system_trace)

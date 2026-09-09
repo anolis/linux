@@ -17745,3 +17745,19 @@ exact RGB565 system-memory shape gate, then validate 2,000 offscreen frames
 without snapshot/logging delays. Follow a pass with existing render/KMS
 regression, retaining installed provider until remaining acceptance gates pass.
 Do not expand to XRGB8888 or other dimensions without separate evidence.
+
+#### Test horizontal split without tracing (2026-09-08)
+
+Decouple scale_system_split from scale_system_trace using a shared exact
+full-surface RGB565 linear system 320x240 -> 640x480 predicate. Split remains
+default off; only horizontal geometry changes when explicitly enabled. Trace
+off skips stage comparisons, EFB reads, snapshot allocation and trace logging.
+The earlier FIFO bound and reduction behavior remain unchanged.
+
+PowerPC W=1 build, strict checkpatch (zero errors/warnings/checks), and
+`git diff --check` pass. Candidate SHA-256:
+`6c5a5a25d28f9ffe0117aae958bc53f22c6e0914616bce014b3c4a2b840f8dd4`.
+Run 2,000 offscreen RGB565 frames with only scale_system_split=1, stopping on
+failure. After a pass, run full render and existing RGB565 KMS tests with the
+same switch. No XRGB8888 split or installed-provider promotion. Local scratch
+and artifacts stay on the dev drive. No hardware result yet.
