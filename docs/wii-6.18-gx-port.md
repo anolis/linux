@@ -18294,3 +18294,49 @@ prior split switches. Stop on client failure; inspect intermediate faults even
 if frame-level output passes. This short initial control is not the 2,000-frame
 endurance gate. If clean, compare the same candidate with native split off.
 No hardware result yet; local scratch on dev drive, installed provider unchanged.
+
+#### Native final split reveals an upstream horizontal fault (2026-09-08)
+
+Hardware result for 655c35d1d / 591583b2...: the planned 120-frame control
+stops at client frame 25, (381,225), got fbe0 expected ffe0. Frames 0--24
+pass. All 104 rectangle stage triples, 208 prior checks and 104 final command
+records were preserved and mechanically checked. Only sequence 102
+(frame 25 upper-right origin 320,0) has new stage mismatches:
+
+- Crop remains exact.
+- Horizontal pre-copy EFB already differs at local (61,225): raw ARGB
+  00ff7f00, quantized fbe0 instead of ffe0. Tiled copy matches the EFB.
+- Final draw propagates the bad sample to (381,225), raw ARGB 00ff7d00,
+  quantized fbe0. Final copy again matches EFB exactly.
+
+All preservation texture and post-preservation EFB checks pass. No new outside
+pixel mismatch appears in this run. Subsequent sequence 103/104 final summaries
+are relative to their already-bad prior destination; they do not mean the
+frame recovered. The independent client catches the retained error.
+
+Active final streams are 480 quads, 39113 authored bytes each. Four stable
+hashes correspond to the four origins: 9a18aa46, eaa53536, 8996fe92, 6a766562
+(as a set; no origin mapping asserted here). The 38400 vertex bytes plus
+state/header/finish fit the FIFO bound. Final row splitting alone is not a
+complete fix. Its absence of new outside faults across this short run is
+bounded evidence, not the planned 120-frame pass or an endurance validation.
+The same-module unsplit run was conditional on a clean control and was not run.
+
+Audit verifies candidate 591583b2..., client 4352cccc..., installed provider
+a2e7df8e..., boot 444193a6-aee4-4ae3-a619-4f6dd90fccf1, clean unload,
+CPU console restored and gcn_gx absent. No GPU timeout, FIFO stall or kernel
+fault. Installed provider unchanged.
+
+Client/raw-audit/trimmed-kernel manifest:
+
+```
+c9369c84d299b7385ba9f3dbeead49e0708cf417aa8f80fb4e7ce36a6c89486e  /media/anolis/dev/wii-gcn-native-split-120.sha256
+```
+
+Next control: independently enable horizontal primitive splitting at y=120
+inside the exact native trace gate while retaining final-row splitting and
+preservation checkpoint. There are 320 native horizontal runs; doubling yields
+640 quads/51200 vertex bytes, requiring the existing checked authored-state
+budget. Compare all stages, then use same-module switches to retain failing
+controls. Both stages can fail in this workload; do not treat this upstream
+failure as evidence that the earlier outside-pixel fault never existed.
