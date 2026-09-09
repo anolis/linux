@@ -17928,3 +17928,22 @@ explicit header/state/finish/token/alignment capacity checks. Preserve offset
 and outside-pixel behavior and keep the switch opt-in with the exact shape
 gate. Follow a pass with a same-module unsplit control before testing without
 diagnostic timing. Do not broaden to arbitrary rectangles without evidence.
+
+#### Bounded final-row split for offset trace (2026-09-08)
+
+Add scale_offset_split (default off), effective only inside the exact offset
+trace gate. Split each final row primitive at x=128 while preserving y=97
+placement, texture coordinates and outside pixels. Horizontal geometry stays
+unchanged. The 79 selected rows become 158 quads (12640 vertex bytes).
+Capacity checks count actual nearest runs and reject excess before subtraction,
+including the existing authored state and a 256-byte submission reserve plus
+primitive header. Existing reduction emission is unchanged. Log authored final
+count/bytes/hash for split and unsplit offset traces. All EFB oracles remain.
+
+W=1 PowerPC build, strict checkpatch (zero errors/warnings/checks) and
+`git diff --check` pass. Candidate SHA-256:
+`4a834bf9b6bfd188acd0bc2e566837d19425c57b15fb0200d3662c32e11fca7f`.
+Run up to 2,000 focused frames with scale_offset_trace=1 scale_offset_split=1
+scale_system_split=1. Stop on failure. After a pass and verified cleanup, run
+the same module with offset split disabled as control. No hardware result yet;
+no installed-provider promotion; scratch and artifacts remain on dev drive.

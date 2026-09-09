@@ -276,6 +276,10 @@ static bool gx_scale_system_split;
 module_param_named(scale_system_split, gx_scale_system_split, bool, 0444);
 MODULE_PARM_DESC(scale_system_split,
 		 "Halve horizontal primitive height for RGB565 linear 2x system upscale");
+static bool gx_scale_offset_split;
+module_param_named(scale_offset_split, gx_scale_offset_split, bool, 0444);
+MODULE_PARM_DESC(scale_offset_split,
+		 "Halve final primitive width in the focused offset trace");
 static bool gx_scale_offset_trace;
 module_param_named(scale_offset_trace, gx_scale_offset_trace, bool, 0444);
 MODULE_PARM_DESC(scale_offset_trace,
@@ -5467,7 +5471,8 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		(trace && gx_scale_gpu_split) ||
 		(system_focused && gx_scale_system_split);
 	split_vertical = (focused && gx_scale_split_reduce) ||
-		(trace && gx_scale_texture_half_rows);
+		(trace && gx_scale_texture_half_rows) ||
+		(offset_trace && gx_scale_offset_split);
 	if (trace || system_trace || offset_trace)
 		trace_sequence = ++gx_scale_trace_sequence;
 	if (trace && (gx_scale_direct_color || gx_scale_clear_color) &&
@@ -5986,10 +5991,16 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 		gx_setup_texture_coordinate_scale(horizontal_width, crop_height,
 						  false, false);
 		gx_set_scissor(dst_x, dst_y, dst_rect_width, dst_rect_height);
-		if (split_vertical &&
-		    fifo_pos > GX_FIFO_SIZE - 256 - 3 - 160 * dst_rect_height) {
-			ret = -E2BIG;
-			goto out_unlock;
+		if (split_vertical) {
+			u32 vertex_bytes = 160 * gx_nearest_run_count(src_rect_height,
+								     dst_rect_height);
+
+			/* Two 80-byte quads per run, header and submission reserve. */
+			if (vertex_bytes > GX_FIFO_SIZE - 256 - 3 ||
+			    fifo_pos > GX_FIFO_SIZE - 256 - 3 - vertex_bytes) {
+				ret = -E2BIG;
+				goto out_unlock;
+			}
 		}
 		gx_draw_nearest_vertical_runs(dst_x, dst_y, dst_rect_width,
 					      horizontal_width, src_rect_height,
@@ -6014,6 +6025,12 @@ static int gcn_gx_drm_blit_scaled_rgb565_core(const void *src_addr,
 			gx_load_bp_reg(0x45000002);
 		if (trace)
 			final_command_hash = gx_hash_pending_commands();
+		if (offset_trace)
+			pr_info("gcn-gx: offset-final seq=%u split=%u quads=%u bytes=%u hash=%08x\n",
+				trace_sequence, split_vertical,
+				(split_vertical ? 2 : 1) *
+				gx_nearest_run_count(src_rect_height, dst_rect_height),
+				fifo_pos, gx_hash_pending_commands());
 		ret = gx_submit_and_wait_finish(trace && gx_scale_clear_color ?
 						"render-blit-scaled-final-clear" :
 						"render-blit-scaled-final-draw");
